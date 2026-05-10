@@ -1,0 +1,13 @@
+task_id: example-task
+
+steps:
+  - id: red-001
+    stage: RED_TEST
+    goal: Add a failing test
+    allowed_paths:
+      - tests/**
+    forbidden_paths:
+      - src/**
+    commands:
+      - npm test
+    success_condition: "test fails for the expected reason"

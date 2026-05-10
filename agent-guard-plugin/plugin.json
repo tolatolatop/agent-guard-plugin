@@ -1,0 +1,13 @@
+{
+  "name": "agent-guard-plugin",
+  "version": "0.1.0",
+  "entrypoint": "bin/agent-guard",
+  "hooks": {
+    "session-start": "hooks/session-start.sh",
+    "before-write": "hooks/before-write.sh",
+    "after-command": "hooks/after-command.sh",
+    "before-final-response": "hooks/before-final-response.sh",
+    "job-monitor": "hooks/job-monitor.sh",
+    "failure-loop": "hooks/failure-loop.sh"
+  }
+}

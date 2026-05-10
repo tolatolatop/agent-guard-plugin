@@ -1,0 +1,9 @@
+#!/usr/bin/env node
+
+const { runInstallCli } = require("../lib/install");
+
+runInstallCli(process.argv.slice(2), {
+  cwd: process.cwd(),
+  homeDir: process.env.HOME,
+  pluginRoot: require("node:path").resolve(__dirname, ".."),
+});
