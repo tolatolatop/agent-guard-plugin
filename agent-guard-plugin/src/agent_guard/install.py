@@ -7,6 +7,8 @@ import shutil
 from pathlib import Path
 from typing import Any, TextIO
 
+from .interactive import confirm_action
+
 SUPPORTED_RUNTIMES = ("claude-code", "codex", "opencode")
 SUPPORTED_SCOPES = ("project", "user")
 
@@ -530,10 +532,7 @@ def _render_uninstall_preview(plan: dict[str, Any], output: TextIO) -> None:
 
 
 def _confirm_uninstall(output: TextIO, input_stream: TextIO) -> bool:
-    output.write("Proceed with uninstall? [y/N]: ")
-    output.flush()
-    answer = input_stream.readline().strip().lower()
-    return answer in {"y", "yes"}
+    return confirm_action("Proceed with uninstall?", input_stream, output)
 
 
 def apply_uninstall_plan(plan: dict[str, Any], cwd: Path, home_dir: Path | None) -> dict[str, Any]:
