@@ -1,8 +1,9 @@
 import json
+from io import StringIO
 import tempfile
 from pathlib import Path
 
-from agent_guard.install import build_opencode_plugin_source, install_runtime
+from agent_guard.install import build_opencode_plugin_source, install_runtime, uninstall_runtime
 
 
 def make_dirs() -> tuple[Path, Path]:
@@ -24,6 +25,23 @@ def test_install_writes_claude_code_project_settings_with_hook_commands() -> Non
     assert result["runtime"] == "claude-code"
     assert len(config["hooks"]["PreToolUse"]) >= 1
     assert "agent-guard-bridge" in json.dumps(config)
+    assert "AGENT_GUARD_SKILLS_DIR" in json.dumps(config)
+    assert config["hooks"]["SessionStart"][0]["matcher"] == "startup|clear|compact"
+    assert config["hooks"]["SessionStart"][0]["hooks"][0]["async"] is False
+    assert (root / ".claude" / "skills" / "workflow-navigator" / "SKILL.md").exists()
+    assert (root / ".claude" / "skills" / "workflow-core" / "SKILL.md").exists()
+
+
+def test_install_claude_removes_legacy_flat_skill_files() -> None:
+    root, home = make_dirs()
+    legacy_file = root / ".claude" / "skills" / "workflow-navigator.md"
+    legacy_file.parent.mkdir(parents=True, exist_ok=True)
+    legacy_file.write_text("legacy\n", encoding="utf-8")
+
+    install_runtime(["--runtime", "claude-code", "--scope", "project"], root, home, PLUGIN_ROOT)
+
+    assert not legacy_file.exists()
+    assert (root / ".claude" / "skills" / "workflow-navigator" / "SKILL.md").exists()
 
 
 def test_install_writes_codex_hooks_json() -> None:
@@ -35,6 +53,8 @@ def test_install_writes_codex_hooks_json() -> None:
 
     assert isinstance(hooks["hooks"]["SessionStart"], list)
     assert "pre-dispatch" in json.dumps(hooks)
+    assert "AGENT_GUARD_SKILLS_DIR" in json.dumps(hooks)
+    assert (root / ".agent-guard" / "skills" / "workflow-core.md").exists()
 
 
 def test_install_writes_opencode_loader() -> None:
@@ -46,10 +66,66 @@ def test_install_writes_opencode_loader() -> None:
 
     assert '"tool.execute.before"' in source
     assert "agent-guard-bridge" in source
+    assert "AGENT_GUARD_SKILLS_DIR" in source
+    assert (root / ".agent-guard" / "skills" / "finalization-checklist.md").exists()
 
 
 def test_opencode_loader_stays_thin() -> None:
-    source = build_opencode_plugin_source(PLUGIN_ROOT)
+    source = build_opencode_plugin_source(PLUGIN_ROOT, PLUGIN_ROOT / ".agent-guard" / "skills")
     assert "check-failure-loop" not in source
     assert "can-write" not in source
     assert "record-command" not in source
+
+
+def test_uninstall_codex_lists_and_removes_hooks_after_confirmation() -> None:
+    root, home = make_dirs()
+    install_runtime(["--runtime", "codex", "--scope", "project"], root, home, PLUGIN_ROOT)
+
+    output = StringIO()
+    result = uninstall_runtime(
+        ["--runtime", "codex", "--scope", "project"],
+        root,
+        home,
+        output=output,
+        input_stream=StringIO("y\n"),
+    )
+
+    assert result["cancelled"] is False
+    assert not (root / ".codex" / "hooks.json").exists()
+    assert not (root / ".agent-guard" / "skills").exists()
+    rendered = output.getvalue()
+    assert "The following changes will be applied" in rendered
+    assert ".codex/hooks.json" in rendered
+
+
+def test_uninstall_can_be_cancelled() -> None:
+    root, home = make_dirs()
+    install_runtime(["--runtime", "opencode", "--scope", "project"], root, home, PLUGIN_ROOT)
+
+    result = uninstall_runtime(
+        ["--runtime", "opencode", "--scope", "project"],
+        root,
+        home,
+        output=StringIO(),
+        input_stream=StringIO("n\n"),
+    )
+
+    assert result["cancelled"] is True
+    assert (root / ".opencode" / "plugins" / "agent-guard.js").exists()
+    assert (root / ".agent-guard" / "skills" / "workflow-navigator.md").exists()
+
+
+def test_uninstall_claude_removes_skills_bundle_after_confirmation() -> None:
+    root, home = make_dirs()
+    install_runtime(["--runtime", "claude-code", "--scope", "project"], root, home, PLUGIN_ROOT)
+
+    result = uninstall_runtime(
+        ["--runtime", "claude-code", "--scope", "project"],
+        root,
+        home,
+        output=StringIO(),
+        input_stream=StringIO("y\n"),
+    )
+
+    assert result["cancelled"] is False
+    assert not (root / ".claude" / "skills").exists()

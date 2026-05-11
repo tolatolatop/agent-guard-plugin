@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .cli import run_command
-from .state import artifacts_dir
+from .state import artifacts_dir, load_state
 
 
 def _load_stdin_json() -> dict[str, Any]:
@@ -25,6 +25,11 @@ def _load_stdin_json() -> dict[str, Any]:
 
 def _print_json(value: dict[str, Any], exit_code: int = 0) -> None:
     sys.stdout.write(json.dumps(value, indent=2) + "\n")
+    raise SystemExit(exit_code)
+
+
+def _print_text(value: str, exit_code: int = 0) -> None:
+    sys.stdout.write(value.rstrip() + "\n")
     raise SystemExit(exit_code)
 
 
@@ -93,6 +98,17 @@ def _handle_session_start(cwd: Path) -> None:
     code, payload = _cli_json(["session-start"], cwd)
     if code != 0:
         _fail(str(payload.get("error", "session-start failed")))
+    prompt_block = payload.get("prompt_block")
+    if isinstance(prompt_block, str) and prompt_block.strip():
+        _print_json(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "SessionStart",
+                    "additionalContext": prompt_block,
+                }
+            },
+            0,
+        )
     _print_json(payload, 0)
 
 
@@ -136,6 +152,10 @@ def _handle_post_command(cwd: Path, payload: dict[str, Any]) -> None:
 
 
 def _handle_stop(cwd: Path) -> None:
+    state = load_state(cwd)
+    stage = state.get("stage")
+    if stage not in {"READY_TO_SUMMARIZE", "DONE"} and state.get("can_finalize") is not True:
+        raise SystemExit(0)
     code, payload = _cli_json(["can-finalize"], cwd)
     if code != 0:
         reasons = payload.get("reasons") or [payload.get("reason") or payload.get("error") or "finalization blocked"]

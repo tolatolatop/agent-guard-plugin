@@ -8,12 +8,13 @@ from typing import Any
 
 from .failures import check_failure_loop, record_command_result
 from .gates import can_finalize
-from .install import install_runtime, parse_flags
+from .install import install_runtime, parse_flags, uninstall_runtime
 from .jobs import check_job_poll, load_jobs
 from .plan import load_plan_summary
 from .path_policy import decide_write
 from .runtime_adapter import get_next_step, get_session_reminder
 from .state import AGENT_DIR, ensure_agent_files, load_state, update_state
+from .task_reset import reset_task
 
 
 def print_json(data: dict[str, Any], exit_code: int = 0) -> None:
@@ -49,6 +50,10 @@ def run_command(argv: list[str], cwd: Path) -> int:
                 },
             )
             print_json({"ok": True, "state": state})
+        elif command in {"reset-task", "next-task"}:
+            task_id = ensure_path_arg(rest, "task-id")
+            result = reset_task(cwd, task_id)
+            print_json({"ok": True, **result})
         elif command == "status":
             state = load_state(cwd)
             print_json(
@@ -98,13 +103,22 @@ def run_command(argv: list[str], cwd: Path) -> int:
         elif command == "install":
             result = install_runtime(rest, cwd, Path(os.path.expanduser("~")), Path(__file__).resolve().parents[2])
             print_json({"ok": True, **result})
+        elif command == "uninstall":
+            result = uninstall_runtime(
+                rest,
+                cwd,
+                Path(os.path.expanduser("~")),
+                output=sys.stdout,
+                input_stream=sys.stdin,
+            )
+            print_json({"ok": True, **result})
         else:
             print_json(
                 {
                     "error": (
                         "Unknown command. Supported: init, start-task, status, session-start, "
                         "can-write, record-command, check-failure-loop, check-job-poll, "
-                        "can-finalize, next-step, install"
+                        "can-finalize, next-step, reset-task, next-task, install, uninstall"
                     )
                 },
                 1,
@@ -121,6 +135,20 @@ def main() -> None:
 def install_main() -> None:
     try:
         result = install_runtime(sys.argv[1:], Path.cwd(), Path(os.path.expanduser("~")), Path(__file__).resolve().parents[2])
+        print_json({"ok": True, **result})
+    except RuntimeError as exc:
+        print_json({"error": str(exc)}, 1)
+
+
+def uninstall_main() -> None:
+    try:
+        result = uninstall_runtime(
+            sys.argv[1:],
+            Path.cwd(),
+            Path(os.path.expanduser("~")),
+            output=sys.stdout,
+            input_stream=sys.stdin,
+        )
         print_json({"ok": True, **result})
     except RuntimeError as exc:
         print_json({"error": str(exc)}, 1)
