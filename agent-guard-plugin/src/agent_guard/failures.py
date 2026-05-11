@@ -21,8 +21,8 @@ def save_failures(root_dir: Path, failures: dict[str, Any]) -> dict[str, Any]:
     return failures
 
 
-def hash_failure(command: str, exit_code: int, log_path: Path) -> str:
-    log_contents = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
+def hash_failure(command: str, exit_code: int, log_path: Path | None) -> str:
+    log_contents = log_path.read_text(encoding="utf-8") if log_path and log_path.exists() else ""
     digest = hashlib.sha256()
     digest.update(f"{command}\n{exit_code}\n{log_contents}".encode("utf-8"))
     return digest.hexdigest()
@@ -39,9 +39,9 @@ def latest_mtime(root_dir: Path) -> int:
     return latest
 
 
-def record_command_result(root_dir: Path, command: str, exit_code: int, log_path: str) -> dict[str, Any]:
+def record_command_result(root_dir: Path, command: str, exit_code: int, log_path: str | None) -> dict[str, Any]:
     state = load_state(root_dir)
-    absolute_log = root_dir / log_path
+    absolute_log = (root_dir / log_path) if log_path else None
     failure_hash = None if exit_code == 0 else hash_failure(command, exit_code, absolute_log)
     failures = read_failures(root_dir)
     code_fingerprint = latest_mtime(root_dir)
@@ -87,8 +87,8 @@ def record_command_result(root_dir: Path, command: str, exit_code: int, log_path
             "hook": "AfterCommand",
             "command": command,
             "exit_code": exit_code,
-            "log_path": log_path,
             "stage": next_state.get("stage"),
+            **({"log_path": log_path} if log_path else {}),
         },
     )
     return {"state": next_state, "failure": last_failure, "event": event}

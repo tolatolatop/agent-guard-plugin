@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import sys
-import time
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -85,11 +84,22 @@ def _extract_exit_code(payload: dict[str, Any]) -> int:
     return int(response.get("exit_code", response.get("exitCode", response.get("status", 0))) or 0)
 
 
-def _write_command_log(root_dir: Path, command: str, stdout: str, stderr: str) -> str:
+def _log_target_for_command(stage: str | None, exit_code: int) -> str | None:
+    if stage == "VERIFY":
+        return ".agent/artifacts/final-verification.log"
+    if stage == "RED_TEST" and exit_code != 0:
+        return ".agent/artifacts/red-test.log"
+    if exit_code != 0:
+        return ".agent/artifacts/command-failure.log"
+    return None
+
+
+def _write_command_log(root_dir: Path, command: str, stdout: str, stderr: str, log_path: str) -> str:
     target_dir = artifacts_dir(root_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
-    log_path = target_dir / f"hook-command-{int(time.time() * 1000)}.log"
+    log_path = root_dir / log_path
     body = "\n\n".join(part for part in [f"command: {command}", stdout, stderr] if part)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.write_text(body + "\n", encoding="utf-8")
     return log_path.relative_to(root_dir).as_posix()
 
@@ -139,14 +149,16 @@ def _handle_post_command(cwd: Path, payload: dict[str, Any]) -> None:
     command = _extract_command(payload)
     if not command:
         raise SystemExit(0)
+    state = load_state(cwd)
     tool_response = payload.get("tool_response", {})
     stdout = tool_response.get("stdout", tool_response.get("output", "")) if isinstance(tool_response, dict) else ""
     stderr = tool_response.get("stderr", tool_response.get("error", "")) if isinstance(tool_response, dict) else ""
-    log_path = _write_command_log(cwd, command, str(stdout or ""), str(stderr or ""))
-    code, result = _cli_json(
-        ["record-command", "--cmd", command, "--exit-code", str(_extract_exit_code(payload)), "--log", log_path],
-        cwd,
-    )
+    exit_code = _extract_exit_code(payload)
+    log_path = _log_target_for_command(state.get("stage"), exit_code)
+    args = ["record-command", "--cmd", command, "--exit-code", str(exit_code)]
+    if log_path:
+        args.extend(["--log", _write_command_log(cwd, command, str(stdout or ""), str(stderr or ""), log_path)])
+    code, result = _cli_json(args, cwd)
     if code != 0:
         _fail(str(result.get("error", "record-command failed")))
 

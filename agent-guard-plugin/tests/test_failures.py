@@ -42,3 +42,13 @@ def test_verify_command_records_final_verification_result() -> None:
     record_command_result(root_dir, "pytest", 0, log_path)
     state = load_state(root_dir)
     assert state["last_verification"]["exit_code"] == 0
+
+
+def test_success_command_without_log_only_records_event() -> None:
+    root_dir = make_temp_repo()
+    write_state(root_dir, stage="GREEN_IMPL")
+
+    result = record_command_result(root_dir, "pytest tests/example.py", 0, None)
+
+    assert result["failure"] is None
+    assert "log_path" not in result["event"]

@@ -42,7 +42,7 @@ def test_bridge_blocks_forbidden_write() -> None:
     assert "src/** is forbidden" in result.stderr
 
 
-def test_bridge_records_post_command_log() -> None:
+def test_bridge_records_final_verification_log_only_for_verify() -> None:
     root_dir = make_temp_repo()
     save_state(
         root_dir,
@@ -66,8 +66,34 @@ def test_bridge_records_post_command_log() -> None:
         {"tool_input": {"command": "pytest"}, "tool_response": {"exit_code": 0, "stdout": "ok"}},
     )
     assert result.returncode == 0
-    artifact_logs = list((root_dir / ".agent" / "artifacts").glob("hook-command-*.log"))
-    assert artifact_logs
+    assert (root_dir / ".agent" / "artifacts" / "final-verification.log").exists()
+
+
+def test_bridge_does_not_write_success_log_outside_verify() -> None:
+    root_dir = make_temp_repo()
+    save_state(
+        root_dir,
+        {
+            "task_id": "password-reset",
+            "stage": "GREEN_IMPL",
+            "current_step": "green-001",
+            "completed_steps": [],
+            "remaining_steps": [],
+            "allowed_paths": [],
+            "forbidden_paths": [],
+            "can_finalize": False,
+            "last_verification": None,
+            "needs_human": False,
+        },
+    )
+
+    result = run_bridge(
+        root_dir,
+        "post-command",
+        {"tool_input": {"command": "pytest tests/example.py"}, "tool_response": {"exit_code": 0, "stdout": "ok"}},
+    )
+    assert result.returncode == 0
+    assert not list((root_dir / ".agent" / "artifacts").glob("*.log"))
 
 
 def test_bridge_session_start_prefers_prompt_block_output() -> None:

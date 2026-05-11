@@ -73,12 +73,12 @@ def run_command(argv: list[str], cwd: Path) -> int:
             print_json(decision, 0 if decision["decision"] == "allow" else 1)
         elif command == "record-command":
             flags = parse_flags(rest)
-            if "cmd" not in flags or "exit-code" not in flags or "log" not in flags:
+            if "cmd" not in flags or "exit-code" not in flags:
                 print_json(
                     {
                         "error": (
                             'Usage: agent-guard record-command --cmd "<command>" '
-                            "--exit-code <code> --log <path>"
+                            "--exit-code <code> [--log <path>]"
                         )
                     },
                     1,
@@ -87,7 +87,7 @@ def run_command(argv: list[str], cwd: Path) -> int:
                 cwd,
                 str(flags["cmd"]),
                 int(str(flags["exit-code"])),
-                str(flags["log"]),
+                str(flags["log"]) if "log" in flags else None,
             )
             print_json({"ok": True, **result})
         elif command == "check-failure-loop":

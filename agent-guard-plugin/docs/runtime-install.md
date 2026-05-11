@@ -73,6 +73,17 @@ The wizard bootstraps a new task interactively:
 - writes `state.json`
 - can generate a starter `.agent/plan.yaml`
 
+Artifact retention:
+
+- `events.jsonl` is the full lightweight command/event index.
+- successful commands usually stay in `events.jsonl` only
+- `artifacts/` is reserved for retained evidence such as:
+  - `red-test.log`
+  - `final-verification.log`
+  - `command-failure.log`
+  - `failure-analysis.md`
+  - `review.json`
+
 `session-start` now returns two layers of prompt-ready guidance:
 
 - a prominent `meta_skill` navigator pointing at `docs/skills/workflow-navigator.md`
