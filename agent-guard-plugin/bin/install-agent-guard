@@ -1,9 +1,7 @@
-#!/usr/bin/env node
+#!/usr/bin/env bash
+set -euo pipefail
 
-const { runInstallCli } = require("../lib/install");
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-runInstallCli(process.argv.slice(2), {
-  cwd: process.cwd(),
-  homeDir: process.env.HOME,
-  pluginRoot: require("node:path").resolve(__dirname, ".."),
-});
+exec uv run --project "$PROJECT_ROOT" install-agent-guard "$@"

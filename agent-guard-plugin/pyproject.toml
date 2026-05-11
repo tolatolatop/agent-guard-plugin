@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-guard-plugin"
+version = "0.2.0"
+description = "Minimal runtime guard plugin for coding agents"
+readme = "docs/runtime-install.md"
+requires-python = ">=3.11"
+dependencies = [
+  "pyyaml>=6.0",
+]
+
+[project.scripts]
+agent-guard = "agent_guard.cli:main"
+install-agent-guard = "agent_guard.cli:install_main"
+agent-guard-bridge = "agent_guard.runtime_bridge:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_guard"]

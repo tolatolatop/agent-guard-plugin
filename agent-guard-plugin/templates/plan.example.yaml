@@ -9,5 +9,5 @@ steps:
     forbidden_paths:
       - src/**
     commands:
-      - npm test
+      - uv run pytest
     success_condition: "test fails for the expected reason"
