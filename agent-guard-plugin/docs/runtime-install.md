@@ -56,10 +56,22 @@ Development workflow:
 ```bash
 uv run pytest
 uv run agent-guard init
+uv run agent-guard wizard
 uv run agent-guard status
 uv run agent-guard session-start
 uv run agent-guard reset-task next-requirement
 ```
+
+Interactive wizard:
+
+- `uv run agent-guard wizard`
+
+The wizard bootstraps a new task interactively:
+
+- ensures `.agent/` exists
+- collects `task_id`, goal, stage, current step, and path scopes
+- writes `state.json`
+- can generate a starter `.agent/plan.yaml`
 
 `session-start` now returns two layers of prompt-ready guidance:
 

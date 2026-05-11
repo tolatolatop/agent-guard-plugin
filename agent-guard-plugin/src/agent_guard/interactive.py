@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import TextIO
 
 from prompt_toolkit import prompt
+from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.completion import PathCompleter
 from prompt_toolkit.shortcuts import confirm
 
@@ -41,6 +42,29 @@ def prompt_text(
     output.flush()
     answer = input_stream.readline().strip()
     return answer or default
+
+
+def prompt_choice(
+    message: str,
+    choices: list[str],
+    input_stream: TextIO,
+    output: TextIO,
+    default: str,
+) -> str:
+    if use_prompt_toolkit(input_stream, output):
+        completer = WordCompleter(choices, ignore_case=True, sentence=True)
+        while True:
+            answer = prompt(f"{message}: ", default=default, completer=completer).strip() or default
+            if answer in choices:
+                return answer
+
+    options = "/".join(choices)
+    while True:
+        output.write(f"{message} [{options}] ({default}): ")
+        output.flush()
+        answer = input_stream.readline().strip() or default
+        if answer in choices:
+            return answer
 
 
 def prompt_path(

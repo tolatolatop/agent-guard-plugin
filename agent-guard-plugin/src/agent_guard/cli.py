@@ -15,6 +15,7 @@ from .path_policy import decide_write
 from .runtime_adapter import get_next_step, get_session_reminder
 from .state import AGENT_DIR, ensure_agent_files, load_state, update_state
 from .task_reset import reset_task
+from .wizard import run_wizard
 
 
 def print_json(data: dict[str, Any], exit_code: int = 0) -> None:
@@ -112,13 +113,16 @@ def run_command(argv: list[str], cwd: Path) -> int:
                 input_stream=sys.stdin,
             )
             print_json({"ok": True, **result})
+        elif command == "wizard":
+            result = run_wizard(cwd, sys.stdin, sys.stdout)
+            print_json(result)
         else:
             print_json(
                 {
                     "error": (
                         "Unknown command. Supported: init, start-task, status, session-start, "
                         "can-write, record-command, check-failure-loop, check-job-poll, "
-                        "can-finalize, next-step, reset-task, next-task, install, uninstall"
+                        "can-finalize, next-step, reset-task, next-task, install, uninstall, wizard"
                     )
                 },
                 1,
