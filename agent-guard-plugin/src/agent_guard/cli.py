@@ -15,6 +15,13 @@ from .path_policy import decide_write
 from .runtime_adapter import get_next_step, get_session_reminder
 from .state import AGENT_DIR, ensure_agent_files, load_state, update_state
 from .task_reset import reset_task
+from .transitions import (
+    advance_stage,
+    complete_step,
+    mark_done,
+    parse_scope_flag,
+    ready_to_summarize,
+)
 from .wizard import run_wizard
 
 
@@ -90,6 +97,52 @@ def run_command(argv: list[str], cwd: Path) -> int:
                 str(flags["log"]) if "log" in flags else None,
             )
             print_json({"ok": True, **result})
+        elif command == "advance-stage":
+            flags = parse_flags(rest)
+            if "to" not in flags:
+                print_json(
+                    {
+                        "error": (
+                            "Usage: agent-guard advance-stage --to <stage> [--step <step-id>] "
+                            "[--allowed-paths <csv>] [--forbidden-paths <csv>]"
+                        )
+                    },
+                    1,
+                )
+            result = advance_stage(
+                cwd,
+                str(flags["to"]),
+                step_id=str(flags["step"]) if "step" in flags else None,
+                allowed_paths=parse_scope_flag(flags.get("allowed-paths")),
+                forbidden_paths=parse_scope_flag(flags.get("forbidden-paths")),
+            )
+            print_json({"ok": True, **result})
+        elif command == "complete-step":
+            step_id = ensure_path_arg(rest, "step-id")
+            flags = parse_flags(rest[1:])
+            if "next-stage" not in flags:
+                print_json(
+                    {
+                        "error": (
+                            "Usage: agent-guard complete-step <step-id> --next-stage <stage> "
+                            "[--next-step <step-id>] [--allowed-paths <csv>] [--forbidden-paths <csv>]"
+                        )
+                    },
+                    1,
+                )
+            result = complete_step(
+                cwd,
+                step_id,
+                str(flags["next-stage"]),
+                next_step_id=str(flags["next-step"]) if "next-step" in flags else None,
+                allowed_paths=parse_scope_flag(flags.get("allowed-paths")),
+                forbidden_paths=parse_scope_flag(flags.get("forbidden-paths")),
+            )
+            print_json({"ok": True, **result})
+        elif command == "ready-to-summarize":
+            print_json({"ok": True, **ready_to_summarize(cwd)})
+        elif command == "mark-done":
+            print_json({"ok": True, **mark_done(cwd)})
         elif command == "check-failure-loop":
             result = check_failure_loop(cwd)
             print_json(result, 0 if result["decision"] == "allow" else 1)
@@ -121,8 +174,9 @@ def run_command(argv: list[str], cwd: Path) -> int:
                 {
                     "error": (
                         "Unknown command. Supported: init, start-task, status, session-start, "
-                        "can-write, record-command, check-failure-loop, check-job-poll, "
-                        "can-finalize, next-step, reset-task, next-task, install, uninstall, wizard"
+                        "can-write, record-command, advance-stage, complete-step, ready-to-summarize, "
+                        "mark-done, check-failure-loop, check-job-poll, can-finalize, next-step, "
+                        "reset-task, next-task, install, uninstall, wizard"
                     )
                 },
                 1,

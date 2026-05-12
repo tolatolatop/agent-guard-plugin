@@ -4,26 +4,19 @@ import os
 from pathlib import Path
 from typing import Any
 
+from .transitions import (
+    STAGE_TRANSITIONS,
+    automatic_transitions,
+    transition_conditions_for_stage,
+    transition_graph_lines,
+    workflow_commands,
+)
+
 GLOBAL_GATES = [
     "Do not write outside allowed_paths.",
     "Do not retry identical failing commands without code changes or failure analysis.",
     "Do not claim completion unless can-finalize passes.",
 ]
-
-STAGE_TRANSITIONS = {
-    "IDLE": ["CLARIFYING"],
-    "CLARIFYING": ["DESIGNING", "PLANNING"],
-    "DESIGNING": ["PLANNING"],
-    "PLANNING": ["RED_TEST", "GREEN_IMPL"],
-    "RED_TEST": ["GREEN_IMPL", "NEEDS_FAILURE_ANALYSIS"],
-    "GREEN_IMPL": ["REVIEW", "VERIFY", "NEEDS_FAILURE_ANALYSIS"],
-    "REVIEW": ["VERIFY", "GREEN_IMPL"],
-    "VERIFY": ["READY_TO_SUMMARIZE", "NEEDS_FAILURE_ANALYSIS"],
-    "READY_TO_SUMMARIZE": ["DONE"],
-    "NEEDS_FAILURE_ANALYSIS": ["RED_TEST", "GREEN_IMPL", "VERIFY", "NEEDS_HUMAN"],
-    "NEEDS_HUMAN": ["CLARIFYING", "PLANNING"],
-    "DONE": [],
-}
 
 STAGE_RULES = {
     "IDLE": {
@@ -139,6 +132,10 @@ def get_workflow_context(root_dir: Path, stage: str) -> dict[str, Any]:
         "forbidden_actions": rules["forbidden_actions"],
         "transitions_in": [source for source, targets in STAGE_TRANSITIONS.items() if stage in targets],
         "transitions_out": STAGE_TRANSITIONS.get(stage, []),
+        "transition_conditions": transition_conditions_for_stage(stage),
+        "transition_graph": transition_graph_lines(),
+        "workflow_commands": workflow_commands(),
+        "automatic_transitions": automatic_transitions(),
         "global_gates": GLOBAL_GATES,
         "skill_catalog": [
             {**skill, "absolute_path": str(skill_absolute_path(base_dir, skill))}
@@ -160,6 +157,13 @@ def build_session_prompt_block(
 ) -> str:
     skill_paths = ", ".join(skill["absolute_path"] for skill in workflow_context["skill_catalog"])
     transitions_out = ", ".join(workflow_context["transitions_out"]) or "none"
+    transition_conditions = " | ".join(
+        f"{target}: {', '.join(conditions)}"
+        for target, conditions in workflow_context["transition_conditions"].items()
+    ) or "none"
+    transition_graph = " | ".join(workflow_context["transition_graph"])
+    command_help = " | ".join(workflow_context["workflow_commands"])
+    automatic_moves = " | ".join(workflow_context["automatic_transitions"])
     allowed = "; ".join(workflow_context["allowed_actions"])
     forbidden = "; ".join(workflow_context["forbidden_actions"])
     gates = "; ".join(workflow_context["global_gates"])
@@ -180,9 +184,13 @@ def build_session_prompt_block(
         f"Can finalize: {can_finalize}\n"
         f"Stage goal: {workflow_context['current_stage_goal']}\n"
         f"Stage exits: {transitions_out}\n"
+        f"Stage exit conditions: {transition_conditions}\n"
         f"Allowed actions: {allowed}\n"
         f"Forbidden actions: {forbidden}\n"
         f"Global gates: {gates}\n"
+        f"Transition graph: {transition_graph}\n"
+        f"Workflow commands: {command_help}\n"
+        f"Automatic transitions: {automatic_moves}\n"
         f"Consult skills in this order: {skill_paths}"
         f"{archive_line}"
     )

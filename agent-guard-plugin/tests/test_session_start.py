@@ -23,8 +23,11 @@ def test_session_start_includes_meta_skill_and_workflow_context() -> None:
     assert reminder["meta_skill"]["path"] == "docs/skills/workflow-navigator.md"
     assert reminder["workflow"]["current_stage_goal"]
     assert "GREEN_IMPL" in reminder["workflow"]["transitions_out"]
+    assert reminder["workflow"]["transition_graph"]
+    assert reminder["workflow"]["workflow_commands"]
     assert "workflow-core.md" in reminder["prompt_block"]
     assert "Allowed actions:" in reminder["prompt_block"]
+    assert "Workflow commands:" in reminder["prompt_block"]
 
 
 def test_session_start_uses_claude_skill_layout_when_configured() -> None:
