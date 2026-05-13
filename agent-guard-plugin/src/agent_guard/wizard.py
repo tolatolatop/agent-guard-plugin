@@ -34,32 +34,20 @@ def write_plan_template(
     root_dir: Path,
     task_id: str,
     stage: str,
-    step_id: str | None,
+    step_name: str | None,
     goal: str,
-    allowed_paths: list[str],
-    forbidden_paths: list[str],
 ) -> Path:
-    step_stage = "RED_TEST" if stage in {"CLARIFYING", "PLANNING"} else stage
-    step_identifier = step_id or (
-        "red-001" if step_stage == "RED_TEST" else "green-001" if step_stage == "GREEN_IMPL" else "step-001"
+    step_identifier = step_name or (
+        "red-001" if stage == "RED_TEST" else "green-001" if stage == "GREEN_IMPL" else "step-001"
     )
-    command = "uv run pytest" if step_stage in {"RED_TEST", "GREEN_IMPL"} else "uv run pytest -q"
-    success = (
-        "test fails for the expected reason"
-        if step_stage == "RED_TEST"
-        else "targeted verification passes"
-    )
+    status = "in_progress" if stage in {"RED_TEST", "GREEN_IMPL", "PLANNING"} else "pending"
     payload: dict[str, Any] = {
         "task_id": task_id,
         "steps": [
             {
-                "id": step_identifier,
-                "stage": step_stage,
-                "goal": goal,
-                "allowed_paths": allowed_paths,
-                "forbidden_paths": forbidden_paths,
-                "commands": [command],
-                "success_condition": success,
+                "name": step_identifier,
+                "description": goal,
+                "status": status,
             }
         ],
     }
@@ -111,6 +99,6 @@ def run_wizard(root_dir: Path, input_stream: TextIO, output: TextIO) -> dict[str
         "plan_written": None,
     }
     if create_plan:
-        plan_file = write_plan_template(root_dir, task_id, stage, current_step or None, goal, allowed_paths, forbidden_paths)
+        plan_file = write_plan_template(root_dir, task_id, stage, current_step or None, goal)
         result["plan_written"] = str(plan_file)
     return result

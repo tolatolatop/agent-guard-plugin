@@ -94,7 +94,10 @@ def validate_state(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def load_state(root_dir: Path) -> dict[str, Any]:
-    return validate_state(read_json(state_path(root_dir), "state.json"))
+    file_path = state_path(root_dir)
+    if not file_path.exists():
+        return DEFAULT_STATE.copy()
+    return validate_state(read_json(file_path, "state.json"))
 
 
 def save_state(root_dir: Path, state: dict[str, Any]) -> dict[str, Any]:

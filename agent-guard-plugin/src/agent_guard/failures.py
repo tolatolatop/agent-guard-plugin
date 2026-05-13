@@ -8,6 +8,7 @@ from typing import Any
 
 from .events import append_event
 from .state import failures_path, load_state, save_state
+from .workflow_spec import stage_required_artifacts
 
 DEFAULT_REPEAT_THRESHOLD = 2
 
@@ -104,11 +105,13 @@ def check_failure_loop(root_dir: Path, threshold: int = DEFAULT_REPEAT_THRESHOLD
         last_failure.get("repeat_count", 0) >= threshold
         and last_failure.get("code_changed_since_last_failure") is False
     ):
+        required_failure_artifacts = stage_required_artifacts("NEEDS_FAILURE_ANALYSIS")
+        artifact_hint = required_failure_artifacts[0] if required_failure_artifacts else ".agent/artifacts/failure-analysis.md"
         return {
             "decision": "block",
             "reason": (
                 "Repeated identical failure detected without code changes. "
-                "Write .agent/artifacts/failure-analysis.md before retrying."
+                f"Write {artifact_hint} before retrying."
             ),
             "failure": last_failure,
         }

@@ -39,7 +39,33 @@ def test_bridge_blocks_forbidden_write() -> None:
 
     result = run_bridge(root_dir, "pre-write", {"tool_input": {"file_path": "src/app.py"}})
     assert result.returncode == 2
-    assert "src/** is forbidden" in result.stderr
+    assert "forbidden path policy for stage RED_TEST" in result.stderr
+
+
+def test_bridge_allows_absolute_agent_artifact_write_within_repo() -> None:
+    root_dir = make_temp_repo()
+    save_state(
+        root_dir,
+        {
+            "task_id": "implementation-plan",
+            "stage": "PLANNING",
+            "current_step": "plan-001",
+            "completed_steps": [],
+            "remaining_steps": ["plan-001"],
+            "allowed_paths": [],
+            "forbidden_paths": [],
+            "can_finalize": False,
+            "last_verification": None,
+            "needs_human": False,
+        },
+    )
+
+    result = run_bridge(
+        root_dir,
+        "pre-write",
+        {"tool_input": {"file_path": str(root_dir / ".agent" / "artifacts" / "DESIGN.md")}},
+    )
+    assert result.returncode == 0
 
 
 def test_bridge_records_final_verification_log_only_for_verify() -> None:
@@ -279,4 +305,5 @@ def test_bridge_session_start_uses_installed_skills_dir() -> None:
     )
     assert result.returncode == 0
     payload = json.loads(result.stdout)
-    assert "using-workflow.md" in payload["hookSpecificOutput"]["additionalContext"]
+    assert "Using Workflow skill:" in payload["hookSpecificOutput"]["additionalContext"]
+    assert "nav" in payload["hookSpecificOutput"]["additionalContext"]

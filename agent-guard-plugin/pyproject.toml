@@ -30,3 +30,6 @@ pythonpath = ["src"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_guard"]
+
+[tool.hatch.build.targets.wheel.force-include]
+".workflow.yaml" = "agent_guard/.workflow.yaml"

@@ -6,70 +6,16 @@ from typing import Any
 from .events import append_event
 from .gates import can_finalize
 from .jobs import load_jobs
-from .plan import get_plan_step, load_plan_summary
 from .state import AGENT_DIR, load_state, save_state
+from .workflow_spec import (
+    complete_step_allowed_from_stages,
+    stage_exit_conditions,
+    stage_required_artifacts,
+    stage_transition_rules,
+    stage_transitions,
+)
 
-STAGE_TRANSITIONS = {
-    "IDLE": ["CLARIFYING"],
-    "CLARIFYING": ["DESIGNING", "PLANNING"],
-    "DESIGNING": ["PLANNING"],
-    "PLANNING": ["RED_TEST", "GREEN_IMPL"],
-    "RED_TEST": ["GREEN_IMPL", "NEEDS_FAILURE_ANALYSIS"],
-    "GREEN_IMPL": ["REVIEW", "NEEDS_FAILURE_ANALYSIS"],
-    "REVIEW": ["VERIFY", "GREEN_IMPL"],
-    "VERIFY": ["READY_TO_SUMMARIZE", "NEEDS_FAILURE_ANALYSIS"],
-    "READY_TO_SUMMARIZE": ["DONE"],
-    "NEEDS_FAILURE_ANALYSIS": ["RED_TEST", "GREEN_IMPL", "VERIFY", "NEEDS_HUMAN"],
-    "NEEDS_HUMAN": ["CLARIFYING", "PLANNING"],
-    "DONE": [],
-}
-
-TRANSITION_CONDITIONS = {
-    "IDLE": {
-        "CLARIFYING": ["task_id must be set"],
-    },
-    "CLARIFYING": {
-        "DESIGNING": ["active task exists", "needs_human must be false"],
-        "PLANNING": ["active task exists", "caller has clarified requirements"],
-    },
-    "DESIGNING": {
-        "PLANNING": ["active task exists"],
-    },
-    "PLANNING": {
-        "RED_TEST": ["step must be selected", "scope must be known from plan or explicit flags"],
-        "GREEN_IMPL": ["step must be selected", "scope must be known from plan or explicit flags"],
-    },
-    "RED_TEST": {
-        "GREEN_IMPL": ["current red step must be completed with complete-step"],
-        "NEEDS_FAILURE_ANALYSIS": ["unexpected failure requires analysis"],
-    },
-    "GREEN_IMPL": {
-        "REVIEW": ["current impl step must be completed"],
-        "NEEDS_FAILURE_ANALYSIS": ["unexpected failure requires analysis"],
-    },
-    "REVIEW": {
-        "VERIFY": ["review artifact required when plan includes review"],
-        "GREEN_IMPL": ["review identified follow-up implementation work"],
-    },
-    "VERIFY": {
-        "READY_TO_SUMMARIZE": ["last_verification.exit_code must be 0", "no running jobs", "remaining steps must be complete", "can_finalize enabled only through ready-to-summarize"],
-        "NEEDS_FAILURE_ANALYSIS": ["verification failed"],
-    },
-    "READY_TO_SUMMARIZE": {
-        "DONE": ["can-finalize must pass", "use mark-done"],
-    },
-    "NEEDS_FAILURE_ANALYSIS": {
-        "RED_TEST": ["failure-analysis.md must exist", "next step and scope must be known"],
-        "GREEN_IMPL": ["failure-analysis.md must exist", "next step and scope must be known"],
-        "VERIFY": ["failure-analysis.md must exist"],
-        "NEEDS_HUMAN": ["explicit escalation"],
-    },
-    "NEEDS_HUMAN": {
-        "CLARIFYING": ["human guidance received"],
-        "PLANNING": ["human guidance resolved scope and next step"],
-    },
-    "DONE": {},
-}
+STAGE_TRANSITIONS = stage_transitions()
 
 
 def parse_scope_flag(value: str | bool | None) -> list[str]:
@@ -79,33 +25,7 @@ def parse_scope_flag(value: str | bool | None) -> list[str]:
 
 
 def transition_conditions_for_stage(stage: str) -> dict[str, list[str]]:
-    return TRANSITION_CONDITIONS.get(stage, {})
-
-
-def transition_graph_lines() -> list[str]:
-    return [
-        "IDLE -> CLARIFYING",
-        "CLARIFYING -> DESIGNING | PLANNING",
-        "DESIGNING -> PLANNING",
-        "PLANNING -> RED_TEST | GREEN_IMPL",
-        "RED_TEST -> GREEN_IMPL | NEEDS_FAILURE_ANALYSIS",
-        "GREEN_IMPL -> REVIEW | NEEDS_FAILURE_ANALYSIS",
-        "REVIEW -> VERIFY | GREEN_IMPL",
-        "VERIFY -> READY_TO_SUMMARIZE | NEEDS_FAILURE_ANALYSIS",
-        "READY_TO_SUMMARIZE -> DONE",
-        "NEEDS_FAILURE_ANALYSIS -> RED_TEST | GREEN_IMPL | VERIFY | NEEDS_HUMAN",
-        "NEEDS_HUMAN -> CLARIFYING | PLANNING",
-        "DONE -> reset-task / next-task only",
-    ]
-
-
-def workflow_commands() -> list[str]:
-    return [
-        "agent-guard advance-stage --to <stage> [--step <step-id>] [--allowed-paths <csv>] [--forbidden-paths <csv>]",
-        "agent-guard complete-step <step-id> --next-stage <stage> [--next-step <step-id>] [--allowed-paths <csv>] [--forbidden-paths <csv>]",
-        "agent-guard ready-to-summarize",
-        "agent-guard mark-done",
-    ]
+    return stage_exit_conditions(stage)
 
 
 def automatic_transitions() -> list[str]:
@@ -123,11 +43,30 @@ def _has_active_task(state: dict[str, Any]) -> bool:
 
 
 def _review_artifact_exists(root_dir: Path) -> bool:
-    return (root_dir / AGENT_DIR / "artifacts" / "review.json").exists()
+    required = stage_required_artifacts("REVIEW")
+    return all((root_dir / path).exists() for path in required)
 
 
 def _failure_analysis_exists(root_dir: Path) -> bool:
-    return (root_dir / AGENT_DIR / "artifacts" / "failure-analysis.md").exists()
+    required = stage_required_artifacts("NEEDS_FAILURE_ANALYSIS")
+    return all((root_dir / path).exists() for path in required)
+
+
+def _required_artifacts_message(stage: str) -> str:
+    required = stage_required_artifacts(stage)
+    if not required:
+        return f"{stage} has no required artifacts."
+    if len(required) == 1:
+        return required[0]
+    return ", ".join(required)
+
+
+def _required_command_message(required_command: str, to_stage: str) -> str:
+    if required_command == "ready-to-summarize":
+        return "Use agent-guard ready-to-summarize after verification succeeds."
+    if required_command == "mark-done":
+        return "Use agent-guard mark-done to enter DONE."
+    return f"Use agent-guard {required_command} to enter {to_stage}."
 
 
 def _has_running_jobs(root_dir: Path) -> bool:
@@ -152,26 +91,17 @@ def _require_direct_transition(from_stage: str, to_stage: str) -> None:
 
 
 def _resolve_scope(
-    root_dir: Path,
-    step_id: str | None,
+    current_allowed_paths: list[str],
+    current_forbidden_paths: list[str],
     explicit_allowed_paths: list[str],
     explicit_forbidden_paths: list[str],
     require_scope: bool,
-) -> tuple[list[str], list[str], dict[str, Any] | None]:
-    if step_id:
-        step = get_plan_step(root_dir, step_id)
-        if step is not None:
-            allowed = list(step.get("allowed_paths", []))
-            forbidden = list(step.get("forbidden_paths", []))
-            if require_scope and not allowed:
-                raise RuntimeError(f"Plan step {step_id} must define allowed_paths before entering an execution stage.")
-            return allowed, forbidden, step
-
-    if require_scope and not explicit_allowed_paths:
-        raise RuntimeError("Step scope is required. Add the step to .agent/plan.yaml or pass --allowed-paths.")
+) -> tuple[list[str], list[str]]:
     if explicit_allowed_paths or explicit_forbidden_paths:
-        return list(explicit_allowed_paths), list(explicit_forbidden_paths), None
-    return [], [], None
+        return list(explicit_allowed_paths), list(explicit_forbidden_paths)
+    if require_scope and not current_allowed_paths:
+        raise RuntimeError("Step scope is required. Pass --allowed-paths.")
+    return list(current_allowed_paths), list(current_forbidden_paths)
 
 
 def _guard_transition(
@@ -185,66 +115,64 @@ def _guard_transition(
 ) -> None:
     from_stage = str(state.get("stage"))
     _require_direct_transition(from_stage, to_stage)
+    rule = stage_transition_rules(from_stage).get(to_stage, {})
+    required_command = rule.get("required_command")
+    if required_command and command_name != required_command:
+        raise RuntimeError(_required_command_message(str(required_command), to_stage))
 
-    if to_stage == "READY_TO_SUMMARIZE" and command_name != "ready-to-summarize":
-        raise RuntimeError("Use agent-guard ready-to-summarize after verification succeeds.")
-    if to_stage == "DONE" and command_name != "mark-done":
-        raise RuntimeError("Use agent-guard mark-done to enter DONE.")
+    if rule.get("require_active_task") is True and not _has_active_task(state):
+        if from_stage == "IDLE":
+            raise RuntimeError("IDLE -> CLARIFYING requires task_id to be set first.")
+        raise RuntimeError("Current task is unset. Run start-task or wizard first.")
 
-    if from_stage == "IDLE" and to_stage == "CLARIFYING" and not _has_active_task(state):
-        raise RuntimeError("IDLE -> CLARIFYING requires task_id to be set first.")
+    if rule.get("forbid_needs_human") is True and state.get("needs_human") is True:
+        raise RuntimeError(f"Cannot enter {to_stage} while needs_human is true.")
 
-    if from_stage == "CLARIFYING":
-        if not _has_active_task(state):
-            raise RuntimeError("Current task is unset. Run start-task or wizard first.")
-        if to_stage == "DESIGNING" and state.get("needs_human") is True:
-            raise RuntimeError("Cannot enter DESIGNING while needs_human is true.")
+    selected_step = step_id or state.get("current_step")
+    require_selected_step = rule.get("require_selected_step") is True
+    require_scope = rule.get("require_scope") is True
+    if require_selected_step and not selected_step:
+        noun = "next step" if from_stage == "NEEDS_FAILURE_ANALYSIS" else "step"
+        raise RuntimeError(f"{from_stage} -> {to_stage} requires a {noun}. Pass --step or set current_step first.")
+    if (require_selected_step or require_scope) and selected_step:
+        _resolve_scope(
+            list(state.get("allowed_paths", [])),
+            list(state.get("forbidden_paths", [])),
+            allowed_paths,
+            forbidden_paths,
+            require_scope=require_scope,
+        )
 
-    if from_stage == "DESIGNING" and not _has_active_task(state):
-        raise RuntimeError("DESIGNING -> PLANNING requires an active task.")
+    required_completion_commands = {
+        str(item) for item in rule.get("require_completed_current_step_on_commands", []) if str(item)
+    }
+    if command_name in required_completion_commands and not _step_already_completed(state):
+        raise RuntimeError(f"{from_stage} -> {to_stage} requires complete-step for the current implementation step.")
 
-    if from_stage == "PLANNING" and to_stage in {"RED_TEST", "GREEN_IMPL"}:
-        selected_step = step_id or state.get("current_step")
-        if not selected_step:
-            raise RuntimeError(f"{from_stage} -> {to_stage} requires a step. Pass --step or set current_step first.")
-        _resolve_scope(root_dir, str(selected_step), allowed_paths, forbidden_paths, require_scope=True)
+    if rule.get("require_review_artifacts") is True and not _review_artifact_exists(root_dir):
+        raise RuntimeError(f"REVIEW -> VERIFY requires {_required_artifacts_message('REVIEW')}.")
 
-    if from_stage == "RED_TEST" and to_stage == "GREEN_IMPL" and command_name == "advance-stage":
-        raise RuntimeError("RED_TEST -> GREEN_IMPL requires complete-step so the red step is recorded as complete.")
-
-    if from_stage == "GREEN_IMPL" and to_stage in {"REVIEW", "VERIFY"} and command_name == "advance-stage":
-        if not _step_already_completed(state):
-            raise RuntimeError(f"{from_stage} -> {to_stage} requires complete-step for the current implementation step.")
-
-    if from_stage == "REVIEW" and to_stage == "VERIFY":
-        if load_plan_summary(root_dir).get("includesReview") and not _review_artifact_exists(root_dir):
-            raise RuntimeError("REVIEW -> VERIFY requires .agent/artifacts/review.json when the plan includes review.")
-
-    if from_stage == "VERIFY" and to_stage == "READY_TO_SUMMARIZE":
+    if rule.get("require_successful_last_verification") is True:
         last_verification = state.get("last_verification")
         if not last_verification or last_verification.get("exit_code") != 0:
             raise RuntimeError("VERIFY -> READY_TO_SUMMARIZE requires a successful last_verification.")
-        if _has_running_jobs(root_dir):
-            raise RuntimeError("VERIFY -> READY_TO_SUMMARIZE is blocked while jobs are still running.")
-        if state.get("remaining_steps"):
-            raise RuntimeError("VERIFY -> READY_TO_SUMMARIZE requires remaining_steps to be empty.")
 
-    if from_stage == "READY_TO_SUMMARIZE" and to_stage == "DONE":
+    if rule.get("require_no_running_jobs") is True and _has_running_jobs(root_dir):
+        raise RuntimeError("VERIFY -> READY_TO_SUMMARIZE is blocked while jobs are still running.")
+
+    if rule.get("require_empty_remaining_steps") is True and state.get("remaining_steps"):
+        raise RuntimeError("VERIFY -> READY_TO_SUMMARIZE requires remaining_steps to be empty.")
+
+    if rule.get("require_can_finalize") is True:
         result = can_finalize(root_dir)
         if result["decision"] != "allow":
             reasons = "; ".join(str(reason) for reason in result.get("reasons", []))
             raise RuntimeError(f"READY_TO_SUMMARIZE -> DONE is blocked: {reasons}")
 
-    if from_stage == "NEEDS_FAILURE_ANALYSIS" and to_stage != "NEEDS_HUMAN":
-        if not _failure_analysis_exists(root_dir):
-            raise RuntimeError(
-                "Leaving NEEDS_FAILURE_ANALYSIS requires .agent/artifacts/failure-analysis.md."
-            )
-        if to_stage in {"RED_TEST", "GREEN_IMPL"}:
-            selected_step = step_id or state.get("current_step")
-            if not selected_step:
-                raise RuntimeError(f"{from_stage} -> {to_stage} requires a next step. Pass --step or set current_step first.")
-            _resolve_scope(root_dir, str(selected_step), allowed_paths, forbidden_paths, require_scope=True)
+    if rule.get("require_failure_analysis_artifacts") is True and not _failure_analysis_exists(root_dir):
+        raise RuntimeError(
+            f"Leaving NEEDS_FAILURE_ANALYSIS requires {_required_artifacts_message('NEEDS_FAILURE_ANALYSIS')}."
+        )
 
 
 def _next_state_common(
@@ -305,9 +233,17 @@ def advance_stage(
     resolved_step = step_id or state.get("current_step")
     resolved_allowed = allowed
     resolved_forbidden = forbidden
-    if step_id:
-        require_scope = to_stage in {"RED_TEST", "GREEN_IMPL"}
-        resolved_allowed, resolved_forbidden, _ = _resolve_scope(root_dir, step_id, allowed, forbidden, require_scope)
+    if to_stage in {"RED_TEST", "GREEN_IMPL"}:
+        same_step = step_id is None or str(step_id) == str(state.get("current_step") or "")
+        fallback_allowed = list(state.get("allowed_paths", [])) if same_step else []
+        fallback_forbidden = list(state.get("forbidden_paths", [])) if same_step else []
+        resolved_allowed, resolved_forbidden = _resolve_scope(
+            fallback_allowed,
+            fallback_forbidden,
+            allowed,
+            forbidden,
+            require_scope=True,
+        )
     elif to_stage not in {"RED_TEST", "GREEN_IMPL"}:
         resolved_allowed = []
         resolved_forbidden = []
@@ -336,7 +272,7 @@ def complete_step(
 ) -> dict[str, Any]:
     state = load_state(root_dir)
     current_stage = str(state.get("stage"))
-    if current_stage not in {"RED_TEST", "GREEN_IMPL", "REVIEW", "VERIFY"}:
+    if current_stage not in set(complete_step_allowed_from_stages()):
         raise RuntimeError(f"complete-step is not allowed from stage {current_stage}.")
     if step_id not in state.get("remaining_steps", []) and step_id != state.get("current_step"):
         raise RuntimeError(f"Step {step_id} is not the active remaining step.")
@@ -353,9 +289,12 @@ def complete_step(
     resolved_forbidden: list[str] = []
     if resolved_next_step:
         require_scope = next_stage in {"RED_TEST", "GREEN_IMPL"}
-        resolved_allowed, resolved_forbidden, _ = _resolve_scope(
-            root_dir,
-            resolved_next_step,
+        same_step = str(resolved_next_step) == str(state.get("current_step") or "")
+        fallback_allowed = list(state.get("allowed_paths", [])) if same_step else []
+        fallback_forbidden = list(state.get("forbidden_paths", [])) if same_step else []
+        resolved_allowed, resolved_forbidden = _resolve_scope(
+            fallback_allowed,
+            fallback_forbidden,
             allowed,
             forbidden,
             require_scope,

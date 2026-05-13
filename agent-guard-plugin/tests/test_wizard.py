@@ -41,8 +41,9 @@ def test_wizard_writes_state_and_plan_from_plain_streams() -> None:
 
     plan = yaml.safe_load(plan_path(root).read_text(encoding="utf-8"))
     assert plan["task_id"] == state["task_id"]
-    assert plan["steps"][0]["id"] == "red-001"
-    assert plan["steps"][0]["goal"] == "Build ffmpeg wrapper"
+    assert plan["steps"][0]["name"] == "red-001"
+    assert plan["steps"][0]["description"] == "Build ffmpeg wrapper"
+    assert plan["steps"][0]["status"] == "in_progress"
 
 
 def test_wizard_can_skip_plan_generation() -> None:

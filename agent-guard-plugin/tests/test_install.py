@@ -2,8 +2,17 @@ import json
 from io import StringIO
 import tempfile
 from pathlib import Path
+import pytest
 
-from agent_guard.install import build_opencode_plugin_source, install_runtime, uninstall_runtime
+from agent_guard.install import (
+    build_opencode_plugin_source,
+    install_claude_skills_bundle,
+    install_runtime,
+    packaged_skills_dir,
+    parse_flags,
+    source_skills_dir,
+    uninstall_runtime,
+)
 
 
 def make_dirs() -> tuple[Path, Path]:
@@ -48,6 +57,42 @@ def test_install_claude_removes_legacy_flat_skill_files() -> None:
 
     assert not legacy_file.exists()
     assert (root / ".claude" / "skills" / "using-workflow" / "SKILL.md").exists()
+
+
+def test_source_skills_dir_prefers_packaged_bundle_when_plugin_root_has_no_docs() -> None:
+    root, _ = make_dirs()
+
+    resolved = source_skills_dir(root)
+
+    assert resolved == packaged_skills_dir()
+    assert (resolved / "using-workflow.md").exists()
+
+
+def test_install_claude_skills_bundle_succeeds_without_plugin_docs() -> None:
+    root, home = make_dirs()
+    fake_plugin_root = root / "installed-layout"
+    fake_plugin_root.mkdir(parents=True, exist_ok=True)
+
+    result = install_runtime(["--runtime", "claude-code", "--scope", "project"], root, home, fake_plugin_root)
+
+    assert (root / ".claude" / "skills" / "using-workflow" / "SKILL.md").exists()
+    assert any(path.endswith("/.claude/skills/using-workflow/SKILL.md") for path in result["files_written"])
+
+
+def test_install_claude_skills_bundle_errors_when_no_sources_exist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    empty_dir = tmp_path / "empty-skills"
+    empty_dir.mkdir()
+    monkeypatch.setattr("agent_guard.install.packaged_skills_dir", lambda: empty_dir)
+
+    with pytest.raises(RuntimeError, match="Could not locate bundled workflow skills"):
+        install_claude_skills_bundle(tmp_path / "target", tmp_path / "plugin-root")
+
+
+def test_parse_flags_supports_short_runtime_and_scope_aliases() -> None:
+    flags = parse_flags(["-r", "claude-code", "-s", "project"])
+
+    assert flags["runtime"] == "claude-code"
+    assert flags["scope"] == "project"
 
 
 def test_install_writes_codex_hooks_json() -> None:

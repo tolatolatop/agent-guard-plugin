@@ -11,6 +11,10 @@ from .interactive import confirm_action
 
 SUPPORTED_RUNTIMES = ("claude-code", "codex", "opencode")
 SUPPORTED_SCOPES = ("project", "user")
+SHORT_FLAG_ALIASES = {
+    "-r": "runtime",
+    "-s": "scope",
+}
 
 
 def parse_flags(args: list[str]) -> dict[str, str | bool]:
@@ -18,6 +22,16 @@ def parse_flags(args: list[str]) -> dict[str, str | bool]:
     index = 0
     while index < len(args):
         current = args[index]
+        if current in SHORT_FLAG_ALIASES:
+            key = SHORT_FLAG_ALIASES[current]
+            next_value = args[index + 1] if index + 1 < len(args) else None
+            if next_value is None or next_value.startswith("-"):
+                flags[key] = True
+                index += 1
+                continue
+            flags[key] = next_value
+            index += 2
+            continue
         if not current.startswith("--"):
             index += 1
             continue
@@ -65,8 +79,20 @@ def opencode_skills_install_dir(scope: str, cwd: Path, home_dir: Path) -> Path:
     return home_dir / ".config" / "opencode" / "skills"
 
 
+def packaged_skills_dir() -> Path:
+    return Path(__file__).resolve().parent / "_bundled_skills"
+
+
 def source_skills_dir(plugin_root: Path) -> Path:
-    return plugin_root / "docs" / "skills"
+    candidates = [
+        packaged_skills_dir(),
+        plugin_root / "docs" / "skills",
+    ]
+    for candidate in candidates:
+        if candidate.exists() and any(candidate.glob("*.md")):
+            return candidate
+    searched = ", ".join(str(path) for path in candidates)
+    raise RuntimeError(f"Could not locate bundled workflow skills. Searched: {searched}")
 
 
 def skill_slug_from_source(source_file: Path) -> str:
@@ -80,6 +106,8 @@ def install_skills_bundle(target_dir: Path, plugin_root: Path) -> list[str]:
         target_file = target_dir / source_file.name
         shutil.copy2(source_file, target_file)
         written_files.append(str(target_file))
+    if not written_files:
+        raise RuntimeError("No workflow skills were installed.")
     return written_files
 
 
@@ -94,6 +122,8 @@ def install_claude_skills_bundle(target_dir: Path, plugin_root: Path) -> list[st
         target_file.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_file, target_file)
         written_files.append(str(target_file))
+    if not written_files:
+        raise RuntimeError("No Claude workflow skills were installed.")
     return written_files
 
 
@@ -108,6 +138,8 @@ def install_opencode_skills_bundle(target_dir: Path, plugin_root: Path) -> list[
         target_file.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_file, target_file)
         written_files.append(str(target_file))
+    if not written_files:
+        raise RuntimeError("No OpenCode workflow skills were installed.")
     return written_files
 
 

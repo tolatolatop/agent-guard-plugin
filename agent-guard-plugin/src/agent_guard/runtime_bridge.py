@@ -64,6 +64,21 @@ def _extract_path(payload: dict[str, Any]) -> str | None:
     return None
 
 
+def _normalize_target_path_for_policy(cwd: Path, target_path: str) -> str:
+    try:
+        path_obj = Path(target_path)
+    except OSError:
+        return target_path
+
+    if not path_obj.is_absolute():
+        return target_path
+
+    try:
+        return path_obj.resolve().relative_to(cwd.resolve()).as_posix()
+    except ValueError:
+        return target_path
+
+
 def _extract_command(payload: dict[str, Any]) -> str | None:
     tool_input = payload.get("tool_input", {})
     if not isinstance(tool_input, dict):
@@ -126,6 +141,7 @@ def _handle_pre_write(cwd: Path, payload: dict[str, Any]) -> None:
     target_path = _extract_path(payload)
     if not target_path:
         raise SystemExit(0)
+    target_path = _normalize_target_path_for_policy(cwd, target_path)
     code, result = _cli_json(["can-write", target_path], cwd)
     if code != 0:
         _fail(str(result.get("reason") or result.get("error") or "write blocked"))

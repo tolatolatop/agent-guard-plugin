@@ -56,3 +56,41 @@ def test_planning_allows_agent_plan_updates_only() -> None:
         ".agent/plan.yaml",
     )
     assert result["decision"] == "allow"
+
+
+def test_planning_allows_root_plan_markdown() -> None:
+    result = decide_write(
+        {**DEFAULT_STATE, "task_id": "init-video-clipper", "stage": "PLANNING"},
+        "./PLAN.md",
+    )
+    assert result["decision"] == "allow"
+
+
+def test_designing_allows_root_design_markdown() -> None:
+    result = decide_write(
+        {**DEFAULT_STATE, "task_id": "init-video-clipper", "stage": "DESIGNING"},
+        "./DESIGN.md",
+    )
+    assert result["decision"] == "allow"
+
+
+def test_planning_allows_absolute_agent_artifact_paths() -> None:
+    result = decide_write(
+        {**DEFAULT_STATE, "task_id": "init-video-clipper", "stage": "PLANNING"},
+        "/tmp/test-guard/.agent/artifacts/DESIGN.md",
+    )
+    assert result["decision"] == "allow"
+
+
+def test_ready_to_summarize_allows_summary_artifact_only() -> None:
+    result = decide_write(
+        {**DEFAULT_STATE, "task_id": "init-video-clipper", "stage": "READY_TO_SUMMARIZE"},
+        ".agent/artifacts/summary.md",
+    )
+    assert result["decision"] == "allow"
+
+    blocked_result = decide_write(
+        {**DEFAULT_STATE, "task_id": "init-video-clipper", "stage": "READY_TO_SUMMARIZE"},
+        "src/app.py",
+    )
+    assert blocked_result["decision"] == "block"

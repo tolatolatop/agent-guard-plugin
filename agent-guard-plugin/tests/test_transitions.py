@@ -2,17 +2,11 @@ import json
 from contextlib import redirect_stdout
 from io import StringIO
 
-import yaml
-
 from agent_guard.cli import run_command
 from agent_guard.state import load_state
 from agent_guard.transitions import advance_stage, complete_step, mark_done, ready_to_summarize
 
 from .helpers import make_temp_repo, write_state
-
-
-def write_plan(root_dir, payload) -> None:
-    (root_dir / ".agent" / "plan.yaml").write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
 def read_events(root_dir) -> list[dict[str, object]]:
@@ -46,30 +40,8 @@ def test_advance_stage_allows_legal_transition_and_blocks_illegal_transition() -
         raise AssertionError("Expected illegal transition to fail")
 
 
-def test_complete_step_updates_progress_and_inherits_scope_from_plan() -> None:
+def test_complete_step_updates_progress_with_explicit_scope_for_next_execution_step() -> None:
     root_dir = make_temp_repo()
-    write_plan(
-        root_dir,
-        {
-            "task_id": "password-reset",
-            "steps": [
-                {
-                    "id": "red-001",
-                    "stage": "RED_TEST",
-                    "goal": "write red test",
-                    "allowed_paths": ["tests/**"],
-                    "forbidden_paths": ["src/**"],
-                },
-                {
-                    "id": "green-001",
-                    "stage": "GREEN_IMPL",
-                    "goal": "make it pass",
-                    "allowed_paths": ["src/**", "tests/**"],
-                    "forbidden_paths": ["infra/**"],
-                },
-            ],
-        },
-    )
     write_state(
         root_dir,
         task_id="password-reset",
@@ -81,7 +53,14 @@ def test_complete_step_updates_progress_and_inherits_scope_from_plan() -> None:
         forbidden_paths=["src/**"],
     )
 
-    result = complete_step(root_dir, "red-001", "GREEN_IMPL", next_step_id="green-001")
+    result = complete_step(
+        root_dir,
+        "red-001",
+        "GREEN_IMPL",
+        next_step_id="green-001",
+        allowed_paths=["src/**", "tests/**"],
+        forbidden_paths=["infra/**"],
+    )
 
     state = result["state"]
     assert state["completed_steps"] == ["red-001"]
@@ -197,35 +176,26 @@ def test_green_impl_cannot_advance_directly_to_verify() -> None:
 
 def test_cli_representative_flow_from_start_to_done() -> None:
     root_dir = make_temp_repo()
-    write_plan(
-        root_dir,
-        {
-            "task_id": "password-reset",
-            "steps": [
-                {
-                    "id": "red-001",
-                    "stage": "RED_TEST",
-                    "goal": "write red test",
-                    "allowed_paths": ["tests/**"],
-                    "forbidden_paths": ["src/**"],
-                },
-                {
-                    "id": "green-001",
-                    "stage": "GREEN_IMPL",
-                    "goal": "implement fix",
-                    "allowed_paths": ["src/**", "tests/**"],
-                    "forbidden_paths": ["infra/**"],
-                },
-            ],
-        },
-    )
-
     assert invoke_cli(root_dir, ["start-task", "password-reset"])[0] == 0
     assert invoke_cli(root_dir, ["advance-stage", "--to", "PLANNING"])[0] == 0
-    assert invoke_cli(root_dir, ["advance-stage", "--to", "RED_TEST", "--step", "red-001"])[0] == 0
     assert invoke_cli(
         root_dir,
-        ["complete-step", "red-001", "--next-stage", "GREEN_IMPL", "--next-step", "green-001"],
+        ["advance-stage", "--to", "RED_TEST", "--step", "red-001", "--allowed-paths", "tests/**", "--forbidden-paths", "src/**"],
+    )[0] == 0
+    assert invoke_cli(
+        root_dir,
+        [
+            "complete-step",
+            "red-001",
+            "--next-stage",
+            "GREEN_IMPL",
+            "--next-step",
+            "green-001",
+            "--allowed-paths",
+            "src/**,tests/**",
+            "--forbidden-paths",
+            "infra/**",
+        ],
     )[0] == 0
 
     code, _ = invoke_cli(root_dir, ["advance-stage", "--to", "REVIEW"])
@@ -252,6 +222,10 @@ def test_cli_representative_flow_from_start_to_done() -> None:
         },
     )
     assert invoke_cli(root_dir, ["ready-to-summarize"])[0] == 0
+    (root_dir / ".agent" / "artifacts" / "summary.md").write_text(
+        "Implemented password reset flow and verified with pytest.\n",
+        encoding="utf-8",
+    )
     assert invoke_cli(root_dir, ["mark-done"])[0] == 0
     assert load_state(root_dir)["stage"] == "DONE"
 

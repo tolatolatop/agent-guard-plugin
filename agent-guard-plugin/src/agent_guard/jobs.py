@@ -4,11 +4,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .state import jobs_path, read_json
+from .state import DEFAULT_JOBS, jobs_path, read_json
 
 
 def load_jobs(root_dir: Path) -> dict[str, Any]:
-    return read_json(jobs_path(root_dir), "jobs.json")
+    file_path = jobs_path(root_dir)
+    if not file_path.exists():
+        return DEFAULT_JOBS.copy()
+    return read_json(file_path, "jobs.json")
 
 
 def check_job_poll(root_dir: Path, job_id: str) -> dict[str, str]:

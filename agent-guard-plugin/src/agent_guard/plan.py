@@ -32,40 +32,30 @@ def load_plan(root_dir: Path) -> dict[str, Any] | None:
     return data
 
 
-def _normalize_path_list(raw: Any, field_name: str, step_id: str) -> list[str]:
-    if raw is None:
-        return []
-    if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
-        raise RuntimeError(f"plan.yaml step {step_id} field {field_name} must be a list of strings.")
-    return list(raw)
+def _normalize_step(step: Any, index: int) -> dict[str, str]:
+    if not isinstance(step, dict):
+        raise RuntimeError(f"plan.yaml step at index {index} must be a mapping.")
+
+    normalized: dict[str, str] = {}
+    for field_name in ("name", "description", "status"):
+        value = step.get(field_name)
+        if not isinstance(value, str) or not value.strip():
+            raise RuntimeError(f"plan.yaml step at index {index} field {field_name} must be a non-empty string.")
+        normalized[field_name] = value
+    return normalized
 
 
-def get_plan_step(root_dir: Path, step_id: str) -> dict[str, Any] | None:
+def plan_steps(root_dir: Path) -> list[dict[str, str]]:
     data = load_plan(root_dir)
     if data is None:
-        return None
-
-    for step in data.get("steps", []):
-        if not isinstance(step, dict):
-            continue
-        if step.get("id") != step_id:
-            continue
-        stage = step.get("stage")
-        if stage is not None and not isinstance(stage, str):
-            raise RuntimeError(f"plan.yaml step {step_id} field stage must be a string.")
-        return {
-            **step,
-            "allowed_paths": _normalize_path_list(step.get("allowed_paths"), "allowed_paths", step_id),
-            "forbidden_paths": _normalize_path_list(step.get("forbidden_paths"), "forbidden_paths", step_id),
-        }
-    return None
+        return []
+    return [_normalize_step(step, index) for index, step in enumerate(data.get("steps", []))]
 
 
 def load_plan_summary(root_dir: Path) -> dict[str, Any]:
-    data = load_plan(root_dir)
-    if data is None:
-        return {"exists": False, "includesReview": False}
-
-    steps = data.get("steps", [])
-    includes_review = any(isinstance(step, dict) and step.get("stage") == "REVIEW" for step in steps)
-    return {"exists": True, "includesReview": includes_review}
+    steps = plan_steps(root_dir)
+    if not steps:
+        data = load_plan(root_dir)
+        if data is None:
+            return {"exists": False, "includesReview": False, "step_count": 0}
+    return {"exists": True, "includesReview": False, "step_count": len(steps)}

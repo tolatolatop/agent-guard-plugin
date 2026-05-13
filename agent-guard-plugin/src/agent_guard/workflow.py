@@ -4,82 +4,19 @@ import os
 from pathlib import Path
 from typing import Any
 
+from .install import packaged_skills_dir
 from .transitions import (
     STAGE_TRANSITIONS,
-    automatic_transitions,
     transition_conditions_for_stage,
-    transition_graph_lines,
-    workflow_commands,
 )
-
-GLOBAL_GATES = [
-    "Do not write outside allowed_paths.",
-    "Do not retry identical failing commands without code changes or failure analysis.",
-    "Do not claim completion unless can-finalize passes.",
-]
-
-STAGE_RULES = {
-    "IDLE": {
-        "goal": "Load task state and determine the next concrete step.",
-        "allowed_actions": ["read .agent state", "inspect plan and job files", "start-task when task_id is unset"],
-        "forbidden_actions": ["claim work is complete", "skip state initialization"],
-    },
-    "CLARIFYING": {
-        "goal": "Resolve task intent, assumptions, and missing inputs before implementation.",
-        "allowed_actions": ["clarify requirements", "inspect repository state", "capture unresolved risks"],
-        "forbidden_actions": ["start implementation before requirements are clear"],
-    },
-    "DESIGNING": {
-        "goal": "Write the smallest design needed to guide implementation safely.",
-        "allowed_actions": ["draft a design note", "identify artifacts and validation steps"],
-        "forbidden_actions": ["broad implementation before the design is settled"],
-    },
-    "PLANNING": {
-        "goal": "Break work into explicit steps with success conditions and path scope.",
-        "allowed_actions": ["write or refine plan.yaml", "set allowed and forbidden paths per step"],
-        "forbidden_actions": ["execute unplanned broad changes"],
-    },
-    "RED_TEST": {
-        "goal": "Create a failing test that proves the missing behavior.",
-        "allowed_actions": ["write tests", "run targeted tests", "save failing logs"],
-        "forbidden_actions": ["write production code", "claim implementation is complete"],
-    },
-    "GREEN_IMPL": {
-        "goal": "Implement the smallest code change that makes the targeted test pass.",
-        "allowed_actions": ["write minimal production code", "update tests if required", "run targeted verification"],
-        "forbidden_actions": ["broad refactors", "unrelated formatting", "dependency upgrades unless planned"],
-    },
-    "REVIEW": {
-        "goal": "Review the diff and capture review evidence without changing code.",
-        "allowed_actions": ["read diff", "read files", "write review artifact"],
-        "forbidden_actions": ["modify source unless review findings create a new implementation step"],
-    },
-    "VERIFY": {
-        "goal": "Run verification commands and record final evidence.",
-        "allowed_actions": ["run verification commands", "write verification logs"],
-        "forbidden_actions": ["new implementation work unless the state moves to NEEDS_FAILURE_ANALYSIS"],
-    },
-    "READY_TO_SUMMARIZE": {
-        "goal": "Summarize completed work and verification results without further edits.",
-        "allowed_actions": ["summarize work", "list changed files", "report verification commands and results"],
-        "forbidden_actions": ["further code changes"],
-    },
-    "NEEDS_FAILURE_ANALYSIS": {
-        "goal": "Stop retry loops and produce evidence-backed failure analysis before changing code again.",
-        "allowed_actions": ["inspect logs", "write failure-analysis.md", "identify minimal fix and next verification command"],
-        "forbidden_actions": ["rerun the same failing command without analysis", "continue source edits without evidence"],
-    },
-    "NEEDS_HUMAN": {
-        "goal": "Escalate blocked or risky work for human review.",
-        "allowed_actions": ["report blocker", "request approval", "pause risky actions"],
-        "forbidden_actions": ["continue sensitive or ambiguous work without approval"],
-    },
-    "DONE": {
-        "goal": "Task is complete; preserve state and await the next task.",
-        "allowed_actions": ["report completion evidence", "wait for next instruction"],
-        "forbidden_actions": ["resume editing under the completed task"],
-    },
-}
+from .workflow_spec import (
+    complete_step_allowed_from_stages,
+    global_gates,
+    stage_expected_artifacts,
+    stage_required_artifacts,
+    stage_spec,
+    transition_graph_mermaid,
+)
 
 def _parse_skill_metadata(file_path: Path, skill_id: str) -> dict[str, str]:
     fallback_title = skill_id.replace("-", " ").replace("_", " ").title()
@@ -145,7 +82,17 @@ def discover_skills(base_dir: Path) -> list[dict[str, str]]:
 
 
 def get_stage_rules(stage: str) -> dict[str, Any]:
-    return STAGE_RULES.get(stage, STAGE_RULES["IDLE"])
+    return stage_spec(stage)
+
+
+def _read_skill_body(file_path: Path) -> str:
+    text = file_path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    if lines and lines[0].strip() == "---":
+        for index, line in enumerate(lines[1:], start=1):
+            if line.strip() == "---":
+                return "\n".join(lines[index + 1 :]).strip()
+    return text.strip()
 
 
 def get_workflow_context(root_dir: Path, stage: str) -> dict[str, Any]:
@@ -153,21 +100,30 @@ def get_workflow_context(root_dir: Path, stage: str) -> dict[str, Any]:
     base_dir = (
         Path(os.environ["AGENT_GUARD_SKILLS_DIR"])
         if os.environ.get("AGENT_GUARD_SKILLS_DIR")
-        else Path(__file__).resolve().parents[2] / "docs" / "skills"
+        else packaged_skills_dir()
     )
     skill_catalog = discover_skills(base_dir)
+    using_workflow_skill = next(
+        (skill for skill in skill_catalog if skill.get("id") == "using-workflow"),
+        None,
+    )
     return {
         "current_stage_goal": rules["goal"],
-        "allowed_actions": rules["allowed_actions"],
-        "forbidden_actions": rules["forbidden_actions"],
+        "allowed_actions": rules.get("allowed_actions", []),
+        "forbidden_actions": rules.get("forbidden_actions", []),
+        "stage_allowed_paths": rules.get("allowed_paths", []),
+        "stage_forbidden_paths": rules.get("forbidden_paths", []),
+        "stage_expected_artifacts": stage_expected_artifacts(stage),
+        "stage_required_artifacts": stage_required_artifacts(stage),
+        "stage_writable": rules.get("writable"),
         "transitions_in": [source for source, targets in STAGE_TRANSITIONS.items() if stage in targets],
         "transitions_out": STAGE_TRANSITIONS.get(stage, []),
         "transition_conditions": transition_conditions_for_stage(stage),
-        "transition_graph": transition_graph_lines(),
-        "workflow_commands": workflow_commands(),
-        "automatic_transitions": automatic_transitions(),
-        "global_gates": GLOBAL_GATES,
+        "transition_graph_mermaid": transition_graph_mermaid(),
+        "complete_step_allowed_from_stages": complete_step_allowed_from_stages(),
+        "global_gates": global_gates(),
         "skill_catalog": skill_catalog,
+        "using_workflow_skill_body": _read_skill_body(Path(using_workflow_skill["absolute_path"])) if using_workflow_skill else "",
     }
 
 
@@ -182,18 +138,22 @@ def build_session_prompt_block(
     workflow_context: dict[str, Any],
     recent_archive: dict[str, Any] | None = None,
 ) -> str:
-    skill_paths = ", ".join(skill["absolute_path"] for skill in workflow_context["skill_catalog"])
     transitions_out = ", ".join(workflow_context["transitions_out"]) or "none"
     transition_conditions = " | ".join(
         f"{target}: {', '.join(conditions)}"
         for target, conditions in workflow_context["transition_conditions"].items()
     ) or "none"
-    transition_graph = " | ".join(workflow_context["transition_graph"])
-    command_help = " | ".join(workflow_context["workflow_commands"])
-    automatic_moves = " | ".join(workflow_context["automatic_transitions"])
     allowed = "; ".join(workflow_context["allowed_actions"])
     forbidden = "; ".join(workflow_context["forbidden_actions"])
     gates = "; ".join(workflow_context["global_gates"])
+    stage_allowed_paths = workflow_context["stage_allowed_paths"] or ["<none>"]
+    stage_forbidden_paths = workflow_context["stage_forbidden_paths"] or ["<none>"]
+    stage_expected_artifacts = workflow_context["stage_expected_artifacts"] or ["<none>"]
+    stage_required_artifacts = workflow_context["stage_required_artifacts"] or ["<none>"]
+    stage_writable = workflow_context["stage_writable"]
+    transition_graph = workflow_context["transition_graph_mermaid"]
+    complete_step_allowed = workflow_context["complete_step_allowed_from_stages"] or ["<none>"]
+    using_workflow_skill_body = workflow_context["using_workflow_skill_body"]
     archive_line = ""
     if recent_archive:
         archive_line = (
@@ -215,9 +175,17 @@ def build_session_prompt_block(
         f"Allowed actions: {allowed}\n"
         f"Forbidden actions: {forbidden}\n"
         f"Global gates: {gates}\n"
-        f"Transition graph: {transition_graph}\n"
-        f"Workflow commands: {command_help}\n"
-        f"Automatic transitions: {automatic_moves}\n"
-        f"Consult skills in this order: {skill_paths}"
+        "Transition graph (mermaid):\n"
+        "```mermaid\n"
+        f"{transition_graph}\n"
+        "```\n"
+        + (f"Stage writable mode: {stage_writable}\n" if stage_writable else "")
+        + f"Stage allowed paths: {stage_allowed_paths}\n"
+        + f"Stage forbidden paths: {stage_forbidden_paths}\n"
+        + f"Stage expected artifacts: {stage_expected_artifacts}\n"
+        + f"Stage required artifacts: {stage_required_artifacts}\n"
+        + f"Complete-step allowed from: {complete_step_allowed}\n"
+        "Using Workflow skill:\n"
+        f"{using_workflow_skill_body}"
         f"{archive_line}"
     )

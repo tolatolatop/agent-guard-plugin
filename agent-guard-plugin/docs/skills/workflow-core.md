@@ -66,23 +66,16 @@ Transition rules:
 
 - Prefer `complete-step` whenever a real workflow step finished and state must move that step from `remaining_steps` to `completed_steps`.
 - Use `advance-stage` for stage-only moves such as `CLARIFYING -> PLANNING` or when re-entering execution after explicit scope selection.
-- `PLANNING -> RED_TEST` or `PLANNING -> GREEN_IMPL` requires a selected step plus non-empty scope from `plan.yaml` or explicit CLI flags.
+- `PLANNING -> RED_TEST` or `PLANNING -> GREEN_IMPL` requires a selected step plus non-empty scope from explicit CLI flags or the current active state scope.
 - `GREEN_IMPL` must pass through `REVIEW` before entering `VERIFY`; direct `GREEN_IMPL -> VERIFY` is not allowed.
-- `REVIEW -> VERIFY` requires `.agent/artifacts/review.json` when the plan includes a review step.
+- `REVIEW -> VERIFY` requires `.agent/artifacts/review.json`.
 - `VERIFY -> READY_TO_SUMMARIZE` requires successful `last_verification`, no running jobs, empty `remaining_steps`, and the explicit `ready-to-summarize` command.
 - `READY_TO_SUMMARIZE -> DONE` is only legal through `mark-done`, which internally requires `agent-guard can-finalize` to pass.
 - `NEEDS_FAILURE_ANALYSIS` cannot exit until `.agent/artifacts/failure-analysis.md` exists.
 
-Automatic transitions already present:
-
-- `start-task`: `IDLE -> CLARIFYING`
-- `wizard`: initializes directly into the selected starting stage
-- `record-command`: failed non-red command -> `NEEDS_FAILURE_ANALYSIS`
-- `record-command` in `VERIFY`: updates `last_verification`
-- `reset-task`: archives the completed task and starts a new one in `CLARIFYING`
-
 Global workflow gates:
 
 - Respect `allowed_paths` and `forbidden_paths`.
+- When adding an artifact, state the allowed modification scope or directory up front.
 - Do not retry identical failures without analysis.
 - Do not finalize without passing `can-finalize`.
