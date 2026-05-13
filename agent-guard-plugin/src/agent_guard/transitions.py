@@ -15,7 +15,7 @@ STAGE_TRANSITIONS = {
     "DESIGNING": ["PLANNING"],
     "PLANNING": ["RED_TEST", "GREEN_IMPL"],
     "RED_TEST": ["GREEN_IMPL", "NEEDS_FAILURE_ANALYSIS"],
-    "GREEN_IMPL": ["REVIEW", "VERIFY", "NEEDS_FAILURE_ANALYSIS"],
+    "GREEN_IMPL": ["REVIEW", "NEEDS_FAILURE_ANALYSIS"],
     "REVIEW": ["VERIFY", "GREEN_IMPL"],
     "VERIFY": ["READY_TO_SUMMARIZE", "NEEDS_FAILURE_ANALYSIS"],
     "READY_TO_SUMMARIZE": ["DONE"],
@@ -45,7 +45,6 @@ TRANSITION_CONDITIONS = {
     },
     "GREEN_IMPL": {
         "REVIEW": ["current impl step must be completed"],
-        "VERIFY": ["current impl step must be completed"],
         "NEEDS_FAILURE_ANALYSIS": ["unexpected failure requires analysis"],
     },
     "REVIEW": {
@@ -90,7 +89,7 @@ def transition_graph_lines() -> list[str]:
         "DESIGNING -> PLANNING",
         "PLANNING -> RED_TEST | GREEN_IMPL",
         "RED_TEST -> GREEN_IMPL | NEEDS_FAILURE_ANALYSIS",
-        "GREEN_IMPL -> REVIEW | VERIFY | NEEDS_FAILURE_ANALYSIS",
+        "GREEN_IMPL -> REVIEW | NEEDS_FAILURE_ANALYSIS",
         "REVIEW -> VERIFY | GREEN_IMPL",
         "VERIFY -> READY_TO_SUMMARIZE | NEEDS_FAILURE_ANALYSIS",
         "READY_TO_SUMMARIZE -> DONE",

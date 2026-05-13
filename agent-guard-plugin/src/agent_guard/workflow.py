@@ -81,42 +81,67 @@ STAGE_RULES = {
     },
 }
 
-SKILL_CATALOG = [
-    {
-        "id": "workflow-navigator",
-        "title": "Workflow Navigator",
-        "path": "docs/skills/workflow-navigator.md",
-        "purpose": "Top-level navigation skill that tells the model how to choose the next workflow skill.",
-        "trigger_when": "Always consult first at session start and whenever the current step is unclear.",
-    },
-    {
-        "id": "workflow-core",
-        "title": "Core Workflow",
-        "path": "docs/skills/workflow-core.md",
-        "purpose": "Canonical workflow stages, transitions, and guard expectations.",
-        "trigger_when": "Use when deciding what stage comes next or what actions are legal in the current stage.",
-    },
-    {
-        "id": "failure-analysis",
-        "title": "Failure Analysis",
-        "path": "docs/skills/failure-analysis.md",
-        "purpose": "Evidence-first handling for repeated failures and blocked verification.",
-        "trigger_when": "Use when stage is NEEDS_FAILURE_ANALYSIS or the same command failed repeatedly.",
-    },
-    {
-        "id": "finalization-checklist",
-        "title": "Finalization Checklist",
-        "path": "docs/skills/finalization-checklist.md",
-        "purpose": "Rules for review artifacts, verification evidence, and safe completion.",
-        "trigger_when": "Use before summarizing, finalizing, or reporting completion.",
-    },
-]
+def _parse_skill_metadata(file_path: Path, skill_id: str) -> dict[str, str]:
+    fallback_title = skill_id.replace("-", " ").replace("_", " ").title()
+    metadata = {
+        "title": fallback_title,
+        "description": "",
+    }
+    try:
+        lines = file_path.read_text(encoding="utf-8").splitlines()
+        if lines and lines[0].strip() == "---":
+            for line in lines[1:]:
+                stripped = line.strip()
+                if stripped == "---":
+                    break
+                if ":" not in stripped:
+                    continue
+                key, value = stripped.split(":", 1)
+                normalized_key = key.strip().lower()
+                normalized_value = value.strip()
+                if normalized_key == "name" and normalized_value:
+                    metadata["title"] = normalized_value
+                elif normalized_key == "description" and normalized_value:
+                    metadata["description"] = normalized_value
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("# "):
+                metadata["title"] = metadata["title"] or stripped[2:].strip()
+                if metadata["title"] == fallback_title:
+                    metadata["title"] = stripped[2:].strip()
+                break
+    except OSError:
+        return metadata
+    return metadata
 
 
-def skill_absolute_path(base_dir: Path, skill: dict[str, str]) -> Path:
-    if base_dir.name == "skills" and base_dir.parent.name == ".claude":
-        return base_dir / skill["id"] / "SKILL.md"
-    return base_dir / Path(skill["path"]).name
+def discover_skills(base_dir: Path) -> list[dict[str, str]]:
+    if not base_dir.exists():
+        return []
+    discovered: dict[str, dict[str, str]] = {}
+
+    for file_path in sorted(base_dir.glob("*.md")):
+        skill_id = file_path.stem
+        discovered[skill_id] = {
+            "id": skill_id,
+            **_parse_skill_metadata(file_path, skill_id),
+            "path": f"docs/skills/{skill_id}.md",
+            "absolute_path": str(file_path),
+        }
+
+    for skill_dir in sorted(path for path in base_dir.iterdir() if path.is_dir()):
+        skill_file = skill_dir / "SKILL.md"
+        if not skill_file.exists():
+            continue
+        skill_id = skill_dir.name
+        discovered[skill_id] = {
+            "id": skill_id,
+            **_parse_skill_metadata(skill_file, skill_id),
+            "path": f"docs/skills/{skill_id}.md",
+            "absolute_path": str(skill_file),
+        }
+
+    return [discovered[skill_id] for skill_id in sorted(discovered)]
 
 
 def get_stage_rules(stage: str) -> dict[str, Any]:
@@ -125,7 +150,12 @@ def get_stage_rules(stage: str) -> dict[str, Any]:
 
 def get_workflow_context(root_dir: Path, stage: str) -> dict[str, Any]:
     rules = get_stage_rules(stage)
-    base_dir = Path(os.environ["AGENT_GUARD_SKILLS_DIR"]) if os.environ.get("AGENT_GUARD_SKILLS_DIR") else root_dir / "docs" / "skills"
+    base_dir = (
+        Path(os.environ["AGENT_GUARD_SKILLS_DIR"])
+        if os.environ.get("AGENT_GUARD_SKILLS_DIR")
+        else Path(__file__).resolve().parents[2] / "docs" / "skills"
+    )
+    skill_catalog = discover_skills(base_dir)
     return {
         "current_stage_goal": rules["goal"],
         "allowed_actions": rules["allowed_actions"],
@@ -137,10 +167,7 @@ def get_workflow_context(root_dir: Path, stage: str) -> dict[str, Any]:
         "workflow_commands": workflow_commands(),
         "automatic_transitions": automatic_transitions(),
         "global_gates": GLOBAL_GATES,
-        "skill_catalog": [
-            {**skill, "absolute_path": str(skill_absolute_path(base_dir, skill))}
-            for skill in SKILL_CATALOG
-        ],
+        "skill_catalog": skill_catalog,
     }
 
 

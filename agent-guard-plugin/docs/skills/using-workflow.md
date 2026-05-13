@@ -1,4 +1,9 @@
-# Workflow Navigator
+---
+name: using-workflow
+description: Top-level navigation skill that routes the agent to the right workflow skill and hard gate.
+---
+
+# Using Workflow
 
 This is the top-level navigation skill for `agent-guard`.
 

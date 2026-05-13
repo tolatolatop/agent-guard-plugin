@@ -176,6 +176,25 @@ def test_transition_appends_event() -> None:
     assert events[-1]["to_stage"] == "PLANNING"
 
 
+def test_green_impl_cannot_advance_directly_to_verify() -> None:
+    root_dir = make_temp_repo()
+    write_state(
+        root_dir,
+        task_id="password-reset",
+        stage="GREEN_IMPL",
+        current_step="green-001",
+        completed_steps=["red-001"],
+        remaining_steps=["green-001"],
+    )
+
+    try:
+        advance_stage(root_dir, "VERIFY")
+    except RuntimeError as exc:
+        assert "Illegal transition" in str(exc)
+    else:
+        raise AssertionError("Expected GREEN_IMPL -> VERIFY to fail")
+
+
 def test_cli_representative_flow_from_start_to_done() -> None:
     root_dir = make_temp_repo()
     write_plan(

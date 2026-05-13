@@ -1,3 +1,8 @@
+---
+name: failure-analysis
+description: Evidence-first recovery guide for repeated failures, blocked verification, and analysis mode.
+---
+
 # Failure Analysis
 
 Use when the same failure repeats, when the stage is `NEEDS_FAILURE_ANALYSIS`, or when verification fails without an obvious fix.

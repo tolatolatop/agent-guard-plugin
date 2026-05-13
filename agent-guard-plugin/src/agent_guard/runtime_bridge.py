@@ -166,8 +166,13 @@ def _handle_post_command(cwd: Path, payload: dict[str, Any]) -> None:
 def _handle_stop(cwd: Path) -> None:
     state = load_state(cwd)
     stage = state.get("stage")
-    if stage not in {"READY_TO_SUMMARIZE", "DONE"} and state.get("can_finalize") is not True:
+    if stage in {"IDLE", "CLARIFYING", "DESIGNING", "PLANNING", "NEEDS_HUMAN", "DONE"}:
         raise SystemExit(0)
+    if stage != "READY_TO_SUMMARIZE" and state.get("can_finalize") is not True:
+        _fail(
+            "agent-guard blocked final response: "
+            f"stage {stage} is still active. Reach REVIEW completion and READY_TO_SUMMARIZE, or move to an allowed stop stage first."
+        )
     code, payload = _cli_json(["can-finalize"], cwd)
     if code != 0:
         reasons = payload.get("reasons") or [payload.get("reason") or payload.get("error") or "finalization blocked"]

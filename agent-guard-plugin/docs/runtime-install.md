@@ -108,7 +108,7 @@ Artifact retention:
 
 `session-start` now returns two layers of prompt-ready guidance:
 
-- a prominent `meta_skill` navigator pointing at `docs/skills/workflow-navigator.md`
+- a prominent `meta_skill` navigator pointing at `docs/skills/using-workflow.md`
 - a `workflow` block with current-stage goal, legal transitions, action constraints, and skill references
 
 The intent is to inject only a concise navigator into the visible prompt, while leaving the full workflow and specialist skills on disk for on-demand loading.

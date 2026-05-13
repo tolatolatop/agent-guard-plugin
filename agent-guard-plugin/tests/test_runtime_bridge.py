@@ -105,7 +105,7 @@ def test_bridge_session_start_prefers_prompt_block_output() -> None:
     assert payload["hookSpecificOutput"]["additionalContext"].startswith("AGENT-GUARD NAVIGATOR")
 
 
-def test_bridge_stop_does_not_block_mid_task() -> None:
+def test_bridge_stop_allows_clarifying() -> None:
     root_dir = make_temp_repo()
     save_state(
         root_dir,
@@ -127,11 +127,143 @@ def test_bridge_stop_does_not_block_mid_task() -> None:
     assert result.stderr == ""
 
 
+def test_bridge_stop_allows_designing() -> None:
+    root_dir = make_temp_repo()
+    save_state(
+        root_dir,
+        {
+            "task_id": "password-reset",
+            "stage": "DESIGNING",
+            "current_step": "design-001",
+            "completed_steps": [],
+            "remaining_steps": ["design-001"],
+            "allowed_paths": [],
+            "forbidden_paths": [],
+            "can_finalize": False,
+            "last_verification": None,
+            "needs_human": False,
+        },
+    )
+    result = run_bridge(root_dir, "stop", {})
+    assert result.returncode == 0
+    assert result.stderr == ""
+
+
+def test_bridge_stop_allows_planning() -> None:
+    root_dir = make_temp_repo()
+    save_state(
+        root_dir,
+        {
+            "task_id": "password-reset",
+            "stage": "PLANNING",
+            "current_step": "plan-001",
+            "completed_steps": [],
+            "remaining_steps": ["plan-001"],
+            "allowed_paths": [],
+            "forbidden_paths": [],
+            "can_finalize": False,
+            "last_verification": None,
+            "needs_human": False,
+        },
+    )
+    result = run_bridge(root_dir, "stop", {})
+    assert result.returncode == 0
+    assert result.stderr == ""
+
+
+def test_bridge_stop_blocks_red_test() -> None:
+    root_dir = make_temp_repo()
+    save_state(
+        root_dir,
+        {
+            "task_id": "password-reset",
+            "stage": "RED_TEST",
+            "current_step": "red-001",
+            "completed_steps": [],
+            "remaining_steps": ["red-001"],
+            "allowed_paths": ["tests/**"],
+            "forbidden_paths": ["src/**"],
+            "can_finalize": False,
+            "last_verification": None,
+            "needs_human": False,
+        },
+    )
+    result = run_bridge(root_dir, "stop", {})
+    assert result.returncode == 2
+    assert "stage RED_TEST is still active" in result.stderr
+
+
+def test_bridge_stop_allows_needs_human() -> None:
+    root_dir = make_temp_repo()
+    save_state(
+        root_dir,
+        {
+            "task_id": "password-reset",
+            "stage": "NEEDS_HUMAN",
+            "current_step": None,
+            "completed_steps": [],
+            "remaining_steps": ["clarify-001"],
+            "allowed_paths": [],
+            "forbidden_paths": [],
+            "can_finalize": False,
+            "last_verification": None,
+            "needs_human": True,
+        },
+    )
+    result = run_bridge(root_dir, "stop", {})
+    assert result.returncode == 0
+    assert result.stderr == ""
+
+
+def test_bridge_stop_allows_idle() -> None:
+    root_dir = make_temp_repo()
+    save_state(
+        root_dir,
+        {
+            "task_id": None,
+            "stage": "IDLE",
+            "current_step": None,
+            "completed_steps": [],
+            "remaining_steps": [],
+            "allowed_paths": [],
+            "forbidden_paths": [],
+            "can_finalize": False,
+            "last_verification": None,
+            "needs_human": False,
+        },
+    )
+    result = run_bridge(root_dir, "stop", {})
+    assert result.returncode == 0
+    assert result.stderr == ""
+
+
+def test_bridge_stop_allows_done_without_rechecking_finalize() -> None:
+    root_dir = make_temp_repo()
+    save_state(
+        root_dir,
+        {
+            "task_id": "password-reset",
+            "stage": "DONE",
+            "current_step": None,
+            "completed_steps": ["verify-001"],
+            "remaining_steps": [],
+            "allowed_paths": [],
+            "forbidden_paths": [],
+            "can_finalize": False,
+            "last_verification": None,
+            "needs_human": False,
+        },
+    )
+    result = run_bridge(root_dir, "stop", {})
+    assert result.returncode == 0
+    assert result.stderr == ""
+
+
 def test_bridge_session_start_uses_installed_skills_dir() -> None:
     root_dir = make_temp_repo()
     skills_dir = root_dir / ".agent-guard" / "skills"
     skills_dir.mkdir(parents=True, exist_ok=True)
-    (skills_dir / "workflow-navigator.md").write_text("nav\n", encoding="utf-8")
+    (skills_dir / "using-workflow.md").write_text("nav\n", encoding="utf-8")
     (skills_dir / "workflow-core.md").write_text("core\n", encoding="utf-8")
     (skills_dir / "failure-analysis.md").write_text("fail\n", encoding="utf-8")
     (skills_dir / "finalization-checklist.md").write_text("final\n", encoding="utf-8")
@@ -147,4 +279,4 @@ def test_bridge_session_start_uses_installed_skills_dir() -> None:
     )
     assert result.returncode == 0
     payload = json.loads(result.stdout)
-    assert "workflow-navigator.md" in payload["hookSpecificOutput"]["additionalContext"]
+    assert "using-workflow.md" in payload["hookSpecificOutput"]["additionalContext"]

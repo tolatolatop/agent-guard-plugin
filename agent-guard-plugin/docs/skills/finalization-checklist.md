@@ -1,3 +1,8 @@
+---
+name: finalization-checklist
+description: Completion checklist for verification evidence, review artifacts, and finalization gates.
+---
+
 # Finalization Checklist
 
 Use this skill before reporting completion.
