@@ -12,6 +12,11 @@ def make_dirs() -> tuple[Path, Path]:
     return root, home
 
 
+def assert_dir_empty(path: Path) -> None:
+    assert path.exists()
+    assert list(path.iterdir()) == []
+
+
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -30,6 +35,7 @@ def test_install_writes_claude_code_project_settings_with_hook_commands() -> Non
     assert config["hooks"]["SessionStart"][0]["hooks"][0]["async"] is False
     assert (root / ".claude" / "skills" / "workflow-navigator" / "SKILL.md").exists()
     assert (root / ".claude" / "skills" / "workflow-core" / "SKILL.md").exists()
+    assert_dir_empty(home)
 
 
 def test_install_claude_removes_legacy_flat_skill_files() -> None:
@@ -55,6 +61,7 @@ def test_install_writes_codex_hooks_json() -> None:
     assert "pre-dispatch" in json.dumps(hooks)
     assert "AGENT_GUARD_SKILLS_DIR" in json.dumps(hooks)
     assert (root / ".agent-guard" / "skills" / "workflow-core.md").exists()
+    assert_dir_empty(home)
 
 
 def test_install_writes_opencode_loader() -> None:
@@ -67,7 +74,20 @@ def test_install_writes_opencode_loader() -> None:
     assert '"tool.execute.before"' in source
     assert "agent-guard-bridge" in source
     assert "AGENT_GUARD_SKILLS_DIR" in source
-    assert (root / ".agent-guard" / "skills" / "finalization-checklist.md").exists()
+    assert (root / ".opencode" / "skills" / "finalization-checklist" / "SKILL.md").exists()
+    assert_dir_empty(home)
+
+
+def test_install_opencode_removes_legacy_flat_skill_files() -> None:
+    root, home = make_dirs()
+    legacy_file = root / ".opencode" / "skills" / "workflow-navigator.md"
+    legacy_file.parent.mkdir(parents=True, exist_ok=True)
+    legacy_file.write_text("legacy\n", encoding="utf-8")
+
+    install_runtime(["--runtime", "opencode", "--scope", "project"], root, home, PLUGIN_ROOT)
+
+    assert not legacy_file.exists()
+    assert (root / ".opencode" / "skills" / "workflow-navigator" / "SKILL.md").exists()
 
 
 def test_opencode_loader_stays_thin() -> None:
@@ -112,7 +132,7 @@ def test_uninstall_can_be_cancelled() -> None:
 
     assert result["cancelled"] is True
     assert (root / ".opencode" / "plugins" / "agent-guard.js").exists()
-    assert (root / ".agent-guard" / "skills" / "workflow-navigator.md").exists()
+    assert (root / ".opencode" / "skills" / "workflow-navigator" / "SKILL.md").exists()
 
 
 def test_uninstall_claude_removes_skills_bundle_after_confirmation() -> None:

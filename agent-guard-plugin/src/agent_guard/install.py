@@ -59,6 +59,12 @@ def claude_skills_install_dir(scope: str, cwd: Path, home_dir: Path) -> Path:
     return cwd / ".claude" / "skills" if scope == "project" else home_dir / ".claude" / "skills"
 
 
+def opencode_skills_install_dir(scope: str, cwd: Path, home_dir: Path) -> Path:
+    if scope == "project":
+        return cwd / ".opencode" / "skills"
+    return home_dir / ".config" / "opencode" / "skills"
+
+
 def source_skills_dir(plugin_root: Path) -> Path:
     return plugin_root / "docs" / "skills"
 
@@ -78,6 +84,20 @@ def install_skills_bundle(target_dir: Path, plugin_root: Path) -> list[str]:
 
 
 def install_claude_skills_bundle(target_dir: Path, plugin_root: Path) -> list[str]:
+    target_dir.mkdir(parents=True, exist_ok=True)
+    written_files: list[str] = []
+    for source_file in sorted(source_skills_dir(plugin_root).glob("*.md")):
+        legacy_target = target_dir / source_file.name
+        if legacy_target.exists():
+            legacy_target.unlink()
+        target_file = target_dir / skill_slug_from_source(source_file) / "SKILL.md"
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_file, target_file)
+        written_files.append(str(target_file))
+    return written_files
+
+
+def install_opencode_skills_bundle(target_dir: Path, plugin_root: Path) -> list[str]:
     target_dir.mkdir(parents=True, exist_ok=True)
     written_files: list[str] = []
     for source_file in sorted(source_skills_dir(plugin_root).glob("*.md")):
@@ -293,8 +313,8 @@ export const AgentGuardPlugin = async () => {{
 def install_opencode(cwd: Path, home_dir: Path, scope: str, plugin_root: Path) -> dict[str, Any]:
     plugin_path = opencode_plugin_file(scope, cwd, home_dir)
     plugin_path.parent.mkdir(parents=True, exist_ok=True)
-    skills_dir = shared_skills_install_dir(scope, cwd, home_dir)
-    skill_files = install_skills_bundle(skills_dir, plugin_root)
+    skills_dir = opencode_skills_install_dir(scope, cwd, home_dir)
+    skill_files = install_opencode_skills_bundle(skills_dir, plugin_root)
     plugin_path.write_text(build_opencode_plugin_source(plugin_root, skills_dir), encoding="utf-8")
     return {
         "runtime": "opencode",
@@ -304,7 +324,7 @@ def install_opencode(cwd: Path, home_dir: Path, scope: str, plugin_root: Path) -
             "Installed an OpenCode JS loader that forwards plugin events to the Python bridge.",
             "All policy logic remains in Python; the JS file only marshals plugin events.",
             "OpenCode final-response gating remains best-effort because its plugin lifecycle differs from Claude Code and Codex.",
-            "Workflow skills were copied into a local agent-guard skills directory and injected via AGENT_GUARD_SKILLS_DIR.",
+            "Workflow skills were installed into OpenCode's native .opencode/skills/<skill>/SKILL.md layout and injected via AGENT_GUARD_SKILLS_DIR.",
         ],
     }
 
@@ -468,7 +488,7 @@ def plan_uninstall_codex(cwd: Path, home_dir: Path, scope: str) -> dict[str, Any
 
 def plan_uninstall_opencode(cwd: Path, home_dir: Path, scope: str) -> dict[str, Any]:
     plugin_path = opencode_plugin_file(scope, cwd, home_dir)
-    skills_dir = shared_skills_install_dir(scope, cwd, home_dir)
+    skills_dir = opencode_skills_install_dir(scope, cwd, home_dir)
     changes: list[dict[str, str]] = []
 
     if plugin_path.exists():
@@ -512,7 +532,7 @@ def plan_uninstall_runtime(argv: list[str], cwd: Path, home_dir: Path | None) ->
         skills_dir = shared_skills_install_dir(str(scope), cwd, resolved_home)
     else:
         plan = plan_uninstall_opencode(cwd, resolved_home, str(scope))
-        skills_dir = shared_skills_install_dir(str(scope), cwd, resolved_home)
+        skills_dir = opencode_skills_install_dir(str(scope), cwd, resolved_home)
     if skills_dir.exists():
         plan["changes"].append(
             {

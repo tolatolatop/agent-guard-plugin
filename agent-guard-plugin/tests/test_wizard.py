@@ -31,7 +31,7 @@ def test_wizard_writes_state_and_plan_from_plain_streams() -> None:
 
     result = run_wizard(root, answers, StringIO())
 
-    assert result["task_id"] == root.name.replace("_", "-")
+    assert result["task_id"] == slugify_task_id(root.name)
     state = load_state(root)
     assert state["stage"] == "RED_TEST"
     assert state["current_step"] == "red-001"
