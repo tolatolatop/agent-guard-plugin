@@ -1,11 +1,3 @@
-# Standard grouped DSL workflow definition for agent-guard.
-#
-# This file is intentionally declarative:
-# - `workflow` identifies the policy document
-# - `globals` defines cross-stage hard gates
-# - `stages` define intent, permissions, transitions, and evidence
-# - built-in rule names must come from the evaluator registry in code
-
 version: 1
 
 workflow:
@@ -13,18 +5,10 @@ workflow:
   title: Standard Workflow Example
   description: Reference workflow showing policy-driven task execution for agent-guard.
 
-global_gates:
-  - Do not write outside stage permissions.
-  - Do not retry identical failing commands without code changes or failure analysis.
-  - Do not claim completion unless can-finalize passes.
-  - Do not modify .agent/state.json directly; use agent-guard workflow commands to change task state.
-
 globals:
   paths:
-    # Hard-blocked managed files. These are not ordinary task-scoped paths.
     protected:
       - .agent/state.json
-    # Sensitive paths are blocked unless a stage explicitly allows them.
     sensitive:
       - .github/**
       - infra/**
@@ -36,22 +20,18 @@ globals:
       - Cargo.lock
 
   failures:
-    # Number of identical failures allowed before analysis becomes mandatory.
     repeat_threshold: 2
-    # Directories used to fingerprint whether code changed between retries.
     fingerprint_roots:
       - src
       - tests
 
   finalization:
-    # Built-in rule names evaluated by the rule registry in code.
     require:
       - remaining_steps_empty
       - no_running_jobs
       - successful_last_verification
       - can_finalize_flag
       - all_plan_steps_terminal
-    # User-facing messages emitted when a required rule fails.
     messages:
       remaining_steps_empty: remaining_steps must be empty
       no_running_jobs: running jobs still exist
@@ -60,7 +40,6 @@ globals:
       all_plan_steps_terminal: all plan steps must be done or failed
 
   wizard:
-    # Stages exposed as entry choices by the interactive wizard.
     start_stages:
       - CLARIFYING
       - PLANNING

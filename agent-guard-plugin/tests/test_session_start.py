@@ -21,6 +21,12 @@ def test_session_start_includes_meta_skill_and_workflow_context() -> None:
     reminder = get_session_reminder(root_dir)
 
     assert reminder["meta_skill"]["path"] == "docs/skills/using-workflow.md"
+    assert reminder["workflow"]["workflow_metadata"]["id"] == "standard-ddd-example"
+    assert reminder["workflow"]["policy_roles"]["globals"]["paths"] == "hard_gate"
+    assert reminder["workflow"]["stage_policy"]["intent"]["goal"] == reminder["workflow"]["current_stage_goal"]
+    assert reminder["workflow"]["stage_policy"]["permissions"]["write"]["allow"] == ["tests/**"]
+    assert reminder["workflow"]["soft_prompt"]["goal"] == reminder["workflow"]["current_stage_goal"]
+    assert reminder["workflow"]["hard_gates"]["write_allow"] == ["tests/**"]
     assert reminder["workflow"]["current_stage_goal"]
     assert "GREEN_IMPL" in reminder["workflow"]["transitions_out"]
     assert reminder["workflow"]["transition_graph_mermaid"]
@@ -31,6 +37,8 @@ def test_session_start_includes_meta_skill_and_workflow_context() -> None:
     assert reminder["workflow"]["stage_required_artifacts"] == []
     assert reminder["workflow"]["complete_step_allowed_from_stages"] == ["RED_TEST", "GREEN_IMPL", "REVIEW", "VERIFY"]
     assert "# Using Workflow" in reminder["prompt_block"]
+    assert "Soft guidance:" in reminder["prompt_block"]
+    assert "Hard gates:" in reminder["prompt_block"]
     assert "Allowed actions:" in reminder["prompt_block"]
     assert "Transition graph (mermaid):" in reminder["prompt_block"]
     assert "Allowed paths:" not in reminder["prompt_block"]

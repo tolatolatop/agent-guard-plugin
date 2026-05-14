@@ -16,6 +16,7 @@ from ..state import (
     failures_path,
     jobs_path,
     read_json,
+    save_state,
     state_path,
 )
 
@@ -35,10 +36,7 @@ class StateRepository:
 
     def save(self, session: TaskSession) -> TaskSession:
         """Persist the task session aggregate."""
-        state_path(self.root_dir).write_text(
-            json.dumps(session.to_mapping(), indent=2) + "\n",
-            encoding="utf-8",
-        )
+        save_state(self.root_dir, session.to_mapping())
         return session
 
 
@@ -156,4 +154,3 @@ class EventsRepository:
         with file_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload) + "\n")
         return payload
-

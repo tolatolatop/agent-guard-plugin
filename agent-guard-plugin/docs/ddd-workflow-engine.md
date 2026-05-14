@@ -4,6 +4,10 @@
 
 Turn `agent-guard` into a workflow-driven engine whose execution semantics come from a stable DSL, not from scattered branch logic in hooks, CLI glue, or prompt assembly.
 
+For a more explicit split between soft prompts, hard gates, state flow, and write control, see `docs/ddd-dsl-layers.md`.
+
+For a concrete grouped DSL example that is semantically aligned with the current standard workflow, see `docs/grouped-workflow.example.yaml`.
+
 The workflow DSL should describe:
 
 - stage intent

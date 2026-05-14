@@ -394,3 +394,36 @@ def test_failure_analysis_artifact_must_be_updated_in_current_stage() -> None:
         ["advance-stage", "--to", "GREEN_IMPL", "--step", "green-001"],
     )
     assert code == 0
+
+
+def test_failure_analysis_artifact_format_is_checked_when_configured() -> None:
+    """Test that required artifacts can enforce a configured content regex."""
+    root_dir = make_temp_repo()
+    write_state(
+        root_dir,
+        task_id="password-reset",
+        stage="VERIFY",
+        current_step="verify-001",
+    )
+    invoke_cli(root_dir, ["record-command", "--cmd", "pytest", "--exit-code", "1", "--log", ".agent/artifacts/final-verification.log"])
+
+    analysis_artifact = root_dir / ".agent" / "artifacts" / "failure-analysis.md"
+    analysis_artifact.write_text("missing heading\n", encoding="utf-8")
+    current_mtime = analysis_artifact.stat().st_mtime_ns
+    os.utime(analysis_artifact, ns=(current_mtime + 1_000_000, current_mtime + 1_000_000))
+
+    code, payload = invoke_cli(
+        root_dir,
+        ["advance-stage", "--to", "GREEN_IMPL", "--step", "green-001"],
+    )
+    assert code == 1
+    assert payload["error"].endswith("failure-analysis.md must start with the Failure Summary section.")
+
+    previous_mtime = analysis_artifact.stat().st_mtime_ns
+    analysis_artifact.write_text("## Failure Summary\nvalid\n", encoding="utf-8")
+    os.utime(analysis_artifact, ns=(previous_mtime + 1_000_000, previous_mtime + 1_000_000))
+    code, _ = invoke_cli(
+        root_dir,
+        ["advance-stage", "--to", "GREEN_IMPL", "--step", "green-001"],
+    )
+    assert code == 0

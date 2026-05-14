@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import re
 from typing import Any, Callable
 
 from .domain.models import TaskSession
@@ -120,17 +121,18 @@ def ensure_stage_artifact_snapshot(root_dir: Path, stage: str) -> dict[str, Any]
 
 def required_artifact_exit_failures(root_dir: Path, stage: str) -> list[str]:
     """Return required-artifact exit failures for the current stage."""
-    from .workflow_spec import stage_required_artifacts
+    from .workflow_spec import stage_required_artifact_rules
 
-    required = stage_required_artifacts(stage)
-    if not required:
+    required_rules = stage_required_artifact_rules(stage)
+    if not required_rules:
         return []
 
     snapshot = ensure_stage_artifact_snapshot(root_dir, stage)
     entered_at = snapshot.get("entered_at") or "the current stage"
     recorded = snapshot.get("artifacts", {})
     failures: list[str] = []
-    for artifact_path in required:
+    for rule in required_rules:
+        artifact_path = rule["path"]
         current_mtime = _artifact_mtime_ns(root_dir, artifact_path)
         previous_mtime = None
         details = recorded.get(artifact_path)
@@ -141,6 +143,12 @@ def required_artifact_exit_failures(root_dir: Path, stage: str) -> list[str]:
             continue
         if previous_mtime is not None and int(current_mtime) <= int(previous_mtime):
             failures.append(f"{artifact_path} must be updated after entering {stage} at {entered_at}.")
+            continue
+        matches = rule.get("matches")
+        if matches:
+            contents = (root_dir / artifact_path).read_text(encoding="utf-8")
+            if re.search(matches, contents, re.MULTILINE) is None:
+                failures.append(rule.get("message") or f"{artifact_path} does not match the required format.")
     return failures
 
 
