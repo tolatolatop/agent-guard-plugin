@@ -52,10 +52,50 @@ def plan_steps(root_dir: Path) -> list[dict[str, str]]:
     return [_normalize_step(step, index) for index, step in enumerate(data.get("steps", []))]
 
 
+def nonterminal_plan_steps(root_dir: Path) -> list[dict[str, str]]:
+    terminal_statuses = {"done", "failed"}
+    return [
+        step for step in plan_steps(root_dir) if step.get("status", "").strip().lower() not in terminal_statuses
+    ]
+
+
+def first_nonterminal_plan_step_name(root_dir: Path) -> str | None:
+    pending = nonterminal_plan_steps(root_dir)
+    return pending[0]["name"] if pending else None
+
+
+def update_plan_step_status(root_dir: Path, step_name: str, status: str) -> dict[str, Any]:
+    data = load_plan(root_dir)
+    if data is None:
+        raise RuntimeError("plan.yaml does not exist.")
+
+    steps = data.get("steps", [])
+    updated = False
+    for index, step in enumerate(steps):
+        normalized = _normalize_step(step, index)
+        if normalized["name"] != step_name:
+            continue
+        step["status"] = status
+        updated = True
+        break
+
+    if not updated:
+        raise RuntimeError(f"plan.yaml step {step_name} was not found.")
+
+    plan_path(root_dir).write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    return data
+
+
 def load_plan_summary(root_dir: Path) -> dict[str, Any]:
     steps = plan_steps(root_dir)
     if not steps:
         data = load_plan(root_dir)
         if data is None:
             return {"exists": False, "includesReview": False, "step_count": 0}
-    return {"exists": True, "includesReview": False, "step_count": len(steps)}
+    pending = nonterminal_plan_steps(root_dir)
+    return {
+        "exists": True,
+        "includesReview": False,
+        "step_count": len(steps),
+        "all_steps_terminal": not pending,
+    }

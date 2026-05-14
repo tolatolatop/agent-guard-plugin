@@ -56,7 +56,7 @@ steps:
 When reading an existing plan:
 
 1. Check that `steps` is a list.
-2. Find the active step by `current_step` from `.agent/state.json`.
+2. Find the first non-terminal step by scanning `status`.
 3. Confirm the step name exists at most once.
 4. Read `description` to understand the intended outcome.
 5. Read `status` to understand human-visible progress.
@@ -75,7 +75,7 @@ When writing or updating a plan:
 
 ## Step progression
 
-Use `complete-step` when a real planned step finished and state should move that step from remaining to completed.
+Use `complete-step` when a real planned step finished and its `status` in `plan.yaml` should be set to `done`.
 
 Use `advance-stage` when:
 
@@ -88,4 +88,4 @@ Use `advance-stage` when:
 - writing `steps` as a mapping instead of a list
 - trying to store `allowed_paths`, `forbidden_paths`, or stage policy in the plan
 - making one step too broad to have a clear done condition
-- changing step names after they are already referenced by `current_step`, `remaining_steps`, or `completed_steps`
+- changing step names after agents have started using them as stable plan identifiers

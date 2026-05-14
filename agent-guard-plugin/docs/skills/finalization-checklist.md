@@ -9,19 +9,15 @@ Use this skill before reporting completion.
 
 Completion requires:
 
-- `remaining_steps` is empty
 - no running jobs remain
-- latest final verification has `exit_code == 0`
-- required review artifact exists when the plan includes review
 - `can-finalize` passes
+- if `plan.yaml` exists, every step status is `done` or `failed`
 
 Completion evidence should include:
 
 - completed steps
-- verification command
-- exit code
-- log path
-- review artifact when applicable
+- relevant validation evidence, if any
+- unresolved risks or skipped checks
 
 Invalid completion evidence:
 

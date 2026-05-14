@@ -9,6 +9,7 @@ from typing import Any
 
 from .cli import run_command
 from .state import artifacts_dir, load_state
+from .workflow_spec import stage_forbid_needs_human_display
 
 
 def _load_stdin_json() -> dict[str, Any]:
@@ -182,6 +183,11 @@ def _handle_post_command(cwd: Path, payload: dict[str, Any]) -> None:
 def _handle_stop(cwd: Path) -> None:
     state = load_state(cwd)
     stage = state.get("stage")
+    forbid_display = stage_forbid_needs_human_display(str(stage)) if stage else None
+    if forbid_display:
+        # Stages with forbid_needs_human must keep progressing through the
+        # workflow instead of ending the interaction with a final response.
+        _fail(f"agent-guard blocked final response: {forbid_display}")
     if stage in {"IDLE", "CLARIFYING", "DESIGNING", "PLANNING", "NEEDS_HUMAN", "DONE"}:
         raise SystemExit(0)
     if stage != "READY_TO_SUMMARIZE" and state.get("can_finalize") is not True:

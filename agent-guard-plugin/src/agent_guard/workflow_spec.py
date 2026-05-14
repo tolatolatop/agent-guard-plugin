@@ -69,29 +69,59 @@ def _render_condition_text(text: str) -> str:
     return re.sub(r"\{required_artifacts:([A-Z_]+)\}", replace, text)
 
 
-def stage_transition_rules(stage: str) -> dict[str, dict[str, Any]]:
-    rules = stage_spec(stage).get("transition_rules", {})
-    if not isinstance(rules, dict):
-        raise RuntimeError(f".workflow.yaml stage {stage} transition_rules must be a mapping.")
-    normalized: dict[str, dict[str, Any]] = {}
-    for target_stage, rule in rules.items():
-        if not isinstance(rule, dict):
-            raise RuntimeError(
-                f".workflow.yaml stage {stage} transition_rules for {target_stage} must be a mapping."
-            )
-        normalized[str(target_stage)] = dict(rule)
+def _normalize_entry_condition(stage: str, item: Any, label: str) -> dict[str, str]:
+    if not isinstance(item, dict):
+        raise RuntimeError(f".workflow.yaml stage {stage} {label} condition must be a mapping.")
+    display = item.get("display")
+    if not isinstance(display, str) or not display.strip():
+        raise RuntimeError(f".workflow.yaml stage {stage} {label} condition display must be a non-empty string.")
+    normalized = {"display": _render_condition_text(display)}
+    rule = item.get("rule")
+    if rule is not None:
+        normalized["rule"] = str(rule)
+    value = item.get("value")
+    if value is not None:
+        normalized["value"] = str(value)
     return normalized
+
+
+def stage_entry_conditions(stage: str, from_stage: str | None = None) -> list[dict[str, str]]:
+    rules = stage_spec(stage)
+    conditions_config = rules.get("entry_conditions", {})
+    if conditions_config and not isinstance(conditions_config, dict):
+        raise RuntimeError(f".workflow.yaml stage {stage} entry_conditions must be a mapping.")
+
+    normalized: list[dict[str, str]] = []
+    any_conditions = conditions_config.get("any", []) if isinstance(conditions_config, dict) else []
+    if any_conditions and not isinstance(any_conditions, list):
+        raise RuntimeError(f".workflow.yaml stage {stage} entry_conditions.any must be a list.")
+    for item in any_conditions:
+        normalized.append(_normalize_entry_condition(stage, item, "entry_conditions.any"))
+    return normalized
+
+
+def stage_forbid_needs_human_display(stage: str) -> str | None:
+    # This stage-level flag is used by the Stop hook to block final responses
+    # until the task advances out of stages that should stay agent-driven.
+    needs_human_rule = stage_spec(stage).get("forbid_needs_human")
+    if not needs_human_rule:
+        return None
+    if isinstance(needs_human_rule, dict):
+        display = needs_human_rule.get("display")
+        if not isinstance(display, str) or not display.strip():
+            raise RuntimeError(f".workflow.yaml stage {stage} forbid_needs_human.display must be a non-empty string.")
+        return display
+    if needs_human_rule is True:
+        return "Current stage does not allow human intervention; continue advancing the task."
+    raise RuntimeError(f".workflow.yaml stage {stage} forbid_needs_human must be true or a mapping.")
 
 
 def stage_exit_conditions(stage: str) -> dict[str, list[str]]:
     rendered: dict[str, list[str]] = {}
-    for target_stage, rule in stage_transition_rules(stage).items():
-        raw_conditions = rule.get("display_conditions", [])
-        if not isinstance(raw_conditions, list):
-            raise RuntimeError(
-                f".workflow.yaml stage {stage} transition_rules for {target_stage} display_conditions must be a list."
-            )
-        rendered[str(target_stage)] = [_render_condition_text(str(item)) for item in raw_conditions]
+    artifact_conditions = [f"{path} must exist" for path in stage_required_artifacts(stage)]
+    for target_stage in stage_transitions().get(stage, []):
+        entry_conditions = [condition["display"] for condition in stage_entry_conditions(target_stage, stage)]
+        rendered[str(target_stage)] = artifact_conditions + entry_conditions
     return rendered
 
 

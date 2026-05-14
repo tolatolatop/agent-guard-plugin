@@ -36,6 +36,8 @@ REVIEW
 
 VERIFY
   -> READY_TO_SUMMARIZE
+  -> RED_TEST
+  -> GREEN_IMPL
   -> NEEDS_FAILURE_ANALYSIS
 
 READY_TO_SUMMARIZE
@@ -64,12 +66,13 @@ Use these commands for mainline progression:
 
 Transition rules:
 
-- Prefer `complete-step` whenever a real workflow step finished and state must move that step from `remaining_steps` to `completed_steps`.
+- Prefer `complete-step` whenever a real workflow step finished and the corresponding `plan.yaml` step should be marked `done`.
 - Use `advance-stage` for stage-only moves such as `CLARIFYING -> PLANNING` or when re-entering execution after explicit scope selection.
 - `PLANNING -> RED_TEST` or `PLANNING -> GREEN_IMPL` requires a selected step plus non-empty scope from explicit CLI flags or the current active state scope.
 - `GREEN_IMPL` must pass through `REVIEW` before entering `VERIFY`; direct `GREEN_IMPL -> VERIFY` is not allowed.
 - `REVIEW -> VERIFY` requires `.agent/artifacts/review.json`.
-- `VERIFY -> READY_TO_SUMMARIZE` requires successful `last_verification`, no running jobs, empty `remaining_steps`, and the explicit `ready-to-summarize` command.
+- `VERIFY -> READY_TO_SUMMARIZE` requires successful `last_verification`, no running jobs, and the explicit `ready-to-summarize` command.
+- `VERIFY` may return directly to `RED_TEST` or `GREEN_IMPL` when more test or implementation work is needed.
 - `READY_TO_SUMMARIZE -> DONE` is only legal through `mark-done`, which internally requires `agent-guard can-finalize` to pass.
 - `NEEDS_FAILURE_ANALYSIS` cannot exit until `.agent/artifacts/failure-analysis.md` exists.
 

@@ -153,7 +153,7 @@ def test_bridge_stop_allows_clarifying() -> None:
     assert result.stderr == ""
 
 
-def test_bridge_stop_allows_designing() -> None:
+def test_bridge_stop_blocks_designing_when_stage_forbids_human_intervention() -> None:
     root_dir = make_temp_repo()
     save_state(
         root_dir,
@@ -171,8 +171,8 @@ def test_bridge_stop_allows_designing() -> None:
         },
     )
     result = run_bridge(root_dir, "stop", {})
-    assert result.returncode == 0
-    assert result.stderr == ""
+    assert result.returncode == 2
+    assert "Current stage does not allow human intervention; continue advancing the task." in result.stderr
 
 
 def test_bridge_stop_allows_planning() -> None:
@@ -216,7 +216,30 @@ def test_bridge_stop_blocks_red_test() -> None:
     )
     result = run_bridge(root_dir, "stop", {})
     assert result.returncode == 2
-    assert "stage RED_TEST is still active" in result.stderr
+    assert "Current stage does not allow human intervention; continue advancing the task." in result.stderr
+
+
+def test_bridge_stop_blocks_ready_to_summarize_when_stage_forbids_human_intervention() -> None:
+    root_dir = make_temp_repo()
+    save_state(
+        root_dir,
+        {
+            "task_id": "password-reset",
+            "stage": "READY_TO_SUMMARIZE",
+            "current_step": None,
+            "completed_steps": [],
+            "remaining_steps": [],
+            "allowed_paths": [],
+            "forbidden_paths": [],
+            "can_finalize": True,
+            "last_verification": {"exit_code": 0},
+            "needs_human": False,
+        },
+    )
+
+    result = run_bridge(root_dir, "stop", {})
+    assert result.returncode == 2
+    assert "Current stage does not allow human intervention; continue advancing the task." in result.stderr
 
 
 def test_bridge_stop_allows_needs_human() -> None:

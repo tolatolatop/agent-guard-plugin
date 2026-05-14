@@ -3,19 +3,23 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .plan import first_nonterminal_plan_step_name
 from .state import load_state
 from .task_reset import latest_archive
 from .workflow import build_session_prompt_block, get_workflow_context
 
 
-def get_next_step(state: dict[str, Any]) -> str | None:
+def get_next_step(root_dir: Path, state: dict[str, Any]) -> str | None:
+    plan_step = first_nonterminal_plan_step_name(root_dir)
+    if plan_step:
+        return plan_step
     remaining = state.get("remaining_steps", [])
     return remaining[0] if remaining else None
 
 
 def get_session_reminder(root_dir: Path) -> dict[str, Any]:
     state = load_state(root_dir)
-    next_step = get_next_step(state)
+    next_step = get_next_step(root_dir, state)
     stage = state.get("stage", "IDLE")
     workflow_context = get_workflow_context(root_dir, stage)
     recent_archive = latest_archive(root_dir)

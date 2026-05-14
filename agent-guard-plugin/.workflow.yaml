@@ -31,6 +31,8 @@ transition_graph_mermaid: |
     REVIEW --> VERIFY
     REVIEW --> GREEN_IMPL
     VERIFY --> READY_TO_SUMMARIZE
+    VERIFY --> RED_TEST
+    VERIFY --> GREEN_IMPL
     VERIFY --> NEEDS_FAILURE_ANALYSIS
     READY_TO_SUMMARIZE --> DONE
     NEEDS_FAILURE_ANALYSIS --> RED_TEST
@@ -58,11 +60,10 @@ stages:
     forbidden_paths: []
     allowed_next_stages:
       - CLARIFYING
-    transition_rules:
-      CLARIFYING:
-        display_conditions:
-          - task_id must be set
-        require_active_task: true
+    entry_conditions:
+      any:
+        - rule: active_task
+          display: task_id must be set
     artifacts_expected: []
     artifacts_required: []
     writable: managed-only
@@ -81,24 +82,14 @@ stages:
     allowed_next_stages:
       - DESIGNING
       - PLANNING
-    transition_rules:
-      DESIGNING:
-        display_conditions:
-          - active task exists
-          - needs_human must be false
-        require_active_task: true
-        forbid_needs_human: true
-      PLANNING:
-        display_conditions:
-          - active task exists
-          - caller has clarified requirements
-        require_active_task: true
     artifacts_expected: []
     artifacts_required: []
     writable: managed-only
 
   DESIGNING:
     goal: Write the smallest design needed to guide implementation safely.
+    forbid_needs_human:
+      display: Current stage does not allow human intervention; continue advancing the task.
     allowed_actions:
       - draft a design note
       - identify artifacts and validation steps
@@ -110,11 +101,10 @@ stages:
     forbidden_paths: []
     allowed_next_stages:
       - PLANNING
-    transition_rules:
-      PLANNING:
-        display_conditions:
-          - active task exists
-        require_active_task: true
+    entry_conditions:
+      any:
+        - rule: active_task
+          display: active task exists
     artifacts_expected:
       - .agent/artifacts/DESIGN.md
       - ./DESIGN.md
@@ -135,19 +125,10 @@ stages:
     allowed_next_stages:
       - RED_TEST
       - GREEN_IMPL
-    transition_rules:
-      RED_TEST:
-        display_conditions:
-          - step must be selected
-          - scope must be known from plan or explicit flags
-        require_selected_step: true
-        require_scope: true
-      GREEN_IMPL:
-        display_conditions:
-          - step must be selected
-          - scope must be known from plan or explicit flags
-        require_selected_step: true
-        require_scope: true
+    entry_conditions:
+      any:
+        - rule: active_task
+          display: active task exists
     artifacts_expected:
       - .agent/plan.yaml
       - .agent/artifacts/PLAN.md
@@ -157,6 +138,8 @@ stages:
 
   RED_TEST:
     goal: Create a failing test that proves the missing behavior.
+    forbid_needs_human:
+      display: Current stage does not allow human intervention; continue advancing the task.
     allowed_actions:
       - write tests
       - run targeted tests
@@ -170,20 +153,15 @@ stages:
     allowed_next_stages:
       - GREEN_IMPL
       - NEEDS_FAILURE_ANALYSIS
-    transition_rules:
-      GREEN_IMPL:
-        display_conditions:
-          - current red step must be completed with complete-step
-        required_command: complete-step
-      NEEDS_FAILURE_ANALYSIS:
-        display_conditions:
-          - unexpected failure requires analysis
+    entry_conditions: {}
     artifacts_expected:
       - .agent/artifacts/red-test.log
     artifacts_required: []
 
   GREEN_IMPL:
     goal: Implement the smallest code change that makes the targeted test pass.
+    forbid_needs_human:
+      display: Current stage does not allow human intervention; continue advancing the task.
     allowed_actions:
       - write minimal production code
       - update tests if required
@@ -197,21 +175,15 @@ stages:
     allowed_next_stages:
       - REVIEW
       - NEEDS_FAILURE_ANALYSIS
-    transition_rules:
-      REVIEW:
-        display_conditions:
-          - current impl step must be completed
-        require_completed_current_step_on_commands:
-          - advance-stage
-      NEEDS_FAILURE_ANALYSIS:
-        display_conditions:
-          - unexpected failure requires analysis
+    entry_conditions: {}
     artifacts_expected:
       - .agent/artifacts/command-failure.log
     artifacts_required: []
 
   REVIEW:
     goal: Review the diff and capture review evidence without changing code.
+    forbid_needs_human:
+      display: Current stage does not allow human intervention; continue advancing the task.
     allowed_actions:
       - read diff
       - read files
@@ -224,14 +196,7 @@ stages:
     allowed_next_stages:
       - VERIFY
       - GREEN_IMPL
-    transition_rules:
-      VERIFY:
-        display_conditions:
-          - "{required_artifacts:REVIEW} must exist"
-        require_review_artifacts: true
-      GREEN_IMPL:
-        display_conditions:
-          - review identified follow-up implementation work
+    entry_conditions: {}
     artifacts_expected:
       - .agent/artifacts/review.json
     artifacts_required:
@@ -240,6 +205,8 @@ stages:
 
   VERIFY:
     goal: Run verification commands and record final evidence.
+    forbid_needs_human:
+      display: Current stage does not allow human intervention; continue advancing the task.
     allowed_actions:
       - run verification commands
       - write verification logs
@@ -250,21 +217,9 @@ stages:
     forbidden_paths: []
     allowed_next_stages:
       - READY_TO_SUMMARIZE
+      - RED_TEST
+      - GREEN_IMPL
       - NEEDS_FAILURE_ANALYSIS
-    transition_rules:
-      READY_TO_SUMMARIZE:
-        display_conditions:
-          - last_verification.exit_code must be 0
-          - no running jobs
-          - remaining steps must be complete
-          - can_finalize enabled only through ready-to-summarize
-        required_command: ready-to-summarize
-        require_successful_last_verification: true
-        require_no_running_jobs: true
-        require_empty_remaining_steps: true
-      NEEDS_FAILURE_ANALYSIS:
-        display_conditions:
-          - verification failed
     artifacts_expected:
       - .agent/artifacts/final-verification.log
       - .agent/artifacts/command-failure.log
@@ -273,6 +228,8 @@ stages:
 
   READY_TO_SUMMARIZE:
     goal: Summarize completed work and verification results without further edits.
+    forbid_needs_human:
+      display: Current stage does not allow human intervention; continue advancing the task.
     allowed_actions:
       - summarize work
       - list changed files
@@ -284,22 +241,27 @@ stages:
     forbidden_paths: []
     allowed_next_stages:
       - DONE
-    transition_rules:
-      DONE:
-        display_conditions:
-          - use mark-done
-          - can-finalize must pass
-          - "{required_artifacts:READY_TO_SUMMARIZE} must exist"
-        required_command: mark-done
-        require_can_finalize: true
+    entry_conditions:
+      any:
+        - rule: required_command
+          value: ready-to-summarize
+          display: use ready-to-summarize
+        - rule: successful_last_verification
+          display: last_verification.exit_code must be 0
+        - rule: no_running_jobs
+          display: no running jobs
+        - rule: all_plan_steps_terminal
+          display: all plan steps must be done or failed
+        - display: can_finalize enabled only through ready-to-summarize
     artifacts_expected:
       - .agent/artifacts/summary.md
-    artifacts_required:
-      - .agent/artifacts/summary.md
+    artifacts_required: []
     writable: managed-only
 
   NEEDS_FAILURE_ANALYSIS:
     goal: Stop retry loops and produce evidence-backed failure analysis before changing code again.
+    forbid_needs_human:
+      display: Current stage does not allow human intervention; continue advancing the task.
     allowed_actions:
       - inspect logs
       - write failure-analysis.md
@@ -315,28 +277,7 @@ stages:
       - GREEN_IMPL
       - VERIFY
       - NEEDS_HUMAN
-    transition_rules:
-      RED_TEST:
-        display_conditions:
-          - "{required_artifacts:NEEDS_FAILURE_ANALYSIS} must exist"
-          - next step and scope must be known
-        require_failure_analysis_artifacts: true
-        require_selected_step: true
-        require_scope: true
-      GREEN_IMPL:
-        display_conditions:
-          - "{required_artifacts:NEEDS_FAILURE_ANALYSIS} must exist"
-          - next step and scope must be known
-        require_failure_analysis_artifacts: true
-        require_selected_step: true
-        require_scope: true
-      VERIFY:
-        display_conditions:
-          - "{required_artifacts:NEEDS_FAILURE_ANALYSIS} must exist"
-        require_failure_analysis_artifacts: true
-      NEEDS_HUMAN:
-        display_conditions:
-          - explicit escalation
+    entry_conditions: {}
     artifacts_expected:
       - .agent/artifacts/failure-analysis.md
     artifacts_required:
@@ -357,13 +298,7 @@ stages:
     allowed_next_stages:
       - CLARIFYING
       - PLANNING
-    transition_rules:
-      CLARIFYING:
-        display_conditions:
-          - human guidance received
-      PLANNING:
-        display_conditions:
-          - human guidance resolved scope and next step
+    entry_conditions: {}
     artifacts_expected: []
     artifacts_required: []
     writable: managed-only
@@ -379,6 +314,13 @@ stages:
       - .agent/**
     forbidden_paths: []
     allowed_next_stages: []
+    entry_conditions:
+      any:
+        - rule: required_command
+          value: mark-done
+          display: use mark-done
+        - rule: can_finalize_passes
+          display: can-finalize must pass
     artifacts_expected: []
     artifacts_required: []
     writable: managed-only

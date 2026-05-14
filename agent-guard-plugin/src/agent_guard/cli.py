@@ -70,7 +70,7 @@ def run_command(argv: list[str], cwd: Path) -> int:
                     "state": state,
                     "jobs": load_jobs(cwd),
                     "plan": load_plan_summary(cwd),
-                    "next_step": get_next_step(state),
+                    "next_step": get_next_step(cwd, state),
                 }
             )
         elif command == "session-start":
@@ -153,7 +153,7 @@ def run_command(argv: list[str], cwd: Path) -> int:
             result = can_finalize(cwd)
             print_json(result, 0 if result["decision"] == "allow" else 1)
         elif command == "next-step":
-            print_json({"ok": True, "next_step": get_next_step(load_state(cwd))})
+            print_json({"ok": True, "next_step": get_next_step(cwd, load_state(cwd))})
         elif command == "install":
             result = install_runtime(rest, cwd, Path(os.path.expanduser("~")), Path(__file__).resolve().parents[2])
             print_json({"ok": True, **result})
