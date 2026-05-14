@@ -65,12 +65,20 @@ def test_install_claude_removes_legacy_flat_skill_files() -> None:
 
 
 def test_source_skills_dir_prefers_packaged_bundle_when_plugin_root_has_no_docs() -> None:
-    """Test that source skills dir prefers packaged bundle when plugin root has no docs."""
+    """Test that source skills dir falls back to packaged resolver when plugin root has no docs."""
     root, _ = make_dirs()
 
     resolved = source_skills_dir(root)
 
     assert resolved == packaged_skills_dir()
+    assert (resolved / "using-workflow.md").exists()
+
+
+def test_source_skills_dir_prefers_repo_docs_when_available() -> None:
+    """Test that source skills dir prefers repo docs when available."""
+    resolved = source_skills_dir(PLUGIN_ROOT)
+
+    assert resolved == PLUGIN_ROOT / "docs" / "skills"
     assert (resolved / "using-workflow.md").exists()
 
 

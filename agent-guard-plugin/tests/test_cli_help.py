@@ -1,0 +1,56 @@
+"""Tests for CLI help output."""
+from contextlib import redirect_stdout
+from io import StringIO
+
+from agent_guard.cli import run_command
+
+from .helpers import make_temp_repo
+
+
+def invoke_help(argv: list[str]) -> tuple[int, str]:
+    """Invoke CLI and capture plain-text stdout."""
+    root_dir = make_temp_repo()
+    stdout = StringIO()
+    code = 0
+    with redirect_stdout(stdout):
+        try:
+            run_command(argv, root_dir)
+        except SystemExit as exc:
+            code = int(exc.code)
+    return code, stdout.getvalue()
+
+
+def test_top_level_help_flag_prints_command_overview() -> None:
+    """Test that top-level help flag prints command overview."""
+    code, output = invoke_help(["--help"])
+
+    assert code == 0
+    assert "Usage: agent-guard <command> [options]" in output
+    assert "record-command --cmd CMD --exit-code CODE [--log PATH]" in output
+    assert "help [command]" in output
+
+
+def test_subcommand_help_flag_prints_specific_usage() -> None:
+    """Test that subcommand help flag prints specific usage."""
+    code, output = invoke_help(["record-command", "--help"])
+
+    assert code == 0
+    assert "Usage: agent-guard record-command --cmd CMD --exit-code CODE [--log PATH]" in output
+    assert "Record command execution details" in output
+
+
+def test_help_command_supports_command_specific_help() -> None:
+    """Test that help command supports command-specific help."""
+    code, output = invoke_help(["help", "install"])
+
+    assert code == 0
+    assert "Usage: agent-guard install [--runtime RUNTIME] [--scope SCOPE]" in output
+    assert "Supported: claude-code, codex, opencode" in output
+
+
+def test_missing_command_prints_help_and_exits_nonzero() -> None:
+    """Test that missing command prints help and exits nonzero."""
+    code, output = invoke_help([])
+
+    assert code == 1
+    assert "Usage: agent-guard <command> [options]" in output

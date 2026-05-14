@@ -90,14 +90,24 @@ def opencode_skills_install_dir(scope: str, cwd: Path, home_dir: Path) -> Path:
 
 def packaged_skills_dir() -> Path:
     """Packaged skills dir."""
-    return Path(__file__).resolve().parent / "_bundled_skills"
+    package_dir = Path(__file__).resolve().parent
+    bundled_dir = package_dir / "_bundled_skills"
+    if bundled_dir.exists() and any(bundled_dir.glob("*.md")):
+        return bundled_dir
+
+    repo_root = package_dir.parents[1]
+    docs_dir = repo_root / "docs" / "skills"
+    if docs_dir.exists() and any(docs_dir.glob("*.md")):
+        return docs_dir
+
+    return bundled_dir
 
 
 def source_skills_dir(plugin_root: Path) -> Path:
     """Source skills dir."""
     candidates = [
-        packaged_skills_dir(),
         plugin_root / "docs" / "skills",
+        packaged_skills_dir(),
     ]
     for candidate in candidates:
         if candidate.exists() and any(candidate.glob("*.md")):

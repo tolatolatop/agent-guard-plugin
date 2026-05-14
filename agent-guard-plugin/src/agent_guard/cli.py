@@ -26,10 +26,108 @@ from .transitions import (
 from .wizard import run_wizard
 
 
+GLOBAL_HELP = """Usage: agent-guard <command> [options]
+
+Minimal runtime guard CLI for coding-agent workflows.
+
+Commands:
+  init                              Initialize .agent state files in the current repo.
+  start-task <task-id>              Start or register a task.
+  reset-task <task-id>              Archive completed task state and initialize a new task.
+  next-task <task-id>               Alias for reset-task.
+  status                            Show current state, jobs, plan summary, and next step.
+  session-start                     Emit a concise session reminder.
+  can-write <path>                  Check whether a file write is allowed in the current stage.
+  record-command --cmd CMD --exit-code CODE [--log PATH]
+                                    Record command execution details.
+  advance-stage --to STAGE [--step STEP_ID] [--allowed-paths CSV] [--forbidden-paths CSV]
+                                    Move the workflow to a new stage.
+  complete-step <step-id> --next-stage STAGE [--next-step STEP_ID]
+                [--allowed-paths CSV] [--forbidden-paths CSV]
+                                    Mark the current step complete and advance workflow state.
+  ready-to-summarize                Mark the workflow as ready for final summarization.
+  mark-done                         Mark the workflow as done.
+  check-failure-loop                Check whether repeated failures should block progress.
+  check-job-poll <job-id>           Check whether a job may be polled now.
+  can-finalize                      Check whether finalization is allowed.
+  next-step                         Show the next step derived from state and plan.
+  install [options]                 Install runtime integrations for supported tools.
+  uninstall [options]               Remove runtime integrations for supported tools.
+  wizard                            Run the interactive setup wizard.
+  help [command]                    Show general or command-specific help.
+
+Global options:
+  -h, --help                        Show help.
+
+Examples:
+  agent-guard init
+  agent-guard start-task password-reset
+  agent-guard can-write tests/test_auth.py
+  agent-guard record-command --cmd "pytest tests/test_auth.py" --exit-code 1 --log .agent/artifacts/red-test.log
+  agent-guard install --runtime codex --scope project
+"""
+
+COMMAND_HELP: dict[str, str] = {
+    "init": "Usage: agent-guard init\n\nInitialize .agent state files in the current repository.",
+    "start-task": "Usage: agent-guard start-task <task-id>\n\nStart or register a task and move IDLE repositories into CLARIFYING.",
+    "reset-task": "Usage: agent-guard reset-task <task-id>\n\nArchive completed task state and initialize a new task.",
+    "next-task": "Usage: agent-guard next-task <task-id>\n\nAlias for reset-task.",
+    "status": "Usage: agent-guard status\n\nShow current state, jobs, plan summary, and next step.",
+    "session-start": "Usage: agent-guard session-start\n\nEmit a concise session reminder for hooks and agents.",
+    "can-write": "Usage: agent-guard can-write <path>\n\nCheck whether a file write is allowed in the current stage.",
+    "record-command": (
+        "Usage: agent-guard record-command --cmd CMD --exit-code CODE [--log PATH]\n\n"
+        "Record command execution details, exit code, and optional log path."
+    ),
+    "advance-stage": (
+        "Usage: agent-guard advance-stage --to STAGE [--step STEP_ID] [--allowed-paths CSV] [--forbidden-paths CSV]\n\n"
+        "Move the workflow to a new stage."
+    ),
+    "complete-step": (
+        "Usage: agent-guard complete-step <step-id> --next-stage STAGE [--next-step STEP_ID] "
+        "[--allowed-paths CSV] [--forbidden-paths CSV]\n\n"
+        "Mark the current step complete and advance workflow state."
+    ),
+    "ready-to-summarize": "Usage: agent-guard ready-to-summarize\n\nMark the workflow as ready for final summarization.",
+    "mark-done": "Usage: agent-guard mark-done\n\nMark the workflow as done.",
+    "check-failure-loop": "Usage: agent-guard check-failure-loop\n\nCheck whether repeated failures should block progress.",
+    "check-job-poll": "Usage: agent-guard check-job-poll <job-id>\n\nCheck whether a job may be polled now.",
+    "can-finalize": "Usage: agent-guard can-finalize\n\nCheck whether finalization is allowed.",
+    "next-step": "Usage: agent-guard next-step\n\nShow the next step derived from state and plan.",
+    "install": (
+        "Usage: agent-guard install [--runtime RUNTIME] [--scope SCOPE]\n\n"
+        "Install runtime integrations.\n\n"
+        "Options:\n"
+        "  -r, --runtime RUNTIME   Supported: claude-code, codex, opencode\n"
+        "  -s, --scope SCOPE       Supported: project, user"
+    ),
+    "uninstall": (
+        "Usage: agent-guard uninstall [--runtime RUNTIME] [--scope SCOPE]\n\n"
+        "Remove runtime integrations.\n\n"
+        "Options:\n"
+        "  -r, --runtime RUNTIME   Supported: claude-code, codex, opencode\n"
+        "  -s, --scope SCOPE       Supported: project, user"
+    ),
+    "wizard": "Usage: agent-guard wizard\n\nRun the interactive setup wizard.",
+    "help": "Usage: agent-guard help [command]\n\nShow general or command-specific help.",
+}
+
+
 def print_json(data: dict[str, Any], exit_code: int = 0) -> None:
     """Print json."""
     sys.stdout.write(json.dumps(data, indent=2) + "\n")
     raise SystemExit(exit_code)
+
+
+def print_help(text: str, exit_code: int = 0) -> None:
+    """Print plain-text help."""
+    sys.stdout.write(text.rstrip() + "\n")
+    raise SystemExit(exit_code)
+
+
+def command_help(command: str) -> str:
+    """Return help text for a command."""
+    return COMMAND_HELP.get(command, f"Unknown command: {command}\n\n{GLOBAL_HELP}")
 
 
 def ensure_path_arg(rest: list[str], name: str) -> str:
@@ -42,9 +140,19 @@ def ensure_path_arg(rest: list[str], name: str) -> str:
 def run_command(argv: list[str], cwd: Path) -> int:
     """Run command."""
     if not argv:
-        print_json({"error": "Missing command"}, 1)
+        print_help(GLOBAL_HELP, 1)
+
+    if argv[0] in {"-h", "--help"}:
+        print_help(GLOBAL_HELP)
+
+    if argv[0] == "help":
+        target = argv[1] if len(argv) > 1 else None
+        print_help(command_help(target) if target else GLOBAL_HELP)
 
     command, *rest = argv
+
+    if any(flag in {"-h", "--help"} for flag in rest):
+        print_help(command_help(command))
 
     try:
         if command == "init":
