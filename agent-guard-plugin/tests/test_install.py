@@ -82,6 +82,24 @@ def test_source_skills_dir_prefers_repo_docs_when_available() -> None:
     assert (resolved / "using-workflow.md").exists()
 
 
+def test_packaged_skills_dir_falls_back_to_repo_docs_when_bundle_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that packaged skills dir falls back to repo docs when bundled skills are absent."""
+    fake_repo_root = tmp_path / "plugin-root"
+    fake_package_dir = fake_repo_root / "src" / "agent_guard"
+    fake_package_dir.mkdir(parents=True)
+    docs_dir = fake_repo_root / "docs" / "skills"
+    docs_dir.mkdir(parents=True)
+    (docs_dir / "using-workflow.md").write_text("# skill\n", encoding="utf-8")
+    monkeypatch.setattr("agent_guard.install.__file__", str(fake_package_dir / "install.py"))
+
+    resolved = packaged_skills_dir()
+
+    assert resolved == docs_dir
+    assert (resolved / "using-workflow.md").exists()
+
+
 def test_install_claude_skills_bundle_succeeds_without_plugin_docs() -> None:
     """Test that install claude skills bundle succeeds without plugin docs."""
     root, home = make_dirs()
