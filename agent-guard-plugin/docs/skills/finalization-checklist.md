@@ -1,6 +1,6 @@
 ---
 name: finalization-checklist
-description: Completion checklist for verification evidence, review artifacts, and finalization gates.
+description: Completion checklist for verification evidence and finalization gates.
 ---
 
 # Finalization Checklist

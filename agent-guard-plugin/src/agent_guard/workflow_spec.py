@@ -52,7 +52,7 @@ def _require_list(value: Any, label: str) -> list[Any]:
 def validate_workflow_spec(spec: dict[str, Any]) -> None:
     """Validate core workflow policy sections and rule names."""
     _require_mapping(spec.get("stages", {}), ".workflow.yaml stages")
-    for section_name in ("path_policy", "failure_policy", "job_policy", "finalization_policy", "wizard_defaults"):
+    for section_name in ("path_policy", "failure_policy", "finalization_policy", "wizard_defaults"):
         _require_mapping(spec.get(section_name, {}), f".workflow.yaml {section_name}")
     for stage_name, stage_data in workflow_stages_from_spec(spec).items():
         _validate_stage_rules(stage_name, _require_mapping(stage_data, f".workflow.yaml stage {stage_name}"))
@@ -89,6 +89,9 @@ def _validate_stage_rules(stage_name: str, stage_data: dict[str, Any]) -> None:
     if isinstance(write_policy, dict):
         _require_list(write_policy.get("writable_paths", []), f".workflow.yaml stage {stage_name} write_policy.writable_paths")
         _require_list(write_policy.get("denied_paths", []), f".workflow.yaml stage {stage_name} write_policy.denied_paths")
+    allows_complete_step = stage_data.get("allows_complete_step")
+    if allows_complete_step is not None and not isinstance(allows_complete_step, bool):
+        raise RuntimeError(f".workflow.yaml stage {stage_name} allows_complete_step must be a boolean.")
 
 
 def workflow_stages() -> dict[str, dict[str, Any]]:
@@ -117,6 +120,20 @@ def stage_required_artifacts(stage: str) -> list[str]:
     if not isinstance(artifacts, list):
         raise RuntimeError(f".workflow.yaml stage {stage} artifacts_required must be a list.")
     return [str(item) for item in artifacts]
+
+
+def stage_display_artifacts(stage: str) -> list[str]:
+    """Artifacts shown in reminders: required first, then extra expected items."""
+    required = stage_required_artifacts(stage)
+    expected = stage_expected_artifacts(stage)
+    seen: set[str] = set()
+    merged: list[str] = []
+    for artifact in [*required, *expected]:
+        if artifact in seen:
+            continue
+        seen.add(artifact)
+        merged.append(artifact)
+    return merged
 
 
 def _render_condition_text(text: str) -> str:
@@ -207,10 +224,12 @@ def stage_transitions() -> dict[str, list[str]]:
 
 
 def transition_graph_mermaid() -> str:
-    """Transition graph mermaid."""
-    spec = load_workflow_spec()
-    graph = spec.get("transition_graph_mermaid", "")
-    return graph.strip() if isinstance(graph, str) else ""
+    """Generate a Mermaid transition graph from stage transitions."""
+    lines = ["flowchart TD"]
+    for source, targets in stage_transitions().items():
+        for target in targets:
+            lines.append(f"  {source} --> {target}")
+    return "\n".join(lines)
 
 
 def global_gates() -> list[str]:
@@ -241,25 +260,10 @@ def path_policy() -> dict[str, Any]:
 def failure_policy() -> dict[str, Any]:
     """Normalized failure policy."""
     policy = _require_mapping(load_workflow_spec().get("failure_policy", {}), ".workflow.yaml failure_policy")
-    expected = _require_list(policy.get("expected_failure_stages", ["RED_TEST"]), ".workflow.yaml failure_policy.expected_failure_stages")
     roots = _require_list(policy.get("fingerprint_roots", ["src", "tests"]), ".workflow.yaml failure_policy.fingerprint_roots")
     return {
         "repeat_threshold": int(policy.get("repeat_threshold", 2)),
         "fingerprint_roots": [str(item) for item in roots],
-        "expected_failure_stages": [str(item) for item in expected],
-        "analysis_artifact": str(policy.get("analysis_artifact", ".agent/artifacts/failure-analysis.md")),
-        "analysis_stage": str(policy.get("analysis_stage", "NEEDS_FAILURE_ANALYSIS")),
-    }
-
-
-def job_policy() -> dict[str, Any]:
-    """Normalized job policy."""
-    policy = _require_mapping(load_workflow_spec().get("job_policy", {}), ".workflow.yaml job_policy")
-    polling = _require_mapping(policy.get("polling", {}), ".workflow.yaml job_policy.polling")
-    return {
-        "default_max_polls": int(policy.get("default_max_polls", 20)),
-        "escalation_stage": str(policy.get("escalation_stage", "NEEDS_HUMAN")),
-        "polling": polling,
     }
 
 
@@ -271,10 +275,6 @@ def finalization_policy() -> dict[str, Any]:
     return {
         "required_rules": [str(item) for item in rules],
         "rule_messages": {str(key): str(value) for key, value in rule_messages.items()},
-        "review_artifact": str(policy.get("review_artifact", ".agent/artifacts/review.json")),
-        "require_review_artifact_when_plan_includes_review": bool(
-            policy.get("require_review_artifact_when_plan_includes_review", True)
-        ),
     }
 
 
@@ -301,11 +301,8 @@ def stage_write_policy(stage: str) -> dict[str, list[str]]:
 
 def complete_step_allowed_from_stages() -> list[str]:
     """Complete step allowed from stages."""
-    spec = load_workflow_spec()
-    command_rules = spec.get("command_rules", {})
-    if not isinstance(command_rules, dict):
-        raise RuntimeError(".workflow.yaml command_rules must be a mapping.")
-    stages = command_rules.get("complete_step_allowed_from_stages", [])
-    if not isinstance(stages, list):
-        raise RuntimeError(".workflow.yaml command_rules.complete_step_allowed_from_stages must be a list.")
-    return [str(item) for item in stages]
+    return [
+        stage_name
+        for stage_name, stage_data in workflow_stages().items()
+        if stage_data.get("allows_complete_step") is True
+    ]

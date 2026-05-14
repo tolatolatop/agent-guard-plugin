@@ -1,6 +1,14 @@
 """Tests for test state."""
 from agent_guard.jobs import load_jobs
-from agent_guard.state import DEFAULT_JOBS, DEFAULT_STATE, ensure_agent_files, load_state, load_task_session, save_state
+from agent_guard.state import (
+    DEFAULT_JOBS,
+    DEFAULT_STATE,
+    ensure_agent_files,
+    load_stage_artifact_snapshot,
+    load_state,
+    load_task_session,
+    save_state,
+)
 
 from .helpers import make_temp_repo
 
@@ -58,3 +66,18 @@ def test_state_loads_structured_task_session() -> None:
     session = load_task_session(root_dir)
     assert session.task_id == "password-reset"
     assert session.stage == "VERIFY"
+
+
+def test_stage_artifact_snapshot_tracks_stage_entry() -> None:
+    """Test that stage artifact snapshots are recorded when the stage changes."""
+    root_dir = make_temp_repo()
+    snapshot = load_stage_artifact_snapshot(root_dir)
+    assert snapshot["stage"] == "IDLE"
+
+    save_state(root_dir, {**DEFAULT_STATE, "task_id": "password-reset", "stage": "REVIEW"})
+    snapshot = load_stage_artifact_snapshot(root_dir)
+
+    assert snapshot["stage"] == "REVIEW"
+    assert snapshot["entered_at"] is not None
+    assert ".agent/artifacts/review.json" in snapshot["artifacts"]
+    assert snapshot["artifacts"][".agent/artifacts/review.json"]["mtime_ns"] is None

@@ -1,5 +1,6 @@
 """Tests for test transitions."""
 import json
+import os
 from contextlib import redirect_stdout
 from io import StringIO
 
@@ -177,6 +178,36 @@ def test_needs_failure_analysis_cannot_exit_without_artifact() -> None:
         raise AssertionError("Expected transition to be blocked")
 
 
+def test_review_artifact_must_be_updated_after_entering_review() -> None:
+    """Test that a stale review artifact from before REVIEW does not satisfy exit gating."""
+    root_dir = make_temp_repo()
+    review_artifact = root_dir / ".agent" / "artifacts" / "review.json"
+    review_artifact.write_text('{"status":"old"}\n', encoding="utf-8")
+    write_state(
+        root_dir,
+        task_id="password-reset",
+        stage="GREEN_IMPL",
+        current_step="green-001",
+        remaining_steps=["green-001"],
+    )
+
+    advance_stage(root_dir, "REVIEW")
+
+    try:
+        advance_stage(root_dir, "VERIFY", step_id="green-001")
+    except RuntimeError as exc:
+        assert "review.json" in str(exc)
+        assert "updated after entering REVIEW" in str(exc)
+    else:
+        raise AssertionError("Expected stale review artifact to fail")
+
+    previous_mtime = review_artifact.stat().st_mtime_ns
+    review_artifact.write_text('{"status":"fresh"}\n', encoding="utf-8")
+    os.utime(review_artifact, ns=(previous_mtime + 1_000_000, previous_mtime + 1_000_000))
+    result = advance_stage(root_dir, "VERIFY", step_id="green-001")
+    assert result["state"]["stage"] == "VERIFY"
+
+
 def test_done_cannot_be_advanced_further() -> None:
     """Test that done cannot be advanced further."""
     root_dir = make_temp_repo()
@@ -327,6 +358,37 @@ def test_cli_failed_verify_requires_failure_analysis_then_allows_reentry() -> No
     assert "failure-analysis.md" in payload["error"]
 
     (root_dir / ".agent" / "artifacts" / "failure-analysis.md").write_text("## Failure Summary\n", encoding="utf-8")
+    code, _ = invoke_cli(
+        root_dir,
+        ["advance-stage", "--to", "GREEN_IMPL", "--step", "green-001"],
+    )
+    assert code == 0
+
+
+def test_failure_analysis_artifact_must_be_updated_in_current_stage() -> None:
+    """Test that a stale failure-analysis artifact must be refreshed after entering analysis stage."""
+    root_dir = make_temp_repo()
+    analysis_artifact = root_dir / ".agent" / "artifacts" / "failure-analysis.md"
+    analysis_artifact.write_text("## Failure Summary\nold\n", encoding="utf-8")
+    write_state(
+        root_dir,
+        task_id="password-reset",
+        stage="VERIFY",
+        current_step="verify-001",
+    )
+    invoke_cli(root_dir, ["record-command", "--cmd", "pytest", "--exit-code", "1", "--log", ".agent/artifacts/final-verification.log"])
+
+    code, payload = invoke_cli(
+        root_dir,
+        ["advance-stage", "--to", "GREEN_IMPL", "--step", "green-001"],
+    )
+    assert code == 1
+    assert "failure-analysis.md" in payload["error"]
+    assert "updated after entering NEEDS_FAILURE_ANALYSIS" in payload["error"]
+
+    previous_mtime = analysis_artifact.stat().st_mtime_ns
+    analysis_artifact.write_text("## Failure Summary\nfresh\n", encoding="utf-8")
+    os.utime(analysis_artifact, ns=(previous_mtime + 1_000_000, previous_mtime + 1_000_000))
     code, _ = invoke_cli(
         root_dir,
         ["advance-stage", "--to", "GREEN_IMPL", "--step", "green-001"],

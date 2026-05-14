@@ -94,32 +94,3 @@ def test_finalization_allows_plan_when_all_steps_are_done_or_failed() -> None:
 
     result = can_finalize(root_dir)
     assert result["decision"] == "allow"
-
-
-def test_finalization_requires_review_artifact_when_plan_includes_review_stage() -> None:
-    """Test that finalization requires review evidence when the plan includes review."""
-    root_dir = make_temp_repo()
-    (root_dir / ".agent" / "plan.yaml").write_text(
-        "task_id: password-reset\n"
-        "steps:\n"
-        "  - id: review-001\n"
-        "    stage: REVIEW\n"
-        "    goal: inspect diff\n"
-        "    status: done\n",
-        encoding="utf-8",
-    )
-    write_state(
-        root_dir,
-        remaining_steps=[],
-        can_finalize=True,
-        last_verification={
-            "command": "pytest",
-            "exit_code": 0,
-            "log_path": ".agent/artifacts/final-verification.log",
-            "recorded_at": "2026-05-14T10:00:00Z",
-        },
-    )
-
-    result = can_finalize(root_dir)
-    assert result["decision"] == "block"
-    assert "review artifact is missing" in "\n".join(result["reasons"])

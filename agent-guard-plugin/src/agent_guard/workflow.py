@@ -13,6 +13,7 @@ from .transitions import (
 from .workflow_spec import (
     complete_step_allowed_from_stages,
     global_gates,
+    stage_display_artifacts,
     stage_expected_artifacts,
     stage_required_artifacts,
     stage_write_policy,
@@ -125,6 +126,7 @@ def get_workflow_context(root_dir: Path, stage: str) -> dict[str, Any]:
         "forbidden_actions": rules.get("forbidden_actions", []),
         "stage_writable_paths": stage_write_policy(stage)["writable_paths"],
         "stage_denied_paths": stage_write_policy(stage)["denied_paths"],
+        "stage_display_artifacts": stage_display_artifacts(stage),
         "stage_expected_artifacts": stage_expected_artifacts(stage),
         "stage_required_artifacts": stage_required_artifacts(stage),
         "transitions_in": [source for source, targets in STAGE_TRANSITIONS.items() if stage in targets],
@@ -158,6 +160,7 @@ def build_session_prompt_block(
     gates = "; ".join(workflow_context["global_gates"])
     stage_writable_paths = workflow_context["stage_writable_paths"] or ["<none>"]
     stage_denied_paths = workflow_context["stage_denied_paths"] or ["<none>"]
+    stage_display_artifacts = workflow_context["stage_display_artifacts"] or ["<none>"]
     stage_expected_artifacts = workflow_context["stage_expected_artifacts"] or ["<none>"]
     stage_required_artifacts = workflow_context["stage_required_artifacts"] or ["<none>"]
     transition_graph = workflow_context["transition_graph_mermaid"]
@@ -188,6 +191,7 @@ def build_session_prompt_block(
         "```\n"
         + f"Stage writable paths: {stage_writable_paths}\n"
         + f"Stage denied paths: {stage_denied_paths}\n"
+        + f"Stage artifacts: {stage_display_artifacts}\n"
         + f"Stage expected artifacts: {stage_expected_artifacts}\n"
         + f"Stage required artifacts: {stage_required_artifacts}\n"
         + f"Complete-step allowed from: {complete_step_allowed}\n"

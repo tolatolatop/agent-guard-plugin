@@ -33,7 +33,7 @@ def test_repeating_same_failed_command_twice_without_code_changes_is_blocked() -
 
     result = check_failure_loop(root_dir)
     assert result["decision"] == "block"
-    assert "failure-analysis.md" in result["reason"]
+    assert "failure analysis" in result["reason"].lower()
 
 
 def test_verify_command_records_final_verification_result() -> None:

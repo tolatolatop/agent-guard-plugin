@@ -1,634 +1,433 @@
-# DDD Design: Agent Guard as a Workflow-Driven Engine
+# DDD Design: Workflow-Driven Engine DSL
 
 ## Goal
 
-Turn `agent-guard` from a CLI-and-hook tool with embedded workflow policy into a workflow-driven engine.
+Turn `agent-guard` into a workflow-driven engine whose execution semantics come from a stable DSL, not from scattered branch logic in hooks, CLI glue, or prompt assembly.
 
-The engine should own execution semantics, while runtimes, hooks, files, and prompts become adapters around the same domain model.
+The workflow DSL should describe:
 
-This does not mean every concern belongs in workflow configuration.
-It means workflow policy should be the primary source of truth for:
+- stage intent
+- stage permissions
+- stage transitions
+- stage evidence
+- global path, failure, and finalization policy
 
-- stage model
-- transition rules
-- path policy
-- command policy
-- artifact requirements
-- finalization conditions
-- failure-loop behavior
-- job polling policy
+Runtime adapters should translate events into application commands, but they should not own workflow semantics.
 
-Infrastructure concerns should stay in code:
+## Design Principles
 
-- file IO
-- JSON/YAML parsing
-- CLI argument parsing
-- runtime payload translation
-- install/uninstall for Claude Code, Codex, and OpenCode
-
-## Design Lens
-
-Use DDD to separate:
-
-- domain: workflow rules and task progression
-- application: use cases and orchestration
-- infrastructure: files, CLI, runtime hooks, generated installers
-
-The key shift is:
-
-`agent-guard` should stop encoding workflow behavior in Python branch logic wherever that behavior can be expressed as workflow data plus a small set of stable rule evaluators.
-
-## Problem With Current Shape
-
-The repository already externalizes part of the workflow into `.workflow.yaml`, but core policy still leaks into source modules:
-
-- `path_policy.py` hardcodes sensitive paths
-- `failures.py` hardcodes repeat thresholds, code-fingerprint scope, and RED/VERIFY semantics
-- `gates.py` hardcodes finalization checks and still underspecifies required evidence
-- `wizard.py` hardcodes start stages, default scopes, and plan template conventions
-- `transitions.py` hardcodes the supported transition rule types in `if/elif` form
-- `workflow.py` hardcodes the reminder/prompt assembly shape
-
-That means the system is not yet a workflow engine.
-It is a workflow-aware application.
-
-## Ubiquitous Language
-
-Define the domain vocabulary first:
-
-- `Task`: the guarded unit of work
-- `Workflow`: the policy model that governs the task
-- `Stage`: a named execution state in the workflow
-- `Step`: a planned unit of progress within a task
-- `Transition`: a legal move from one stage to another
-- `Guard`: a decision that allows or blocks an action
-- `Artifact`: durable evidence produced during execution
-- `Command Execution`: a recorded tool or shell action with result and evidence
-- `Failure Loop`: repeated equivalent failure without meaningful change
-- `Job`: long-running work that must be polled under policy
-- `Finalization`: the transition from active work to completion summary
-- `Runtime Event`: an external hook event translated into a domain command
-
-These terms should appear in types, CLI outputs, tests, and docs consistently.
+1. Keep the DSL small.
+2. Use stable domain language instead of runtime-specific knobs.
+3. Prefer `allow` and `deny` pairs over one-off flags.
+4. Keep stage-local rules inside the stage.
+5. Keep global completion and failure rules at the top level.
+6. Fail closed when a rule is omitted or invalid.
 
 ## Bounded Contexts
 
-The system fits best as four bounded contexts.
+### Workflow Definition
 
-### 1. Workflow Definition
-
-Owns the static policy model:
+Owns the static workflow DSL:
 
 - stage catalog
 - transition graph
-- rule declarations
-- artifact declarations
-- path policy declarations
-- command policy declarations
-- failure policy declarations
-- job policy declarations
-- finalization policy declarations
+- path policy
+- failure policy
+- finalization policy
+- wizard defaults
 
-Primary artifact:
+### Task Execution
 
-- `workflow spec`
-
-This is today’s `.workflow.yaml`, but it needs to grow into a fuller policy document.
-
-### 2. Task Execution
-
-Owns the mutable lifecycle of one task:
+Owns the mutable task lifecycle:
 
 - current stage
 - current step
-- completed and pending plan steps
-- verification evidence
-- current scope
-- escalation state
+- plan progress
+- verification state
+- failure state
+- finalization state
 
 Primary aggregate:
 
 - `TaskSession`
 
-Primary persistence:
+### Runtime Integration
 
-- `.agent/state.json`
-- `.agent/plan.yaml`
-- `.agent/jobs.json`
-- `.agent/failures.json`
-- `.agent/events.jsonl`
-
-### 3. Runtime Integration
-
-Owns translation between external tools and domain commands:
+Owns translation only:
 
 - Claude Code hook payloads
-- Codex hook payloads
-- OpenCode plugin events
+- Codex runtime events
+- OpenCode runtime events
 
-This context should not make workflow decisions.
-It should translate external events into application commands and map guard results back into runtime-specific response formats.
+This layer must not decide whether a write, transition, or finalization is legal.
 
-### 4. Installation and Provisioning
-
-Owns:
-
-- runtime-specific install paths
-- generated hook configs
-- bundled skill/workflow assets
-
-This context is infrastructure-heavy and should remain separate from workflow policy.
-
-## Aggregates and Entities
-
-### Aggregate: TaskSession
-
-`TaskSession` is the main aggregate root.
-
-It should represent the guarded state of one active task:
-
-- `task_id`
-- `workflow_id` or `workflow_version`
-- `stage`
-- `current_step`
-- `step_statuses`
-- `active_scope`
-- `last_verification`
-- `needs_human`
-- `can_finalize`
-
-Responsibilities:
-
-- apply stage transitions
-- evaluate whether actions are legal under current policy
-- record command outcomes
-- enter failure-analysis state when required
-- enter ready-to-summarize only when all required evidence exists
-
-### Entity: PlanStep
-
-Today `plan.yaml` is treated as a lightweight file helper.
-In the target design, a step should become a domain entity:
-
-- `id`
-- `goal`
-- `status`
-- `stage`
-- `commands`
-- `success_conditions`
-- `artifacts_required`
-
-This aligns more closely with the project’s own AGENTS requirements.
-
-### Entity: Job
-
-A tracked long-running operation:
-
-- `id`
-- `kind`
-- `command`
-- `status`
-- `started_at`
-- `last_polled_at`
-- `next_poll_after`
-- `poll_count`
-- `max_polls`
-
-### Entity: FailureRecord
-
-Represents the most recent failure-loop candidate:
-
-- `command_signature`
-- `failure_hash`
-- `repeat_count`
-- `code_fingerprint`
-- `log_path`
-- `analysis_required`
-
-### Value Objects
-
-Stable domain value objects should be introduced for:
-
-- `StageName`
-- `StepId`
-- `PathPattern`
-- `ArtifactPath`
-- `CommandPolicy`
-- `TransitionCondition`
-- `GuardDecision`
-- `VerificationRecord`
-- `FailureFingerprint`
-
-## Domain Services
-
-The engine needs explicit domain services instead of scattered helper logic.
-
-### WorkflowPolicyService
-
-Evaluates static workflow rules:
-
-- allowed writes
-- legal transitions
-- entry and exit conditions
-- expected artifacts
-- finalization requirements
-
-This should consume the workflow spec and current aggregate state.
-
-### FailurePolicyService
+### Installation and Provisioning
 
 Owns:
 
-- failure equivalence
-- repeat thresholds
-- analysis requirements
-- escalation behavior
+- installer entrypoints
+- runtime-specific hook wiring
+- packaged workflow and skill assets
 
-### JobPolicyService
+## Ubiquitous Language
 
-Owns:
+Use these terms consistently:
 
-- poll intervals by job kind
-- max-poll behavior
-- escalation to human review
+- `Workflow`: the static policy document
+- `Stage`: a named execution state
+- `TaskSession`: the current task aggregate
+- `Transition`: a legal move between stages
+- `Permission`: what a stage allows or denies
+- `Evidence`: durable artifacts required by the workflow
+- `GuardDecision`: allow or block with a reason
+- `Finalization`: the completion gate for the whole task
+- `Failure Loop`: repeated equivalent failure without meaningful change
 
-### FinalizationPolicyService
+## Target DSL Shape
 
-Owns:
+The target workflow shape is:
 
-- required verification state
-- required review artifacts
-- required terminal plan state
-- no-running-jobs rule
-- explicit finalization authorization
+```yaml
+version: 1
 
-### SessionReminderService
+workflow:
+  id: standard
+  title: Standard Agent Guard Workflow
+  description: Minimal workflow-driven guard for long-running coding tasks.
 
-Builds runtime-facing reminders from domain state plus workflow metadata.
+globals:
+  paths:
+    protected:
+      - .agent/state.json
+    sensitive:
+      - .github/**
+      - infra/**
+      - migrations/**
+      - package-lock.json
+      - pnpm-lock.yaml
+      - yarn.lock
+      - poetry.lock
+      - Cargo.lock
 
-This is still a domain-facing service, but its output format should be treated as a projection, not as domain state.
+  failures:
+    repeat_threshold: 2
+    fingerprint_roots:
+      - src
+      - tests
 
-## Repositories
+  finalization:
+    require:
+      - remaining_steps_empty
+      - no_running_jobs
+      - successful_last_verification
+      - can_finalize_flag
+      - all_plan_steps_terminal
+    messages:
+      remaining_steps_empty: remaining_steps must be empty
+      no_running_jobs: running jobs still exist
+      successful_last_verification: last_verification.exit_code must be 0
+      can_finalize_flag: state.can_finalize is not true
+      all_plan_steps_terminal: all plan steps must be done or failed
 
-Repositories should hide file layout from the domain layer.
+  wizard:
+    start_stages:
+      - CLARIFYING
+      - PLANNING
+      - RED_TEST
+      - GREEN_IMPL
 
-### TaskSessionRepository
+stages:
+  RED_TEST:
+    intent:
+      goal: Create a failing test that proves the missing behavior.
 
-Backed by:
+    permissions:
+      write:
+        allow:
+          - tests/**
+        deny:
+          - src/**
+      actions:
+        allow:
+          - write tests
+          - run targeted tests
+          - save failing logs
+        deny:
+          - write production code
+          - claim implementation is complete
+      commands:
+        complete_step: allow
+      handoff:
+        human_stop: deny
+        deny_message: Current stage does not allow human intervention; continue advancing the task.
 
-- `.agent/state.json`
-- `.agent/plan.yaml`
+    transitions:
+      to:
+        - GREEN_IMPL
+        - NEEDS_FAILURE_ANALYSIS
+      enter_when: []
 
-### JobRepository
+    evidence:
+      expected:
+        - .agent/artifacts/red-test.log
+      required: []
+```
 
-Backed by:
+## Stage Structure
 
-- `.agent/jobs.json`
+Every stage should use the same four groups.
 
-### FailureRepository
+### `intent`
 
-Backed by:
+Contains the stage goal only.
 
-- `.agent/failures.json`
+Example:
 
-### EventLogRepository
+```yaml
+intent:
+  goal: Implement the smallest code change that makes the targeted test pass.
+```
 
-Backed by:
+This is descriptive. It tells the agent what the stage is for.
 
-- `.agent/events.jsonl`
+### `permissions`
 
-### WorkflowSpecRepository
+Contains everything the stage allows or denies.
 
-Backed by:
+```yaml
+permissions:
+  write:
+    allow:
+      - src/**
+      - tests/**
+    deny: []
+  actions:
+    allow:
+      - write minimal production code
+      - update tests if required
+      - run targeted verification
+    deny:
+      - broad refactors
+      - unrelated formatting
+  commands:
+    complete_step: allow
+  handoff:
+    human_stop: deny
+    deny_message: Current stage does not allow human intervention; continue advancing the task.
+```
 
-- packaged `.workflow.yaml`
-- source `.workflow.yaml`
+This replaces field sprawl such as:
 
-## Application Layer
+- `write_policy`
+- `allowed_actions`
+- `forbidden_actions`
+- `allows_complete_step`
+- `forbid_needs_human`
 
-The application layer should expose use cases instead of letting CLI commands call low-level helpers directly.
+### `transitions`
 
-Recommended commands/use cases:
-
-- `InitializeWorkspace`
-- `StartTask`
-- `ResetTask`
-- `AdvanceStage`
-- `CompleteStep`
-- `RecordCommandExecution`
-- `CheckWritePermission`
-- `CheckFailureLoop`
-- `CheckJobPoll`
-- `CheckFinalization`
-- `PrepareSummary`
-- `MarkDone`
-- `BuildSessionReminder`
-
-Each use case should:
-
-1. load aggregates from repositories
-2. load workflow definition
-3. invoke domain services
-4. persist updated aggregates
-5. emit domain events
-6. return a stable machine-readable result
-
-## Domain Events
-
-The event log should reflect domain events, not merely hook names.
-
-Suggested event types:
-
-- `TaskStarted`
-- `StageAdvanced`
-- `StepCompleted`
-- `WriteBlocked`
-- `CommandRecorded`
-- `FailureLoopDetected`
-- `FailureAnalysisRequired`
-- `JobRegistered`
-- `JobPollBlocked`
-- `HumanEscalationRequired`
-- `FinalizationBlocked`
-- `ReadyToSummarize`
-- `TaskMarkedDone`
-
-Hook names can still be included as metadata, but should not be the primary event vocabulary.
-
-## What Belongs In Workflow Spec
-
-To become workflow-driven, policy now embedded in code should move into the workflow definition.
-
-### Stage Model
-
-Already partly present and should remain:
-
-- stage goals
-- stage actions
-- stage path constraints
-- allowed next stages
-- expected and required artifacts
-- writable mode
-
-### Transition Policy
-
-Should be formalized further:
-
-- named transition conditions
-- conditions per transition, not only per destination stage
-- whether transition is manual, command-driven, or automatic
-- post-transition effects
-
-Example shape:
+Contains the state graph and transition-entry rules.
 
 ```yaml
 transitions:
-  - from: VERIFY
-    to: READY_TO_SUMMARIZE
-    trigger: ready-to-summarize
-    conditions:
-      - rule: successful_last_verification
-      - rule: no_running_jobs
-      - rule: all_plan_steps_terminal
-      - rule: review_artifact_present
-      - rule: can_finalize_enabled
+  to:
+    - REVIEW
+    - NEEDS_FAILURE_ANALYSIS
+  enter_when:
+    - rule: active_task
+      display: active task exists
 ```
 
-### Path Policy
+This replaces:
 
-Move these into workflow policy:
+- `allowed_next_stages`
+- `entry_conditions`
 
-- sensitive path patterns
-- protected paths
-- per-stage managed-only / read-only semantics
-- plan-step overrides for lockfiles or infra paths
+`enter_when` stays declarative. It names built-in evaluator rules, but does not execute arbitrary scripts.
 
-This removes the hardcoded list now in `path_policy.py`.
+### `evidence`
 
-### Failure Policy
-
-Move these into workflow policy:
-
-- repeat threshold
-- fingerprint roots
-- equivalent-failure strategy
-- required analysis artifact
-- expected-failure rules by stage or step
-
-Example:
+Contains stage artifacts.
 
 ```yaml
-failure_policy:
-  repeat_threshold: 2
-  fingerprint_roots:
-    - src/**
-    - tests/**
-  expected_failures:
-    - stage: RED_TEST
-      exit_code: nonzero
-  analysis_artifact: .agent/artifacts/failure-analysis.md
+evidence:
+  expected:
+    - .agent/artifacts/final-verification.log
+  required:
+    - .agent/artifacts/review.json
 ```
 
-### Job Policy
+Rules:
 
-Move these into workflow policy:
+- `required` participates in guards and display.
+- `expected` is optional display-only metadata.
+- Display should dedupe `required` and `expected`.
 
-- polling interval ranges by job kind
-- max poll counts
-- escalation thresholds
+This replaces:
 
-### Finalization Policy
+- `artifacts_expected`
+- `artifacts_required`
 
-Move these into workflow policy:
+## Why This DSL Is Better
 
-- required terminal stage
-- required verification status
-- required artifacts
-- required review evidence
-- no-running-jobs rule
+### It matches the domain
 
-This removes the partial hardcoding now in `gates.py`.
+Each stage becomes a small policy object:
 
-### Wizard Defaults
+- why the stage exists
+- what the stage allows
+- where the stage can go
+- what evidence the stage expects
 
-Wizard behavior should come from workflow spec defaults:
+That is a cleaner domain model than a flat bag of fields.
 
-- allowed bootstrap stages
-- default step naming templates
-- default scope by stage
-- whether plan creation is recommended
+### It reduces user confusion
 
-## What Should Stay In Code
+Users do not need to learn:
 
-Even in a workflow-driven engine, some things should remain explicit code.
+- write modes
+- dynamic path scopes
+- special top-level command rules
+- mixed action and transition flags at the same level
 
-### Runtime Adapters
+They only learn one stage pattern.
 
-The parsing of Claude/Codex/OpenCode payloads should remain code.
-Those payloads are infrastructure contracts, not workflow rules.
+### It is runtime-neutral
 
-### Installers
+Claude Code, Codex, and OpenCode can all consume the same semantics:
 
-Hook installation, config-file edits, and generated JS/JSON should remain code.
+- write permissions
+- transition rules
+- failure policy
+- finalization policy
 
-### Repositories and Serialization
+The runtime adapter only translates payload shape and response format.
 
-JSON/YAML parsing, schema normalization, path resolution, and file locking remain code.
+## Domain Model Impact
 
-### Rule Evaluator Registry
+### `TaskSession`
 
-The engine should not use arbitrary user-defined code from YAML.
-It should keep a stable registry of built-in rule evaluators in Python.
+`TaskSession` should own current execution state only:
 
-Important distinction:
+- `task_id`
+- `stage`
+- `current_step`
+- `completed_steps`
+- `remaining_steps`
+- `can_finalize`
+- `last_verification`
+- `needs_human`
 
-- the existence and composition of rules should be configured
-- the implementation of each safe evaluator should stay in code
+It should not own workflow configuration.
 
-This is the correct balance between workflow-driven behavior and operational safety.
+### `PlanStep`
 
-## Target Architecture
+`PlanStep` should stay focused on task planning:
 
-Recommended package split:
+- `id`
+- `stage`
+- `goal`
+- `commands`
+- `success_condition`
+- `status`
 
-```text
-src/agent_guard/
-  domain/
-    model/
-      task_session.py
-      plan_step.py
-      job.py
-      failure_record.py
-      value_objects.py
-    services/
-      workflow_policy.py
-      failure_policy.py
-      job_policy.py
-      finalization_policy.py
-      reminder_service.py
-    events.py
+It should not duplicate stage-level write permissions.
 
-  application/
-    commands.py
-    handlers.py
-    dto.py
+### Policy Services
 
-  infrastructure/
-    repositories/
-      state_repository.py
-      plan_repository.py
-      jobs_repository.py
-      failures_repository.py
-      events_repository.py
-      workflow_spec_repository.py
-    runtime/
-      claude_adapter.py
-      codex_adapter.py
-      opencode_adapter.py
-    install/
-      installer.py
+The DSL maps naturally to policy services:
 
-  interfaces/
-    cli.py
-    runtime_bridge.py
-    wizard.py
-```
+- `WritePolicyService`
+- `FailurePolicyService`
+- `FinalizationPolicyService`
+- `TransitionPolicyService`
 
-The existing modules can migrate toward this shape incrementally rather than all at once.
+Each service evaluates one slice of workflow semantics against `TaskSession` and repository state.
 
-## Rule Evaluation Model
+## Rule Evaluator Model
 
-The workflow engine should use declarative rules plus a fixed evaluator registry.
+The workflow remains declarative.
 
-Example:
+Allowed rule names come from a built-in registry such as:
 
-```python
-RULE_EVALUATORS = {
-    "active_task": ActiveTaskRule(),
-    "successful_last_verification": SuccessfulLastVerificationRule(),
-    "no_running_jobs": NoRunningJobsRule(),
-    "all_plan_steps_terminal": AllPlanStepsTerminalRule(),
-    "review_artifact_present": ReviewArtifactPresentRule(),
-    "required_command": RequiredCommandRule(),
-}
-```
+- `active_task`
+- `required_command`
+- `successful_last_verification`
+- `no_running_jobs`
+- `all_plan_steps_terminal`
+- `can_finalize_passes`
 
-The workflow spec references rules by name.
-The evaluator registry implements them safely in code.
+The registry is code.
+The rule composition is workflow data.
 
-This is the core pattern that lets the system become workflow-driven without turning YAML into executable code.
+This preserves safety and testability while avoiding arbitrary script execution in the DSL.
 
-## Migration Strategy
+## Compatibility Mapping
 
-### Phase 1: Extract Domain Vocabulary
+The current repository still uses a flatter `.workflow.yaml`.
+The target DSL should map mechanically from the current shape.
 
-- introduce domain types for task session, plan step, job, failure record
-- stop passing raw dictionaries across the codebase where behavior matters
+Mapping:
 
-### Phase 2: Expand Workflow Spec
+- `goal` -> `intent.goal`
+- `write_policy.writable_paths` -> `permissions.write.allow`
+- `write_policy.denied_paths` -> `permissions.write.deny`
+- `allowed_actions` -> `permissions.actions.allow`
+- `forbidden_actions` -> `permissions.actions.deny`
+- `allows_complete_step` -> `permissions.commands.complete_step`
+- `forbid_needs_human` -> `permissions.handoff.human_stop: deny`
+- `allowed_next_stages` -> `transitions.to`
+- `entry_conditions.any` -> `transitions.enter_when`
+- `artifacts_expected` -> `evidence.expected`
+- `artifacts_required` -> `evidence.required`
 
-- add `path_policy`
-- add `failure_policy`
-- add `job_policy`
-- add `finalization_policy`
-- add `wizard_defaults`
+Top-level mapping:
 
-### Phase 3: Replace Hardcoded Policy
+- `metadata` -> `workflow`
+- `path_policy` -> `globals.paths`
+- `failure_policy` -> `globals.failures`
+- `finalization_policy` -> `globals.finalization`
+- `wizard_defaults` -> `globals.wizard`
 
-- move sensitive paths out of `path_policy.py`
-- move repeat-threshold and fingerprint roots out of `failures.py`
-- move finalization criteria out of `gates.py`
-- move wizard defaults out of `wizard.py`
+## Migration Guidance
 
-### Phase 4: Introduce Rule Registry
+Migration should happen in two steps.
 
-- replace `if/elif` transition-rule interpretation with rule objects
-- support transition-level condition composition
+### Step 1
 
-### Phase 5: Reframe Runtime Bridge
+Keep runtime behavior the same, but update docs and internal adapters to think in:
 
-- bridge only translates runtime events into application commands
-- runtime-specific response rendering stays outside the domain
+- `intent`
+- `permissions`
+- `transitions`
+- `evidence`
 
-### Phase 6: Tighten Tests Around Domain Behavior
+### Step 2
 
-Prefer tests at the domain-service level:
+Update `.workflow.yaml` parsing so the grouped DSL becomes the actual source format, and keep a compatibility shim only if necessary.
 
-- path guards from workflow data
-- transition legality from workflow data
-- failure-loop behavior from workflow data
-- finalization behavior from workflow data
+## Test Expectations
 
-## Non-Goals
+Tests for the DSL should cover:
 
-This design should not attempt:
+- invalid top-level sections fail closed
+- invalid stage grouping fails closed
+- unknown transition rule names fail closed
+- `permissions.write.allow` and `permissions.write.deny` drive write guards
+- `permissions.commands.complete_step` drives `complete-step`
+- `transitions.to` drives the generated Mermaid graph
+- `evidence.required` drives exit gating
+- `globals.finalization.require` drives `can-finalize`
 
-- arbitrary executable workflow scripting
-- user-defined Python plugins for domain rules in v1
-- a distributed scheduler
-- autonomous multi-agent orchestration
+## Summary
 
-The engine should remain deterministic, inspectable, and file-backed.
+The target DDD DSL is a stage-grouped policy language:
 
-## Proposed First Refactor Slice
+- `intent`
+- `permissions`
+- `transitions`
+- `evidence`
 
-The highest-leverage first slice is:
+plus a small `globals` section for cross-stage rules.
 
-1. add `failure_policy`, `path_policy`, and `finalization_policy` sections to `.workflow.yaml`
-2. create `WorkflowPolicyService`
-3. make `path_policy.py`, `failures.py`, and `gates.py` read policy from the workflow model instead of hardcoded constants
-4. keep CLI and runtime behavior unchanged externally
-
-This yields the biggest architectural improvement with the least runtime disruption.
-
-## Expected Outcome
-
-After the refactor, `agent-guard` should be describable as:
-
-`A file-backed workflow engine with runtime adapters`
-
-not:
-
-`A set of CLI helpers with some workflow metadata on the side`
-
-That distinction matters because it determines whether future policy changes require editing Python source or primarily editing a workflow definition plus tests.
+That keeps the workflow explicit, teachable, and portable across agent runtimes without leaking runtime mechanics into user-facing configuration.

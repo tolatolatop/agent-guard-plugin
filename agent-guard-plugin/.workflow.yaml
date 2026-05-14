@@ -44,32 +44,6 @@ failure_policy:
   fingerprint_roots:
     - src
     - tests
-  # Stages where a non-zero exit code can be expected rather than treated as an unexpected workflow failure.
-  expected_failure_stages:
-    - RED_TEST
-  # Required artifact before retrying after a repeated identical failure.
-  analysis_artifact: .agent/artifacts/failure-analysis.md
-  # Stage to enter when failure analysis is required.
-  analysis_stage: NEEDS_FAILURE_ANALYSIS
-
-job_policy:
-  # Default poll ceiling when an individual job record does not provide max_polls.
-  default_max_polls: 20
-  # Escalation target if a job exceeds policy and needs human intervention.
-  escalation_stage: NEEDS_HUMAN
-  # Reference polling windows by job kind. Runtime adapters may map concrete commands into these buckets.
-  polling:
-    unit_test:
-      min_seconds: 10
-      max_seconds: 30
-    full_test_suite:
-      min_seconds: 30
-      max_seconds: 60
-    build:
-      min_seconds: 60
-      max_seconds: 60
-    deployment:
-      approval_required: true
 
 finalization_policy:
   # Built-in rule names evaluated by the rule registry in code.
@@ -86,9 +60,6 @@ finalization_policy:
     successful_last_verification: last_verification.exit_code must be 0
     can_finalize_flag: state.can_finalize is not true
     all_plan_steps_terminal: all plan steps must be done or failed
-  # Only required when the active plan actually contains a REVIEW step.
-  review_artifact: .agent/artifacts/review.json
-  require_review_artifact_when_plan_includes_review: true
 
 wizard_defaults:
   # Stages exposed as entry choices by the interactive wizard.
@@ -97,40 +68,6 @@ wizard_defaults:
     - PLANNING
     - RED_TEST
     - GREEN_IMPL
-
-command_rules:
-  # Stages where the complete-step workflow command is legal.
-  complete_step_allowed_from_stages:
-    - RED_TEST
-    - GREEN_IMPL
-    - REVIEW
-    - VERIFY
-
-transition_graph_mermaid: |
-  flowchart TD
-    IDLE --> CLARIFYING
-    CLARIFYING --> DESIGNING
-    CLARIFYING --> PLANNING
-    DESIGNING --> PLANNING
-    PLANNING --> RED_TEST
-    PLANNING --> GREEN_IMPL
-    RED_TEST --> GREEN_IMPL
-    RED_TEST --> NEEDS_FAILURE_ANALYSIS
-    GREEN_IMPL --> REVIEW
-    GREEN_IMPL --> NEEDS_FAILURE_ANALYSIS
-    REVIEW --> VERIFY
-    REVIEW --> GREEN_IMPL
-    VERIFY --> READY_TO_SUMMARIZE
-    VERIFY --> RED_TEST
-    VERIFY --> GREEN_IMPL
-    VERIFY --> NEEDS_FAILURE_ANALYSIS
-    READY_TO_SUMMARIZE --> DONE
-    NEEDS_FAILURE_ANALYSIS --> RED_TEST
-    NEEDS_FAILURE_ANALYSIS --> GREEN_IMPL
-    NEEDS_FAILURE_ANALYSIS --> VERIFY
-    NEEDS_FAILURE_ANALYSIS --> NEEDS_HUMAN
-    NEEDS_HUMAN --> CLARIFYING
-    NEEDS_HUMAN --> PLANNING
 
 stages:
   IDLE:
@@ -231,6 +168,7 @@ stages:
 
   RED_TEST:
     goal: Create a failing test that proves the missing behavior.
+    allows_complete_step: true
     forbid_needs_human:
       display: Current stage does not allow human intervention; continue advancing the task.
     allowed_actions:
@@ -255,6 +193,7 @@ stages:
 
   GREEN_IMPL:
     goal: Implement the smallest code change that makes the targeted test pass.
+    allows_complete_step: true
     forbid_needs_human:
       display: Current stage does not allow human intervention; continue advancing the task.
     allowed_actions:
@@ -280,6 +219,7 @@ stages:
 
   REVIEW:
     goal: Review the diff and capture review evidence without changing code.
+    allows_complete_step: true
     forbid_needs_human:
       display: Current stage does not allow human intervention; continue advancing the task.
     allowed_actions:
@@ -303,6 +243,7 @@ stages:
 
   VERIFY:
     goal: Run verification commands and record final evidence.
+    allows_complete_step: true
     forbid_needs_human:
       display: Current stage does not allow human intervention; continue advancing the task.
     allowed_actions:

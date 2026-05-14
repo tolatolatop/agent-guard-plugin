@@ -18,7 +18,7 @@ Decision order:
    - `plan-yaml.md` when creating, reading, or updating `.agent/plan.yaml`
    - `failure-analysis.md` when blocked by repeated failures
    - `finalization-checklist.md` before claiming completion
-4. Follow hard gates from stage `write_policy`, `check-failure-loop`, and `can-finalize`.
+4. Follow hard gates from stage permissions, `check-failure-loop`, and `can-finalize`.
 
 Core navigation rules:
 

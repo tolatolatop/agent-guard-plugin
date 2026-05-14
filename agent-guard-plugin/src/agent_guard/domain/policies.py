@@ -10,8 +10,8 @@ from typing import Any
 from .models import FailureRecord, GuardDecision, TaskSession, VerificationRecord
 from .rules import RuleContext, evaluate_rule
 from ..events import append_event
-from ..infrastructure.repositories import FailuresRepository, JobsRepository, PlanRepository, StateRepository
-from ..workflow_spec import failure_policy, finalization_policy, job_policy, path_policy
+from ..infrastructure.repositories import FailuresRepository, JobsRepository, StateRepository
+from ..workflow_spec import failure_policy, finalization_policy, path_policy
 
 
 def normalize_path(target_path: str) -> str:
@@ -91,6 +91,9 @@ class WorkflowPolicyService:
 class FailurePolicyService:
     """Policy service for command recording and failure-loop detection."""
 
+    EXPECTED_FAILURE_STAGE = "RED_TEST"
+    ANALYSIS_STAGE = "NEEDS_FAILURE_ANALYSIS"
+
     def __init__(self, root_dir: Path):
         self.root_dir = root_dir
         self.state_repo = StateRepository(root_dir)
@@ -141,11 +144,10 @@ class FailurePolicyService:
             )
         self.failures_repo.save(failure)
 
-        policy = failure_policy()
-        expected_red_failure = session.stage in policy["expected_failure_stages"] and exit_code != 0
+        expected_red_failure = session.stage == self.EXPECTED_FAILURE_STAGE and exit_code != 0
         next_session = session
         if exit_code != 0 and not expected_red_failure:
-            next_session = next_session.with_updates(stage=policy["analysis_stage"])
+            next_session = next_session.with_updates(stage=self.ANALYSIS_STAGE)
         if session.stage == "VERIFY":
             next_session = next_session.with_updates(
                 last_verification=VerificationRecord(
@@ -180,10 +182,9 @@ class FailurePolicyService:
             return GuardDecision("allow", "No recorded failure loop.")
         policy = failure_policy()
         if record.repeat_count >= policy["repeat_threshold"] and record.code_changed_since_last_failure is False:
-            artifact = policy["analysis_artifact"]
             return GuardDecision(
                 "block",
-                f"Repeated identical failure detected without code changes. Write {artifact} before retrying.",
+                "Repeated identical failure detected without code changes. Perform failure analysis before retrying.",
                 payload={"failure": record.to_mapping()},
             )
         return GuardDecision(
@@ -195,6 +196,8 @@ class FailurePolicyService:
 
 class JobPolicyService:
     """Policy service for job polling guard checks."""
+
+    DEFAULT_MAX_POLLS = 20
 
     def __init__(self, root_dir: Path):
         self.root_dir = root_dir
@@ -210,7 +213,7 @@ class JobPolicyService:
             now = datetime.now(timezone.utc)
             if now < datetime.fromisoformat(job.next_poll_after.replace("Z", "+00:00")):
                 return GuardDecision("block", f"Job {job_id} cannot be polled before {job.next_poll_after}.")
-        max_polls = job.max_polls if job.max_polls is not None else job_policy()["default_max_polls"]
+        max_polls = job.max_polls if job.max_polls is not None else self.DEFAULT_MAX_POLLS
         if job.poll_count >= max_polls:
             return GuardDecision("block", f"Job {job_id} exceeded max poll count and requires human review.")
         return GuardDecision("allow", f"Job {job_id} can be polled now.")
@@ -231,15 +234,6 @@ class FinalizationPolicyService:
             if evaluate_rule(rule_name, context):
                 continue
             reasons.append(finalization_policy()["rule_messages"].get(rule_name, f"{rule_name} must pass"))
-
-        if finalization_policy()["require_review_artifact_when_plan_includes_review"]:
-            has_review_step = any(step.stage == "REVIEW" for step in PlanRepository(self.root_dir).load_steps())
-            if has_review_step and not evaluate_rule(
-                "review_artifact_present",
-                context,
-                finalization_policy()["review_artifact"],
-            ):
-                reasons.append(f"review artifact is missing: {finalization_policy()['review_artifact']}")
 
         if reasons:
             return GuardDecision("block", reasons[0], reasons=reasons)

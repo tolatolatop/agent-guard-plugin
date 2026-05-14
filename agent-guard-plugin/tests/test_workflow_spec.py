@@ -3,9 +3,11 @@ from agent_guard.workflow_spec import (
     failure_policy,
     finalization_policy,
     path_policy,
+    stage_display_artifacts,
     stage_entry_conditions,
     stage_exit_conditions,
     stage_forbid_needs_human_display,
+    transition_graph_mermaid,
     stage_write_policy,
     wizard_defaults,
 )
@@ -59,3 +61,20 @@ def test_policy_sections_are_loaded_from_workflow_spec() -> None:
     assert "successful_last_verification" in finalization_policy()["required_rules"]
     assert wizard_defaults()["start_stages"] == ["CLARIFYING", "PLANNING", "RED_TEST", "GREEN_IMPL"]
     assert stage_write_policy("RED_TEST")["writable_paths"] == ["tests/**"]
+
+
+def test_transition_graph_mermaid_is_generated_from_stage_transitions() -> None:
+    """Test that transition graph Mermaid is generated from the stage transition map."""
+    graph = transition_graph_mermaid()
+
+    assert graph.startswith("flowchart TD")
+    assert "  IDLE --> CLARIFYING" in graph
+    assert "  GREEN_IMPL --> REVIEW" in graph
+    assert "  READY_TO_SUMMARIZE --> DONE" in graph
+
+
+def test_stage_display_artifacts_merge_required_and_expected_without_duplicates() -> None:
+    """Test that display artifacts show required items without duplicate expected entries."""
+    assert stage_display_artifacts("NEEDS_FAILURE_ANALYSIS") == [
+        ".agent/artifacts/failure-analysis.md",
+    ]

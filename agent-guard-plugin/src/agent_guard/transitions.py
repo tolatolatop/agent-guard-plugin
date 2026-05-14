@@ -10,12 +10,11 @@ from .events import append_event
 from .gates import can_finalize
 from .jobs import load_jobs
 from .plan import nonterminal_plan_steps, update_plan_step_status
-from .state import AGENT_DIR, load_state, save_state
+from .state import AGENT_DIR, load_state, required_artifact_exit_failures, save_state
 from .workflow_spec import (
     complete_step_allowed_from_stages,
     stage_entry_conditions,
     stage_exit_conditions,
-    stage_required_artifacts,
     stage_transitions,
 )
 
@@ -41,16 +40,6 @@ def automatic_transitions() -> list[str]:
 def _has_active_task(state: dict[str, Any]) -> bool:
     """Internal helper for has active task."""
     return bool(state.get("task_id"))
-
-def _required_artifacts_message(stage: str) -> str:
-    """Internal helper for required artifacts message."""
-    required = stage_required_artifacts(stage)
-    if not required:
-        return f"{stage} has no required artifacts."
-    if len(required) == 1:
-        return required[0]
-    return ", ".join(required)
-
 
 def _has_running_jobs(root_dir: Path) -> bool:
     """Internal helper for has running jobs."""
@@ -78,9 +67,9 @@ def _guard_transition(
     """Internal helper for guard transition."""
     from_stage = str(state.get("stage"))
     _require_direct_transition(from_stage, to_stage)
-    current_required = stage_required_artifacts(from_stage)
-    if current_required and not all((root_dir / path).exists() for path in current_required):
-        raise RuntimeError(f"Leaving {from_stage} requires {_required_artifacts_message(from_stage)}.")
+    artifact_failures = required_artifact_exit_failures(root_dir, from_stage)
+    if artifact_failures:
+        raise RuntimeError(f"Leaving {from_stage} requires {'; '.join(artifact_failures)}")
 
     session = TaskSession.from_mapping(state)
     context = RuleContext(root_dir, session, command_name=command_name)
