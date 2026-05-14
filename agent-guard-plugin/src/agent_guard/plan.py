@@ -53,6 +53,8 @@ def plan_steps(root_dir: Path) -> list[dict[str, str]]:
 
 
 def nonterminal_plan_steps(root_dir: Path) -> list[dict[str, str]]:
+    # Only done/failed are terminal. Every other status keeps the plan open and
+    # blocks finalization.
     terminal_statuses = {"done", "failed"}
     return [
         step for step in plan_steps(root_dir) if step.get("status", "").strip().lower() not in terminal_statuses
@@ -75,6 +77,8 @@ def update_plan_step_status(root_dir: Path, step_name: str, status: str) -> dict
         normalized = _normalize_step(step, index)
         if normalized["name"] != step_name:
             continue
+        # Match by stable step name so workflow commands do not depend on
+        # transient state.current_step tracking.
         step["status"] = status
         updated = True
         break

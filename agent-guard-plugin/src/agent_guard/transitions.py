@@ -80,6 +80,8 @@ def _guard_transition(
     if current_required and not all((root_dir / path).exists() for path in current_required):
         raise RuntimeError(f"Leaving {from_stage} requires {_required_artifacts_message(from_stage)}.")
 
+    # Entry conditions are declared on the destination stage and enforced here
+    # for every command that can move the workflow forward.
     for condition in stage_entry_conditions(to_stage, from_stage):
         display = condition["display"]
         rule = condition.get("rule")
@@ -125,6 +127,8 @@ def _next_state_common(
     next_state["allowed_paths"] = allowed_paths
     next_state["forbidden_paths"] = forbidden_paths
     next_state["can_finalize"] = can_finalize_value
+    # needs_human is sticky only inside escalation stages; any normal workflow
+    # stage clears it so the task can continue under agent control again.
     if state.get("stage") in {"NEEDS_FAILURE_ANALYSIS", "NEEDS_HUMAN"} and to_stage != "NEEDS_HUMAN":
         next_state["needs_human"] = False
     if to_stage == "NEEDS_HUMAN":
@@ -200,6 +204,8 @@ def complete_step(
     forbidden = list(forbidden_paths or [])
 
     _guard_transition(root_dir, state, next_stage, "complete-step", None, allowed, forbidden)
+    # complete-step is intentionally narrow now: it marks the named plan step
+    # done and leaves stage progression to the explicit next_stage argument.
     update_plan_step_status(root_dir, step_id, "done")
 
     resolved_allowed = list(allowed or state.get("allowed_paths", [])) if next_stage in {"RED_TEST", "GREEN_IMPL"} else []

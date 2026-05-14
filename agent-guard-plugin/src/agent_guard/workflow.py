@@ -57,6 +57,9 @@ def discover_skills(base_dir: Path) -> list[dict[str, str]]:
         return []
     discovered: dict[str, dict[str, str]] = {}
 
+    # Support both the repo's flat markdown skills and Claude-style bundled
+    # skills directories so session-start can describe whichever install layout
+    # is active.
     for file_path in sorted(base_dir.glob("*.md")):
         skill_id = file_path.stem
         discovered[skill_id] = {
@@ -107,6 +110,8 @@ def get_workflow_context(root_dir: Path, stage: str) -> dict[str, Any]:
         (skill for skill in skill_catalog if skill.get("id") == "using-workflow"),
         None,
     )
+    # This dictionary is the single payload used by session-start and related
+    # reminders, so it keeps prompt generation and machine-readable state aligned.
     return {
         "current_stage_goal": rules["goal"],
         "allowed_actions": rules.get("allowed_actions", []),

@@ -17,6 +17,8 @@ SENSITIVE_PATTERNS = [
 ]
 
 def normalize_path(target_path: str) -> str:
+    # Policy matching is repo-relative, but hooks may send absolute paths.
+    # Special-case .agent paths so they remain governed even when absolute.
     normalized = target_path.replace("\\", "/").removeprefix("./")
 
     if normalized == ".agent" or normalized.startswith(".agent/"):
@@ -99,6 +101,8 @@ def decide_write(state: dict[str, Any], target_path: str) -> dict[str, str]:
             "Use agent-guard workflow commands and .agent artifacts first."
         )
 
+    # Enforcement order matters: hard stage forbids first, then runtime forbids,
+    # then global sensitive-path gates, and finally any explicit allowlist.
     stage_forbidden_paths = list(stage_rule.get("forbidden_paths", []))
     if matches_any(normalized, stage_forbidden_paths):
         return blocked(f"Path {normalized} matches forbidden path policy for stage {stage}.")

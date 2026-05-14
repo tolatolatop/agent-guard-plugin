@@ -34,6 +34,8 @@ def _print_text(value: str, exit_code: int = 0) -> None:
 
 
 def _cli_json(args: list[str], cwd: Path) -> tuple[int, dict[str, Any]]:
+    # Bridge hooks call the CLI in-process so all policy decisions stay in one
+    # place and hooks only translate payloads to/from JSON.
     stdout_buffer = StringIO()
     exit_code = 0
     with redirect_stdout(stdout_buffer):
@@ -75,6 +77,8 @@ def _normalize_target_path_for_policy(cwd: Path, target_path: str) -> str:
         return target_path
 
     try:
+        # Convert repo-local absolute paths back to the relative form expected
+        # by the path policy matcher.
         return path_obj.resolve().relative_to(cwd.resolve()).as_posix()
     except ValueError:
         return target_path

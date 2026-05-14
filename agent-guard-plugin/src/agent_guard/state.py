@@ -54,6 +54,8 @@ def _write_json_if_missing(file_path: Path, value: dict[str, Any]) -> None:
 
 
 def ensure_agent_files(root_dir: Path) -> None:
+    # Create the full managed workspace up front so later commands can assume
+    # .agent state, artifacts, and event files exist.
     artifacts_dir(root_dir).mkdir(parents=True, exist_ok=True)
     _write_json_if_missing(state_path(root_dir), DEFAULT_STATE)
     _write_json_if_missing(jobs_path(root_dir), DEFAULT_JOBS)

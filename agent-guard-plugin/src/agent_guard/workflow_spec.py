@@ -18,6 +18,8 @@ def source_workflow_path() -> Path:
 
 @lru_cache(maxsize=1)
 def load_workflow_spec() -> dict[str, Any]:
+    # Prefer the installed copy first so the runtime behavior matches the
+    # packaged tool, while still allowing source-tree execution in tests.
     for candidate in (packaged_workflow_path(), source_workflow_path()):
         if not candidate.exists():
             continue
@@ -57,6 +59,8 @@ def stage_required_artifacts(stage: str) -> list[str]:
 
 
 def _render_condition_text(text: str) -> str:
+    # Exit-condition display strings can reference another stage's required
+    # artifacts so the prompt stays in sync with the single workflow source.
     def replace(match: re.Match[str]) -> str:
         referenced_stage = match.group(1)
         artifacts = stage_required_artifacts(referenced_stage)
@@ -118,6 +122,8 @@ def stage_forbid_needs_human_display(stage: str) -> str | None:
 
 def stage_exit_conditions(stage: str) -> dict[str, list[str]]:
     rendered: dict[str, list[str]] = {}
+    # Leaving a stage depends on its own required artifacts plus the
+    # destination stage's entry conditions.
     artifact_conditions = [f"{path} must exist" for path in stage_required_artifacts(stage)]
     for target_stage in stage_transitions().get(stage, []):
         entry_conditions = [condition["display"] for condition in stage_entry_conditions(target_stage, stage)]
