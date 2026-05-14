@@ -71,7 +71,7 @@ When writing or updating a plan:
 3. Keep descriptions short and outcome-focused.
 4. Use a small status vocabulary such as `pending`, `in_progress`, `done`.
 5. Prefer one real completion event per step.
-6. Keep execution policy in workflow state and CLI flags, not in `plan.yaml`.
+6. Keep execution policy in workflow config, not in `plan.yaml`.
 
 ## Step progression
 
@@ -80,12 +80,12 @@ Use `complete-step` when a real planned step finished and its `status` in `plan.
 Use `advance-stage` when:
 
 - moving through a non-execution stage without finishing a planned step
-- re-entering an execution stage with explicit scope
+- re-entering an execution stage under the stage's static workflow policy
 - changing stage while preserving the current step context
 
 ## Common mistakes
 
 - writing `steps` as a mapping instead of a list
-- trying to store `allowed_paths`, `forbidden_paths`, or stage policy in the plan
+- trying to store path policy or stage policy in the plan
 - making one step too broad to have a clear done condition
 - changing step names after agents have started using them as stable plan identifiers

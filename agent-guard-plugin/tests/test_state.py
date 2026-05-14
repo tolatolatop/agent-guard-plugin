@@ -1,6 +1,6 @@
 """Tests for test state."""
 from agent_guard.jobs import load_jobs
-from agent_guard.state import DEFAULT_JOBS, DEFAULT_STATE, ensure_agent_files, load_state, save_state
+from agent_guard.state import DEFAULT_JOBS, DEFAULT_STATE, ensure_agent_files, load_state, load_task_session, save_state
 
 from .helpers import make_temp_repo
 
@@ -48,3 +48,13 @@ def test_state_saves_and_reloads_updates() -> None:
     next_state = {**DEFAULT_STATE, "stage": "RED_TEST", "current_step": "red-001"}
     save_state(root_dir, next_state)
     assert load_state(root_dir) == next_state
+
+
+def test_state_loads_structured_task_session() -> None:
+    """Test that state exposes a structured task session aggregate."""
+    root_dir = make_temp_repo()
+    save_state(root_dir, {**DEFAULT_STATE, "task_id": "password-reset", "stage": "VERIFY"})
+
+    session = load_task_session(root_dir)
+    assert session.task_id == "password-reset"
+    assert session.stage == "VERIFY"

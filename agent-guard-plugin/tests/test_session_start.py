@@ -15,8 +15,6 @@ def test_session_start_includes_meta_skill_and_workflow_context() -> None:
         stage="RED_TEST",
         current_step="red-001",
         remaining_steps=["red-001", "green-001"],
-        allowed_paths=["tests/**"],
-        forbidden_paths=["src/**"],
         can_finalize=False,
     )
 
@@ -27,14 +25,18 @@ def test_session_start_includes_meta_skill_and_workflow_context() -> None:
     assert "GREEN_IMPL" in reminder["workflow"]["transitions_out"]
     assert reminder["workflow"]["transition_graph_mermaid"]
     assert any(skill["id"] == "plan-yaml" for skill in reminder["workflow"]["skill_catalog"])
-    assert reminder["workflow"]["stage_writable"] is None
+    assert reminder["workflow"]["stage_writable_paths"] == ["tests/**"]
+    assert reminder["workflow"]["stage_denied_paths"] == ["src/**"]
     assert reminder["workflow"]["stage_expected_artifacts"] == [".agent/artifacts/red-test.log"]
     assert reminder["workflow"]["stage_required_artifacts"] == []
     assert reminder["workflow"]["complete_step_allowed_from_stages"] == ["RED_TEST", "GREEN_IMPL", "REVIEW", "VERIFY"]
     assert "# Using Workflow" in reminder["prompt_block"]
     assert "Allowed actions:" in reminder["prompt_block"]
     assert "Transition graph (mermaid):" in reminder["prompt_block"]
-    assert "Stage writable mode:" not in reminder["prompt_block"]
+    assert "Allowed paths:" not in reminder["prompt_block"]
+    assert "Forbidden paths:" not in reminder["prompt_block"]
+    assert "Stage writable paths:" in reminder["prompt_block"]
+    assert "Stage denied paths:" in reminder["prompt_block"]
     assert "Stage expected artifacts:" in reminder["prompt_block"]
     assert "Stage required artifacts:" in reminder["prompt_block"]
     assert "Complete-step allowed from:" in reminder["prompt_block"]

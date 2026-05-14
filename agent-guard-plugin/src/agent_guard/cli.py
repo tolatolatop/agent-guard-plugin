@@ -7,20 +7,27 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .failures import check_failure_loop, record_command_result
-from .gates import can_finalize
+from .application.use_cases import (
+    build_session_reminder,
+    check_failure_loop,
+    check_finalization,
+    check_job_poll,
+    check_write_permission,
+    initialize_workspace,
+    next_step,
+    record_command_execution,
+    start_task,
+)
 from .install import install_runtime, parse_flags, uninstall_runtime
-from .jobs import check_job_poll, load_jobs
+from .jobs import load_jobs
 from .plan import load_plan_summary
-from .path_policy import decide_write
-from .runtime_adapter import get_next_step, get_session_reminder
+from .runtime_adapter import get_next_step
 from .state import AGENT_DIR, ensure_agent_files, load_state, update_state
 from .task_reset import reset_task
 from .transitions import (
     advance_stage,
     complete_step,
     mark_done,
-    parse_scope_flag,
     ready_to_summarize,
 )
 from .wizard import run_wizard
@@ -40,10 +47,9 @@ Commands:
   can-write <path>                  Check whether a file write is allowed in the current stage.
   record-command --cmd CMD --exit-code CODE [--log PATH]
                                     Record command execution details.
-  advance-stage --to STAGE [--step STEP_ID] [--allowed-paths CSV] [--forbidden-paths CSV]
+  advance-stage --to STAGE [--step STEP_ID]
                                     Move the workflow to a new stage.
   complete-step <step-id> --next-stage STAGE [--next-step STEP_ID]
-                [--allowed-paths CSV] [--forbidden-paths CSV]
                                     Mark the current step complete and advance workflow state.
   ready-to-summarize                Mark the workflow as ready for final summarization.
   mark-done                         Mark the workflow as done.
@@ -80,12 +86,11 @@ COMMAND_HELP: dict[str, str] = {
         "Record command execution details, exit code, and optional log path."
     ),
     "advance-stage": (
-        "Usage: agent-guard advance-stage --to STAGE [--step STEP_ID] [--allowed-paths CSV] [--forbidden-paths CSV]\n\n"
+        "Usage: agent-guard advance-stage --to STAGE [--step STEP_ID]\n\n"
         "Move the workflow to a new stage."
     ),
     "complete-step": (
-        "Usage: agent-guard complete-step <step-id> --next-stage STAGE [--next-step STEP_ID] "
-        "[--allowed-paths CSV] [--forbidden-paths CSV]\n\n"
+        "Usage: agent-guard complete-step <step-id> --next-stage STAGE [--next-step STEP_ID]\n\n"
         "Mark the current step complete and advance workflow state."
     ),
     "ready-to-summarize": "Usage: agent-guard ready-to-summarize\n\nMark the workflow as ready for final summarization.",
@@ -156,20 +161,10 @@ def run_command(argv: list[str], cwd: Path) -> int:
 
     try:
         if command == "init":
-            ensure_agent_files(cwd)
-            print_json({"ok": True, "agent_dir": str(cwd / AGENT_DIR)})
+            print_json(initialize_workspace(cwd))
         elif command == "start-task":
             task_id = ensure_path_arg(rest, "task-id")
-            ensure_agent_files(cwd)
-            state = update_state(
-                cwd,
-                lambda current: {
-                    **current,
-                    "task_id": task_id,
-                    "stage": "CLARIFYING" if current["stage"] == "IDLE" else current["stage"],
-                },
-            )
-            print_json({"ok": True, "state": state})
+            print_json(start_task(cwd, task_id))
         elif command in {"reset-task", "next-task"}:
             task_id = ensure_path_arg(rest, "task-id")
             result = reset_task(cwd, task_id)
@@ -186,9 +181,9 @@ def run_command(argv: list[str], cwd: Path) -> int:
                 }
             )
         elif command == "session-start":
-            print_json({"ok": True, **get_session_reminder(cwd)})
+            print_json(build_session_reminder(cwd))
         elif command == "can-write":
-            decision = decide_write(load_state(cwd), ensure_path_arg(rest, "path"))
+            decision = check_write_permission(cwd, ensure_path_arg(rest, "path"))
             print_json(decision, 0 if decision["decision"] == "allow" else 1)
         elif command == "record-command":
             flags = parse_flags(rest)
@@ -202,7 +197,7 @@ def run_command(argv: list[str], cwd: Path) -> int:
                     },
                     1,
                 )
-            result = record_command_result(
+            result = record_command_execution(
                 cwd,
                 str(flags["cmd"]),
                 int(str(flags["exit-code"])),
@@ -216,7 +211,6 @@ def run_command(argv: list[str], cwd: Path) -> int:
                     {
                         "error": (
                             "Usage: agent-guard advance-stage --to <stage> [--step <step-id>] "
-                            "[--allowed-paths <csv>] [--forbidden-paths <csv>]"
                         )
                     },
                     1,
@@ -225,8 +219,6 @@ def run_command(argv: list[str], cwd: Path) -> int:
                 cwd,
                 str(flags["to"]),
                 step_id=str(flags["step"]) if "step" in flags else None,
-                allowed_paths=parse_scope_flag(flags.get("allowed-paths")),
-                forbidden_paths=parse_scope_flag(flags.get("forbidden-paths")),
             )
             print_json({"ok": True, **result})
         elif command == "complete-step":
@@ -237,7 +229,7 @@ def run_command(argv: list[str], cwd: Path) -> int:
                     {
                         "error": (
                             "Usage: agent-guard complete-step <step-id> --next-stage <stage> "
-                            "[--next-step <step-id>] [--allowed-paths <csv>] [--forbidden-paths <csv>]"
+                            "[--next-step <step-id>]"
                         )
                     },
                     1,
@@ -247,8 +239,6 @@ def run_command(argv: list[str], cwd: Path) -> int:
                 step_id,
                 str(flags["next-stage"]),
                 next_step_id=str(flags["next-step"]) if "next-step" in flags else None,
-                allowed_paths=parse_scope_flag(flags.get("allowed-paths")),
-                forbidden_paths=parse_scope_flag(flags.get("forbidden-paths")),
             )
             print_json({"ok": True, **result})
         elif command == "ready-to-summarize":
@@ -262,10 +252,10 @@ def run_command(argv: list[str], cwd: Path) -> int:
             result = check_job_poll(cwd, ensure_path_arg(rest, "job-id"))
             print_json(result, 0 if result["decision"] == "allow" else 1)
         elif command == "can-finalize":
-            result = can_finalize(cwd)
+            result = check_finalization(cwd)
             print_json(result, 0 if result["decision"] == "allow" else 1)
         elif command == "next-step":
-            print_json({"ok": True, "next_step": get_next_step(cwd, load_state(cwd))})
+            print_json(next_step(cwd))
         elif command == "install":
             result = install_runtime(rest, cwd, Path(os.path.expanduser("~")), Path(__file__).resolve().parents[2])
             print_json({"ok": True, **result})

@@ -17,5 +17,7 @@ def make_temp_repo() -> Path:
 def write_state(root_dir: Path, **override: object) -> dict[str, object]:
     """Helper for write state."""
     state = {**DEFAULT_STATE, **override}
+    state.pop("allowed_paths", None)
+    state.pop("forbidden_paths", None)
     save_state(root_dir, state)
     return state

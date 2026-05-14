@@ -4,6 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .domain.models import TaskSession
+from .domain.rules import RuleContext, evaluate_rule
 from .events import append_event
 from .gates import can_finalize
 from .jobs import load_jobs
@@ -18,13 +20,6 @@ from .workflow_spec import (
 )
 
 STAGE_TRANSITIONS = stage_transitions()
-
-
-def parse_scope_flag(value: str | bool | None) -> list[str]:
-    """Parse scope flag."""
-    if not isinstance(value, str):
-        return []
-    return [item.strip() for item in value.split(",") if item.strip()]
 
 
 def transition_conditions_for_stage(stage: str) -> dict[str, list[str]]:
@@ -79,8 +74,6 @@ def _guard_transition(
     to_stage: str,
     command_name: str,
     step_id: str | None,
-    allowed_paths: list[str],
-    forbidden_paths: list[str],
 ) -> None:
     """Internal helper for guard transition."""
     from_stage = str(state.get("stage"))
@@ -89,53 +82,31 @@ def _guard_transition(
     if current_required and not all((root_dir / path).exists() for path in current_required):
         raise RuntimeError(f"Leaving {from_stage} requires {_required_artifacts_message(from_stage)}.")
 
-    # Entry conditions are declared on the destination stage and enforced here
-    # for every command that can move the workflow forward.
+    session = TaskSession.from_mapping(state)
+    context = RuleContext(root_dir, session, command_name=command_name)
     for condition in stage_entry_conditions(to_stage, from_stage):
         display = condition["display"]
         rule = condition.get("rule")
-        if rule == "required_command":
-            required_command = condition.get("value", "")
-            if command_name != required_command:
-                raise RuntimeError(display)
-        elif rule == "active_task":
-            if not _has_active_task(state):
-                raise RuntimeError(display)
-        elif rule == "successful_last_verification":
-            last_verification = state.get("last_verification")
-            if not last_verification or last_verification.get("exit_code") != 0:
-                raise RuntimeError(display)
-        elif rule == "no_running_jobs":
-            if _has_running_jobs(root_dir):
-                raise RuntimeError(display)
-        elif rule == "all_plan_steps_terminal":
-            if nonterminal_plan_steps(root_dir):
-                raise RuntimeError(display)
-        elif rule == "can_finalize_passes":
-            result = can_finalize(root_dir)
-            if result["decision"] != "allow":
+        if rule is None:
+            continue
+        if not evaluate_rule(rule, context, condition.get("value")):
+            if rule == "can_finalize_passes":
+                result = can_finalize(root_dir)
                 reasons = "; ".join(str(reason) for reason in result.get("reasons", []))
                 raise RuntimeError(f"{display}: {reasons}" if reasons else display)
-        elif rule is None:
-            continue
-        else:
-            raise RuntimeError(f"Unknown entry condition rule for {to_stage}: {rule}")
+            raise RuntimeError(display)
 
 
 def _next_state_common(
     state: dict[str, Any],
     to_stage: str,
     current_step: str | None,
-    allowed_paths: list[str],
-    forbidden_paths: list[str],
     can_finalize_value: bool,
 ) -> dict[str, Any]:
     """Internal helper for next state common."""
     next_state = dict(state)
     next_state["stage"] = to_stage
     next_state["current_step"] = current_step
-    next_state["allowed_paths"] = allowed_paths
-    next_state["forbidden_paths"] = forbidden_paths
     next_state["can_finalize"] = can_finalize_value
     # needs_human is sticky only inside escalation stages; any normal workflow
     # stage clears it so the task can continue under agent control again.
@@ -173,26 +144,17 @@ def advance_stage(
     root_dir: Path,
     to_stage: str,
     step_id: str | None = None,
-    allowed_paths: list[str] | None = None,
-    forbidden_paths: list[str] | None = None,
 ) -> dict[str, Any]:
     """Advance stage."""
     state = load_state(root_dir)
-    allowed = list(allowed_paths or [])
-    forbidden = list(forbidden_paths or [])
-    _guard_transition(root_dir, state, to_stage, "advance-stage", step_id, allowed, forbidden)
+    _guard_transition(root_dir, state, to_stage, "advance-stage", step_id)
 
     resolved_step = step_id or state.get("current_step")
-    resolved_allowed = list(allowed or state.get("allowed_paths", [])) if to_stage in {"RED_TEST", "GREEN_IMPL"} else []
-    resolved_forbidden = list(forbidden or state.get("forbidden_paths", [])) if to_stage in {"RED_TEST", "GREEN_IMPL"} else []
-
     from_stage = str(state.get("stage"))
     next_state = _next_state_common(
         state,
         to_stage,
         str(resolved_step) if resolved_step else None,
-        resolved_allowed,
-        resolved_forbidden,
         can_finalize_value=False,
     )
     save_state(root_dir, next_state)
@@ -205,31 +167,21 @@ def complete_step(
     step_id: str,
     next_stage: str,
     next_step_id: str | None = None,
-    allowed_paths: list[str] | None = None,
-    forbidden_paths: list[str] | None = None,
 ) -> dict[str, Any]:
     """Complete step."""
     state = load_state(root_dir)
     current_stage = str(state.get("stage"))
     if current_stage not in set(complete_step_allowed_from_stages()):
         raise RuntimeError(f"complete-step is not allowed from stage {current_stage}.")
-    allowed = list(allowed_paths or [])
-    forbidden = list(forbidden_paths or [])
-
-    _guard_transition(root_dir, state, next_stage, "complete-step", None, allowed, forbidden)
+    _guard_transition(root_dir, state, next_stage, "complete-step", None)
     # complete-step is intentionally narrow now: it marks the named plan step
     # done and leaves stage progression to the explicit next_stage argument.
     update_plan_step_status(root_dir, step_id, "done")
-
-    resolved_allowed = list(allowed or state.get("allowed_paths", [])) if next_stage in {"RED_TEST", "GREEN_IMPL"} else []
-    resolved_forbidden = list(forbidden or state.get("forbidden_paths", [])) if next_stage in {"RED_TEST", "GREEN_IMPL"} else []
 
     next_state = _next_state_common(
         state,
         next_stage,
         None,
-        resolved_allowed,
-        resolved_forbidden,
         can_finalize_value=next_stage == "READY_TO_SUMMARIZE",
     )
     next_state["current_step"] = None
@@ -252,13 +204,11 @@ def ready_to_summarize(root_dir: Path) -> dict[str, Any]:
     """Move workflow state so it is ready to summarize."""
     state = load_state(root_dir)
     from_stage = str(state.get("stage"))
-    _guard_transition(root_dir, state, "READY_TO_SUMMARIZE", "ready-to-summarize", None, [], [])
+    _guard_transition(root_dir, state, "READY_TO_SUMMARIZE", "ready-to-summarize", None)
     next_state = _next_state_common(
         state,
         "READY_TO_SUMMARIZE",
         None,
-        [],
-        [],
         can_finalize_value=True,
     )
     save_state(root_dir, next_state)
@@ -270,8 +220,8 @@ def mark_done(root_dir: Path) -> dict[str, Any]:
     """Mark done."""
     state = load_state(root_dir)
     from_stage = str(state.get("stage"))
-    _guard_transition(root_dir, state, "DONE", "mark-done", None, [], [])
-    next_state = _next_state_common(state, "DONE", None, [], [], can_finalize_value=True)
+    _guard_transition(root_dir, state, "DONE", "mark-done", None)
+    next_state = _next_state_common(state, "DONE", None, can_finalize_value=True)
     save_state(root_dir, next_state)
     event = _append_transition_event(root_dir, "mark-done", from_stage, "DONE", next_state)
     return {"state": next_state, "event": event}

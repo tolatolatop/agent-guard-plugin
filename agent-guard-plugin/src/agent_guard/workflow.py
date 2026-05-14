@@ -15,6 +15,7 @@ from .workflow_spec import (
     global_gates,
     stage_expected_artifacts,
     stage_required_artifacts,
+    stage_write_policy,
     stage_spec,
     transition_graph_mermaid,
 )
@@ -122,11 +123,10 @@ def get_workflow_context(root_dir: Path, stage: str) -> dict[str, Any]:
         "current_stage_goal": rules["goal"],
         "allowed_actions": rules.get("allowed_actions", []),
         "forbidden_actions": rules.get("forbidden_actions", []),
-        "stage_allowed_paths": rules.get("allowed_paths", []),
-        "stage_forbidden_paths": rules.get("forbidden_paths", []),
+        "stage_writable_paths": stage_write_policy(stage)["writable_paths"],
+        "stage_denied_paths": stage_write_policy(stage)["denied_paths"],
         "stage_expected_artifacts": stage_expected_artifacts(stage),
         "stage_required_artifacts": stage_required_artifacts(stage),
-        "stage_writable": rules.get("writable"),
         "transitions_in": [source for source, targets in STAGE_TRANSITIONS.items() if stage in targets],
         "transitions_out": STAGE_TRANSITIONS.get(stage, []),
         "transition_conditions": transition_conditions_for_stage(stage),
@@ -143,8 +143,6 @@ def build_session_prompt_block(
     stage: str,
     current_step: str | None,
     next_step: str | None,
-    allowed_paths: list[str],
-    forbidden_paths: list[str],
     can_finalize: bool,
     workflow_context: dict[str, Any],
     recent_archive: dict[str, Any] | None = None,
@@ -158,11 +156,10 @@ def build_session_prompt_block(
     allowed = "; ".join(workflow_context["allowed_actions"])
     forbidden = "; ".join(workflow_context["forbidden_actions"])
     gates = "; ".join(workflow_context["global_gates"])
-    stage_allowed_paths = workflow_context["stage_allowed_paths"] or ["<none>"]
-    stage_forbidden_paths = workflow_context["stage_forbidden_paths"] or ["<none>"]
+    stage_writable_paths = workflow_context["stage_writable_paths"] or ["<none>"]
+    stage_denied_paths = workflow_context["stage_denied_paths"] or ["<none>"]
     stage_expected_artifacts = workflow_context["stage_expected_artifacts"] or ["<none>"]
     stage_required_artifacts = workflow_context["stage_required_artifacts"] or ["<none>"]
-    stage_writable = workflow_context["stage_writable"]
     transition_graph = workflow_context["transition_graph_mermaid"]
     complete_step_allowed = workflow_context["complete_step_allowed_from_stages"] or ["<none>"]
     using_workflow_skill_body = workflow_context["using_workflow_skill_body"]
@@ -178,8 +175,6 @@ def build_session_prompt_block(
         f"Stage: {stage}\n"
         f"Current step: {current_step or 'unset'}\n"
         f"Next required action: {next_step or 'none'}\n"
-        f"Allowed paths: {allowed_paths or ['<any>']}\n"
-        f"Forbidden paths: {forbidden_paths or ['<none>']}\n"
         f"Can finalize: {can_finalize}\n"
         f"Stage goal: {workflow_context['current_stage_goal']}\n"
         f"Stage exits: {transitions_out}\n"
@@ -191,9 +186,8 @@ def build_session_prompt_block(
         "```mermaid\n"
         f"{transition_graph}\n"
         "```\n"
-        + (f"Stage writable mode: {stage_writable}\n" if stage_writable else "")
-        + f"Stage allowed paths: {stage_allowed_paths}\n"
-        + f"Stage forbidden paths: {stage_forbidden_paths}\n"
+        + f"Stage writable paths: {stage_writable_paths}\n"
+        + f"Stage denied paths: {stage_denied_paths}\n"
         + f"Stage expected artifacts: {stage_expected_artifacts}\n"
         + f"Stage required artifacts: {stage_required_artifacts}\n"
         + f"Complete-step allowed from: {complete_step_allowed}\n"

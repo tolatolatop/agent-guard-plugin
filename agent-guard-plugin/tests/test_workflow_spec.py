@@ -1,8 +1,13 @@
 """Tests for test workflow spec."""
 from agent_guard.workflow_spec import (
+    failure_policy,
+    finalization_policy,
+    path_policy,
     stage_entry_conditions,
     stage_exit_conditions,
     stage_forbid_needs_human_display,
+    stage_write_policy,
+    wizard_defaults,
 )
 
 
@@ -45,3 +50,12 @@ def test_stage_forbid_needs_human_display_is_exposed() -> None:
         stage_forbid_needs_human_display("GREEN_IMPL")
         == "Current stage does not allow human intervention; continue advancing the task."
     )
+
+
+def test_policy_sections_are_loaded_from_workflow_spec() -> None:
+    """Test that top-level workflow policies are available."""
+    assert ".github/**" in path_policy()["sensitive_paths"]
+    assert failure_policy()["repeat_threshold"] == 2
+    assert "successful_last_verification" in finalization_policy()["required_rules"]
+    assert wizard_defaults()["start_stages"] == ["CLARIFYING", "PLANNING", "RED_TEST", "GREEN_IMPL"]
+    assert stage_write_policy("RED_TEST")["writable_paths"] == ["tests/**"]

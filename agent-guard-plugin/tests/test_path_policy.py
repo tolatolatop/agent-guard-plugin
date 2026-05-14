@@ -17,42 +17,30 @@ def test_clarifying_blocks_direct_project_file_edits() -> None:
         "pyproject.toml",
     )
     assert result["decision"] == "block"
-    assert "Direct project file edits are not allowed" in result["reason"]
+    assert "not writable during CLARIFYING" in result["reason"]
 
 
 def test_red_test_blocks_src_writes() -> None:
     """Test that red test blocks src writes."""
-    result = decide_write(
-        {**DEFAULT_STATE, "stage": "RED_TEST", "allowed_paths": ["tests/**"], "forbidden_paths": ["src/**"]},
-        "src/auth/reset.py",
-    )
+    result = decide_write({**DEFAULT_STATE, "task_id": "password-reset", "stage": "RED_TEST"}, "src/auth/reset.py")
     assert result["decision"] == "block"
 
 
 def test_red_test_allows_test_writes_in_allowed_scope() -> None:
     """Test that red test allows test writes in allowed scope."""
-    result = decide_write(
-        {**DEFAULT_STATE, "stage": "RED_TEST", "allowed_paths": ["tests/**"], "forbidden_paths": ["src/**"]},
-        "tests/auth/test_password_reset.py",
-    )
+    result = decide_write({**DEFAULT_STATE, "task_id": "password-reset", "stage": "RED_TEST"}, "tests/auth/test_password_reset.py")
     assert result["decision"] == "allow"
 
 
 def test_sensitive_paths_require_approval() -> None:
     """Test that sensitive paths require approval."""
-    result = decide_write(
-        {**DEFAULT_STATE, "stage": "GREEN_IMPL", "allowed_paths": [".github/**"], "forbidden_paths": []},
-        ".github/workflows/ci.yml",
-    )
+    result = decide_write({**DEFAULT_STATE, "task_id": "password-reset", "stage": "GREEN_IMPL"}, ".github/workflows/ci.yml")
     assert result["decision"] == "block"
 
 
 def test_state_json_cannot_be_modified_directly() -> None:
     """Test that state json cannot be modified directly."""
-    result = decide_write(
-        {**DEFAULT_STATE, "stage": "GREEN_IMPL", "allowed_paths": [".agent/**"], "forbidden_paths": []},
-        ".agent/state.json",
-    )
+    result = decide_write({**DEFAULT_STATE, "task_id": "password-reset", "stage": "GREEN_IMPL"}, ".agent/state.json")
     assert result["decision"] == "block"
     assert "managed by agent-guard" in result["reason"]
 

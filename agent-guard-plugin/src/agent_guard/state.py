@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import Any, Callable
 
+from .domain.models import TaskSession
+
 AGENT_DIR = ".agent"
 ARTIFACTS_DIR = f"{AGENT_DIR}/artifacts"
 
@@ -14,8 +16,6 @@ DEFAULT_STATE: dict[str, Any] = {
     "current_step": None,
     "completed_steps": [],
     "remaining_steps": [],
-    "allowed_paths": [],
-    "forbidden_paths": [],
     "can_finalize": False,
     "last_verification": None,
     "needs_human": False,
@@ -94,8 +94,6 @@ def validate_state(state: dict[str, Any]) -> dict[str, Any]:
         "current_step",
         "completed_steps",
         "remaining_steps",
-        "allowed_paths",
-        "forbidden_paths",
         "can_finalize",
         "last_verification",
         "needs_human",
@@ -103,7 +101,20 @@ def validate_state(state: dict[str, Any]) -> dict[str, Any]:
     for key in required_keys:
         if key not in state:
             raise RuntimeError(f"state.json is missing required key: {key}")
+    state.pop("allowed_paths", None)
+    state.pop("forbidden_paths", None)
     return state
+
+
+def load_task_session(root_dir: Path) -> TaskSession:
+    """Load the structured task session aggregate."""
+    return TaskSession.from_mapping(load_state(root_dir))
+
+
+def save_task_session(root_dir: Path, session: TaskSession) -> TaskSession:
+    """Persist the structured task session aggregate."""
+    save_state(root_dir, session.to_mapping())
+    return session
 
 
 def load_state(root_dir: Path) -> dict[str, Any]:

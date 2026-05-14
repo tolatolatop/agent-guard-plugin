@@ -1,4 +1,16 @@
+# Standard example workflow definition for agent-guard.
+#
+# This file is intentionally declarative:
+# - top-level policy sections define reusable guard behavior
+# - stages define the workflow graph plus stage-local expectations
+# - built-in rule names must come from the evaluator registry in code
+
 version: 1
+
+metadata:
+  id: standard-ddd-example
+  title: Standard Workflow Example
+  description: Reference workflow showing policy-driven task execution for agent-guard.
 
 global_gates:
   - Do not write outside allowed_paths.
@@ -6,10 +18,88 @@ global_gates:
   - Do not claim completion unless can-finalize passes.
   - Do not modify .agent/state.json directly; use agent-guard workflow commands to change task state.
 
+# Legacy compatibility mirror for older helpers. New code should prefer path_policy.protected_paths.
 protected_paths:
   - .agent/state.json
 
+path_policy:
+  # Hard-blocked managed files. These are not ordinary task-scoped paths.
+  protected_paths:
+    - .agent/state.json
+  # Sensitive paths are blocked unless a higher-level workflow step or human approval explicitly allows them.
+  sensitive_paths:
+    - .github/**
+    - infra/**
+    - migrations/**
+    - package-lock.json
+    - pnpm-lock.yaml
+    - yarn.lock
+    - poetry.lock
+    - Cargo.lock
+
+failure_policy:
+  # Number of identical failures allowed before analysis becomes mandatory.
+  repeat_threshold: 2
+  # Directories used to fingerprint whether code changed between retries.
+  fingerprint_roots:
+    - src
+    - tests
+  # Stages where a non-zero exit code can be expected rather than treated as an unexpected workflow failure.
+  expected_failure_stages:
+    - RED_TEST
+  # Required artifact before retrying after a repeated identical failure.
+  analysis_artifact: .agent/artifacts/failure-analysis.md
+  # Stage to enter when failure analysis is required.
+  analysis_stage: NEEDS_FAILURE_ANALYSIS
+
+job_policy:
+  # Default poll ceiling when an individual job record does not provide max_polls.
+  default_max_polls: 20
+  # Escalation target if a job exceeds policy and needs human intervention.
+  escalation_stage: NEEDS_HUMAN
+  # Reference polling windows by job kind. Runtime adapters may map concrete commands into these buckets.
+  polling:
+    unit_test:
+      min_seconds: 10
+      max_seconds: 30
+    full_test_suite:
+      min_seconds: 30
+      max_seconds: 60
+    build:
+      min_seconds: 60
+      max_seconds: 60
+    deployment:
+      approval_required: true
+
+finalization_policy:
+  # Built-in rule names evaluated by the rule registry in code.
+  required_rules:
+    - remaining_steps_empty
+    - no_running_jobs
+    - successful_last_verification
+    - can_finalize_flag
+    - all_plan_steps_terminal
+  # User-facing messages emitted when a required rule fails.
+  rule_messages:
+    remaining_steps_empty: remaining_steps must be empty
+    no_running_jobs: running jobs still exist
+    successful_last_verification: last_verification.exit_code must be 0
+    can_finalize_flag: state.can_finalize is not true
+    all_plan_steps_terminal: all plan steps must be done or failed
+  # Only required when the active plan actually contains a REVIEW step.
+  review_artifact: .agent/artifacts/review.json
+  require_review_artifact_when_plan_includes_review: true
+
+wizard_defaults:
+  # Stages exposed as entry choices by the interactive wizard.
+  start_stages:
+    - CLARIFYING
+    - PLANNING
+    - RED_TEST
+    - GREEN_IMPL
+
 command_rules:
+  # Stages where the complete-step workflow command is legal.
   complete_step_allowed_from_stages:
     - RED_TEST
     - GREEN_IMPL
@@ -55,18 +145,19 @@ stages:
       - run implementation or verification work before a task is started
       - claim work is complete
       - skip state initialization
-    allowed_paths:
-      - .agent/**
-    forbidden_paths: []
     allowed_next_stages:
       - CLARIFYING
     entry_conditions:
+      # `any` is a list of rule declarations checked by the transition guard.
       any:
         - rule: active_task
           display: task_id must be set
     artifacts_expected: []
     artifacts_required: []
-    writable: managed-only
+    write_policy:
+      writable_paths:
+        - .agent/**
+      denied_paths: []
 
   CLARIFYING:
     goal: Resolve task intent, assumptions, and missing inputs before implementation.
@@ -76,29 +167,27 @@ stages:
       - capture unresolved risks
     forbidden_actions:
       - start implementation before requirements are clear
-    allowed_paths:
-      - .agent/**
-    forbidden_paths: []
     allowed_next_stages:
       - DESIGNING
       - PLANNING
+    entry_conditions: {}
     artifacts_expected: []
     artifacts_required: []
-    writable: managed-only
+    write_policy:
+      writable_paths:
+        - .agent/**
+      denied_paths: []
 
   DESIGNING:
     goal: Write the smallest design needed to guide implementation safely.
     forbid_needs_human:
+      # If present, runtime stop/final-response hooks should block ending the session in this stage.
       display: Current stage does not allow human intervention; continue advancing the task.
     allowed_actions:
       - draft a design note
       - identify artifacts and validation steps
     forbidden_actions:
       - broad implementation before the design is settled
-    allowed_paths:
-      - .agent/**
-      - ./DESIGN.md
-    forbidden_paths: []
     allowed_next_stages:
       - PLANNING
     entry_conditions:
@@ -109,7 +198,11 @@ stages:
       - .agent/artifacts/DESIGN.md
       - ./DESIGN.md
     artifacts_required: []
-    writable: managed-only
+    write_policy:
+      writable_paths:
+        - .agent/**
+        - ./DESIGN.md
+      denied_paths: []
 
   PLANNING:
     goal: Break work into explicit steps with success conditions and path scope.
@@ -118,10 +211,6 @@ stages:
       - set allowed and forbidden paths per step
     forbidden_actions:
       - execute unplanned broad changes
-    allowed_paths:
-      - .agent/**
-      - ./PLAN.md
-    forbidden_paths: []
     allowed_next_stages:
       - RED_TEST
       - GREEN_IMPL
@@ -134,7 +223,11 @@ stages:
       - .agent/artifacts/PLAN.md
       - ./PLAN.md
     artifacts_required: []
-    writable: managed-only
+    write_policy:
+      writable_paths:
+        - .agent/**
+        - ./PLAN.md
+      denied_paths: []
 
   RED_TEST:
     goal: Create a failing test that proves the missing behavior.
@@ -147,9 +240,6 @@ stages:
     forbidden_actions:
       - write production code
       - claim implementation is complete
-    allowed_paths: []
-    forbidden_paths:
-      - src/**
     allowed_next_stages:
       - GREEN_IMPL
       - NEEDS_FAILURE_ANALYSIS
@@ -157,6 +247,11 @@ stages:
     artifacts_expected:
       - .agent/artifacts/red-test.log
     artifacts_required: []
+    write_policy:
+      writable_paths:
+        - tests/**
+      denied_paths:
+        - src/**
 
   GREEN_IMPL:
     goal: Implement the smallest code change that makes the targeted test pass.
@@ -170,8 +265,6 @@ stages:
       - broad refactors
       - unrelated formatting
       - dependency upgrades unless planned
-    allowed_paths: []
-    forbidden_paths: []
     allowed_next_stages:
       - REVIEW
       - NEEDS_FAILURE_ANALYSIS
@@ -179,6 +272,11 @@ stages:
     artifacts_expected:
       - .agent/artifacts/command-failure.log
     artifacts_required: []
+    write_policy:
+      writable_paths:
+        - src/**
+        - tests/**
+      denied_paths: []
 
   REVIEW:
     goal: Review the diff and capture review evidence without changing code.
@@ -190,9 +288,6 @@ stages:
       - write review artifact
     forbidden_actions:
       - modify source unless review findings create a new implementation step
-    allowed_paths:
-      - .agent/**
-    forbidden_paths: []
     allowed_next_stages:
       - VERIFY
       - GREEN_IMPL
@@ -201,7 +296,10 @@ stages:
       - .agent/artifacts/review.json
     artifacts_required:
       - .agent/artifacts/review.json
-    writable: managed-only
+    write_policy:
+      writable_paths:
+        - .agent/**
+      denied_paths: []
 
   VERIFY:
     goal: Run verification commands and record final evidence.
@@ -212,19 +310,20 @@ stages:
       - write verification logs
     forbidden_actions:
       - new implementation work unless the state moves to NEEDS_FAILURE_ANALYSIS
-    allowed_paths:
-      - .agent/artifacts/**
-    forbidden_paths: []
     allowed_next_stages:
       - READY_TO_SUMMARIZE
       - RED_TEST
       - GREEN_IMPL
       - NEEDS_FAILURE_ANALYSIS
+    entry_conditions: {}
     artifacts_expected:
       - .agent/artifacts/final-verification.log
       - .agent/artifacts/command-failure.log
     artifacts_required: []
-    writable: managed-only
+    write_policy:
+      writable_paths:
+        - .agent/artifacts/**
+      denied_paths: []
 
   READY_TO_SUMMARIZE:
     goal: Summarize completed work and verification results without further edits.
@@ -236,13 +335,11 @@ stages:
       - report verification commands and results
     forbidden_actions:
       - further code changes
-    allowed_paths:
-      - .agent/artifacts/summary.md
-    forbidden_paths: []
     allowed_next_stages:
       - DONE
     entry_conditions:
       any:
+        # `required_command` ensures this transition only happens through the explicit workflow command.
         - rule: required_command
           value: ready-to-summarize
           display: use ready-to-summarize
@@ -252,11 +349,15 @@ stages:
           display: no running jobs
         - rule: all_plan_steps_terminal
           display: all plan steps must be done or failed
+        # A display-only condition can document extra expectations even when the evaluator rule lives elsewhere.
         - display: can_finalize enabled only through ready-to-summarize
     artifacts_expected:
       - .agent/artifacts/summary.md
     artifacts_required: []
-    writable: managed-only
+    write_policy:
+      writable_paths:
+        - .agent/artifacts/summary.md
+      denied_paths: []
 
   NEEDS_FAILURE_ANALYSIS:
     goal: Stop retry loops and produce evidence-backed failure analysis before changing code again.
@@ -269,9 +370,6 @@ stages:
     forbidden_actions:
       - rerun the same failing command without analysis
       - continue source edits without evidence
-    allowed_paths:
-      - .agent/artifacts/**
-    forbidden_paths: []
     allowed_next_stages:
       - RED_TEST
       - GREEN_IMPL
@@ -282,7 +380,10 @@ stages:
       - .agent/artifacts/failure-analysis.md
     artifacts_required:
       - .agent/artifacts/failure-analysis.md
-    writable: managed-only
+    write_policy:
+      writable_paths:
+        - .agent/artifacts/**
+      denied_paths: []
 
   NEEDS_HUMAN:
     goal: Escalate blocked or risky work for human review.
@@ -292,16 +393,16 @@ stages:
       - pause risky actions
     forbidden_actions:
       - continue sensitive or ambiguous work without approval
-    allowed_paths:
-      - .agent/**
-    forbidden_paths: []
     allowed_next_stages:
       - CLARIFYING
       - PLANNING
     entry_conditions: {}
     artifacts_expected: []
     artifacts_required: []
-    writable: managed-only
+    write_policy:
+      writable_paths:
+        - .agent/**
+      denied_paths: []
 
   DONE:
     goal: Task is complete; preserve state and await the next task.
@@ -310,9 +411,6 @@ stages:
       - wait for next instruction
     forbidden_actions:
       - resume editing under the completed task
-    allowed_paths:
-      - .agent/**
-    forbidden_paths: []
     allowed_next_stages: []
     entry_conditions:
       any:
@@ -323,4 +421,7 @@ stages:
           display: can-finalize must pass
     artifacts_expected: []
     artifacts_required: []
-    writable: managed-only
+    write_policy:
+      writable_paths:
+        - .agent/**
+      denied_paths: []

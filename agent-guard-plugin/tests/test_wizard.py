@@ -28,8 +28,6 @@ def test_wizard_writes_state_and_plan_from_plain_streams() -> None:
         "Build ffmpeg wrapper\n"
         "RED_TEST\n"
         "red-001\n"
-        "tests/**\n"
-        "src/**\n"
         "y\n"
     )
 
@@ -39,14 +37,13 @@ def test_wizard_writes_state_and_plan_from_plain_streams() -> None:
     state = load_state(root)
     assert state["stage"] == "RED_TEST"
     assert state["current_step"] == "red-001"
-    assert state["allowed_paths"] == ["tests/**"]
-    assert state["forbidden_paths"] == ["src/**"]
     assert result["plan_written"] == str(plan_path(root))
 
     plan = yaml.safe_load(plan_path(root).read_text(encoding="utf-8"))
     assert plan["task_id"] == state["task_id"]
-    assert plan["steps"][0]["name"] == "red-001"
-    assert plan["steps"][0]["description"] == "Build ffmpeg wrapper"
+    assert plan["steps"][0]["id"] == "red-001"
+    assert plan["steps"][0]["goal"] == "Build ffmpeg wrapper"
+    assert plan["steps"][0]["stage"] == "RED_TEST"
     assert plan["steps"][0]["status"] == "in_progress"
 
 
@@ -57,8 +54,6 @@ def test_wizard_can_skip_plan_generation() -> None:
         "video-clipper\n"
         "Scaffold project\n"
         "CLARIFYING\n"
-        "\n"
-        "\n"
         "\n"
         "n\n"
     )

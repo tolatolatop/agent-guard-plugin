@@ -31,8 +31,6 @@ def test_reset_task_archives_current_records_and_initializes_new_task() -> None:
         current_step="verify-001",
         completed_steps=["red-001", "green-001"],
         remaining_steps=[],
-        allowed_paths=["src/**"],
-        forbidden_paths=["infra/**"],
         can_finalize=True,
         last_verification={
             "command": "pytest",

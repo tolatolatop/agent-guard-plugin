@@ -60,15 +60,15 @@ DONE
 Use these commands for mainline progression:
 
 - `agent-guard complete-step <step-id> --next-stage <stage> [--next-step <step-id>]`
-- `agent-guard advance-stage --to <stage> [--step <step-id>] [--allowed-paths <csv>] [--forbidden-paths <csv>]`
+- `agent-guard advance-stage --to <stage> [--step <step-id>]`
 - `agent-guard ready-to-summarize`
 - `agent-guard mark-done`
 
 Transition rules:
 
 - Prefer `complete-step` whenever a real workflow step finished and the corresponding `plan.yaml` step should be marked `done`.
-- Use `advance-stage` for stage-only moves such as `CLARIFYING -> PLANNING` or when re-entering execution after explicit scope selection.
-- `PLANNING -> RED_TEST` or `PLANNING -> GREEN_IMPL` requires a selected step plus non-empty scope from explicit CLI flags or the current active state scope.
+- Use `advance-stage` for stage-only moves such as `CLARIFYING -> PLANNING` or when re-entering execution with the same step context.
+- `PLANNING -> RED_TEST` or `PLANNING -> GREEN_IMPL` uses static workflow `write_policy`; it does not accept runtime scope overrides.
 - `GREEN_IMPL` must pass through `REVIEW` before entering `VERIFY`; direct `GREEN_IMPL -> VERIFY` is not allowed.
 - `REVIEW -> VERIFY` requires `.agent/artifacts/review.json`.
 - `VERIFY -> READY_TO_SUMMARIZE` requires successful `last_verification`, no running jobs, and the explicit `ready-to-summarize` command.
@@ -78,7 +78,7 @@ Transition rules:
 
 Global workflow gates:
 
-- Respect `allowed_paths` and `forbidden_paths`.
+- Respect the current stage `write_policy`.
 - When adding an artifact, state the allowed modification scope or directory up front.
 - Do not retry identical failures without analysis.
 - Do not finalize without passing `can-finalize`.

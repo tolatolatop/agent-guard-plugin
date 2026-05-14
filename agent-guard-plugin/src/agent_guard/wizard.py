@@ -4,13 +4,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, TextIO
 
-import yaml
-
+from .application.use_cases import plan_template_step
 from .interactive import confirm_action, prompt_choice, prompt_text
-from .plan import plan_path
+from .infrastructure.repositories import PlanRepository
 from .state import ensure_agent_files, save_state
+from .workflow_spec import wizard_defaults
 
-WIZARD_STAGES = ["CLARIFYING", "PLANNING", "RED_TEST", "GREEN_IMPL"]
+WIZARD_STAGES = wizard_defaults()["start_stages"]
 
 
 def slugify_task_id(value: str) -> str:
@@ -18,20 +18,6 @@ def slugify_task_id(value: str) -> str:
     cleaned = "".join(ch.lower() if ch.isalnum() else "-" for ch in value.strip())
     collapsed = "-".join(part for part in cleaned.split("-") if part)
     return collapsed or "new-task"
-
-
-def default_paths_for_stage(stage: str) -> tuple[list[str], list[str]]:
-    """Return default paths for stage."""
-    if stage == "RED_TEST":
-        return ["tests/**"], ["src/**"]
-    if stage == "GREEN_IMPL":
-        return ["src/**", "tests/**"], [".github/**", "infra/**"]
-    return [], []
-
-
-def parse_csv(value: str) -> list[str]:
-    """Parse csv."""
-    return [item.strip() for item in value.split(",") if item.strip()]
 
 
 def write_plan_template(
@@ -42,24 +28,9 @@ def write_plan_template(
     goal: str,
 ) -> Path:
     """Write plan template."""
-    step_identifier = step_name or (
-        "red-001" if stage == "RED_TEST" else "green-001" if stage == "GREEN_IMPL" else "step-001"
-    )
-    status = "in_progress" if stage in {"RED_TEST", "GREEN_IMPL", "PLANNING"} else "pending"
-    payload: dict[str, Any] = {
-        "task_id": task_id,
-        "steps": [
-            {
-                "name": step_identifier,
-                "description": goal,
-                "status": status,
-            }
-        ],
-    }
-    target = plan_path(root_dir)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
-    return target
+    repository = PlanRepository(root_dir)
+    repository.save_steps(task_id, [plan_template_step(task_id, stage, step_name, goal)])
+    return repository.file_path
 
 
 def run_wizard(root_dir: Path, input_stream: TextIO, output: TextIO) -> dict[str, Any]:
@@ -71,13 +42,6 @@ def run_wizard(root_dir: Path, input_stream: TextIO, output: TextIO) -> dict[str
     goal = prompt_text("Task goal", input_stream, output, default=f"Implement {task_id}")
     stage = prompt_choice("Start stage", WIZARD_STAGES, input_stream, output, default="CLARIFYING")
     current_step = prompt_text("Current step id", input_stream, output, default="")
-    allowed_default, forbidden_default = default_paths_for_stage(stage)
-    allowed_paths = parse_csv(
-        prompt_text("Allowed paths (comma-separated)", input_stream, output, default=", ".join(allowed_default))
-    )
-    forbidden_paths = parse_csv(
-        prompt_text("Forbidden paths (comma-separated)", input_stream, output, default=", ".join(forbidden_default))
-    )
     create_plan = confirm_action("Create or replace .agent/plan.yaml?", input_stream, output)
 
     remaining_steps = [current_step] if current_step else []
@@ -89,8 +53,6 @@ def run_wizard(root_dir: Path, input_stream: TextIO, output: TextIO) -> dict[str
             "current_step": current_step or None,
             "completed_steps": [],
             "remaining_steps": remaining_steps,
-            "allowed_paths": allowed_paths,
-            "forbidden_paths": forbidden_paths,
             "can_finalize": False,
             "last_verification": None,
             "needs_human": False,

@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 
+from .domain.rules import allowed_rule_names
+
 
 def packaged_workflow_path() -> Path:
     """Packaged workflow path."""
@@ -30,17 +32,68 @@ def load_workflow_spec() -> dict[str, Any]:
         data = yaml.safe_load(candidate.read_text(encoding="utf-8")) or {}
         if not isinstance(data, dict):
             raise RuntimeError(f"Workflow spec must be a YAML mapping: {candidate}")
+        validate_workflow_spec(data)
         return data
     raise RuntimeError("Could not locate .workflow.yaml.")
 
 
-def workflow_stages() -> dict[str, dict[str, Any]]:
-    """Workflow stages."""
-    spec = load_workflow_spec()
+def _require_mapping(value: Any, label: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise RuntimeError(f"{label} must be a mapping.")
+    return value
+
+
+def _require_list(value: Any, label: str) -> list[Any]:
+    if not isinstance(value, list):
+        raise RuntimeError(f"{label} must be a list.")
+    return value
+
+
+def validate_workflow_spec(spec: dict[str, Any]) -> None:
+    """Validate core workflow policy sections and rule names."""
+    _require_mapping(spec.get("stages", {}), ".workflow.yaml stages")
+    for section_name in ("path_policy", "failure_policy", "job_policy", "finalization_policy", "wizard_defaults"):
+        _require_mapping(spec.get(section_name, {}), f".workflow.yaml {section_name}")
+    for stage_name, stage_data in workflow_stages_from_spec(spec).items():
+        _validate_stage_rules(stage_name, _require_mapping(stage_data, f".workflow.yaml stage {stage_name}"))
+    final_rules = _require_list(spec.get("finalization_policy", {}).get("required_rules", []), ".workflow.yaml finalization_policy.required_rules")
+    unknown_rules = [str(rule_name) for rule_name in final_rules if str(rule_name) not in allowed_rule_names()]
+    if unknown_rules:
+        raise RuntimeError(f"Unknown finalization rules in .workflow.yaml: {', '.join(unknown_rules)}")
+
+
+def workflow_stages_from_spec(spec: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Return stages from a provided spec mapping."""
     stages = spec.get("stages", {})
     if not isinstance(stages, dict):
         raise RuntimeError(".workflow.yaml must define a stages mapping.")
     return stages
+
+
+def _validate_stage_rules(stage_name: str, stage_data: dict[str, Any]) -> None:
+    conditions_config = stage_data.get("entry_conditions", {})
+    if conditions_config and not isinstance(conditions_config, dict):
+        raise RuntimeError(f".workflow.yaml stage {stage_name} entry_conditions must be a mapping.")
+    allowed = allowed_rule_names()
+    for item in conditions_config.get("any", []) if isinstance(conditions_config, dict) else []:
+        if not isinstance(item, dict):
+            raise RuntimeError(f".workflow.yaml stage {stage_name} entry_conditions.any item must be a mapping.")
+        rule = item.get("rule")
+        if rule is None:
+            continue
+        if str(rule) not in allowed:
+            raise RuntimeError(f"Unknown entry condition rule for stage {stage_name}: {rule}")
+    write_policy = stage_data.get("write_policy", {})
+    if write_policy and not isinstance(write_policy, dict):
+        raise RuntimeError(f".workflow.yaml stage {stage_name} write_policy must be a mapping.")
+    if isinstance(write_policy, dict):
+        _require_list(write_policy.get("writable_paths", []), f".workflow.yaml stage {stage_name} write_policy.writable_paths")
+        _require_list(write_policy.get("denied_paths", []), f".workflow.yaml stage {stage_name} write_policy.denied_paths")
+
+
+def workflow_stages() -> dict[str, dict[str, Any]]:
+    """Workflow stages."""
+    return workflow_stages_from_spec(load_workflow_spec())
 
 
 def stage_spec(stage: str) -> dict[str, Any]:
@@ -171,11 +224,79 @@ def global_gates() -> list[str]:
 
 def protected_paths() -> list[str]:
     """Protected paths."""
-    spec = load_workflow_spec()
-    paths = spec.get("protected_paths", [])
-    if not isinstance(paths, list):
-        raise RuntimeError(".workflow.yaml protected_paths must be a list.")
-    return [str(item) for item in paths]
+    return path_policy()["protected_paths"]
+
+
+def path_policy() -> dict[str, Any]:
+    """Normalized path policy."""
+    policy = _require_mapping(load_workflow_spec().get("path_policy", {}), ".workflow.yaml path_policy")
+    sensitive_paths = _require_list(policy.get("sensitive_paths", []), ".workflow.yaml path_policy.sensitive_paths")
+    protected = _require_list(policy.get("protected_paths", load_workflow_spec().get("protected_paths", [])), ".workflow.yaml path_policy.protected_paths")
+    return {
+        "sensitive_paths": [str(item) for item in sensitive_paths],
+        "protected_paths": [str(item) for item in protected],
+    }
+
+
+def failure_policy() -> dict[str, Any]:
+    """Normalized failure policy."""
+    policy = _require_mapping(load_workflow_spec().get("failure_policy", {}), ".workflow.yaml failure_policy")
+    expected = _require_list(policy.get("expected_failure_stages", ["RED_TEST"]), ".workflow.yaml failure_policy.expected_failure_stages")
+    roots = _require_list(policy.get("fingerprint_roots", ["src", "tests"]), ".workflow.yaml failure_policy.fingerprint_roots")
+    return {
+        "repeat_threshold": int(policy.get("repeat_threshold", 2)),
+        "fingerprint_roots": [str(item) for item in roots],
+        "expected_failure_stages": [str(item) for item in expected],
+        "analysis_artifact": str(policy.get("analysis_artifact", ".agent/artifacts/failure-analysis.md")),
+        "analysis_stage": str(policy.get("analysis_stage", "NEEDS_FAILURE_ANALYSIS")),
+    }
+
+
+def job_policy() -> dict[str, Any]:
+    """Normalized job policy."""
+    policy = _require_mapping(load_workflow_spec().get("job_policy", {}), ".workflow.yaml job_policy")
+    polling = _require_mapping(policy.get("polling", {}), ".workflow.yaml job_policy.polling")
+    return {
+        "default_max_polls": int(policy.get("default_max_polls", 20)),
+        "escalation_stage": str(policy.get("escalation_stage", "NEEDS_HUMAN")),
+        "polling": polling,
+    }
+
+
+def finalization_policy() -> dict[str, Any]:
+    """Normalized finalization policy."""
+    policy = _require_mapping(load_workflow_spec().get("finalization_policy", {}), ".workflow.yaml finalization_policy")
+    rule_messages = _require_mapping(policy.get("rule_messages", {}), ".workflow.yaml finalization_policy.rule_messages")
+    rules = _require_list(policy.get("required_rules", []), ".workflow.yaml finalization_policy.required_rules")
+    return {
+        "required_rules": [str(item) for item in rules],
+        "rule_messages": {str(key): str(value) for key, value in rule_messages.items()},
+        "review_artifact": str(policy.get("review_artifact", ".agent/artifacts/review.json")),
+        "require_review_artifact_when_plan_includes_review": bool(
+            policy.get("require_review_artifact_when_plan_includes_review", True)
+        ),
+    }
+
+
+def wizard_defaults() -> dict[str, Any]:
+    """Normalized wizard defaults."""
+    config = _require_mapping(load_workflow_spec().get("wizard_defaults", {}), ".workflow.yaml wizard_defaults")
+    return {
+        "start_stages": [str(item) for item in _require_list(config.get("start_stages", []), ".workflow.yaml wizard_defaults.start_stages")],
+    }
+
+
+def stage_write_policy(stage: str) -> dict[str, list[str]]:
+    """Normalized stage write policy."""
+    policy = stage_spec(stage).get("write_policy", {})
+    if not isinstance(policy, dict):
+        raise RuntimeError(f".workflow.yaml stage {stage} write_policy must be a mapping.")
+    writable = _require_list(policy.get("writable_paths", []), f".workflow.yaml stage {stage} write_policy.writable_paths")
+    denied = _require_list(policy.get("denied_paths", []), f".workflow.yaml stage {stage} write_policy.denied_paths")
+    return {
+        "writable_paths": [str(item) for item in writable],
+        "denied_paths": [str(item) for item in denied],
+    }
 
 
 def complete_step_allowed_from_stages() -> list[str]:

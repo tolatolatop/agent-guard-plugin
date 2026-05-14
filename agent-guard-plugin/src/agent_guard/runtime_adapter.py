@@ -36,8 +36,6 @@ def get_session_reminder(root_dir: Path) -> dict[str, Any]:
         "task": state.get("task_id"),
         "stage": stage,
         "current_step": state.get("current_step"),
-        "allowed_paths": state.get("allowed_paths"),
-        "forbidden_paths": state.get("forbidden_paths"),
         "next_required_action": next_step,
         "can_finalize": state.get("can_finalize"),
         "meta_skill": {
@@ -53,8 +51,6 @@ def get_session_reminder(root_dir: Path) -> dict[str, Any]:
             stage=stage,
             current_step=state.get("current_step"),
             next_step=next_step,
-            allowed_paths=state.get("allowed_paths", []),
-            forbidden_paths=state.get("forbidden_paths", []),
             can_finalize=bool(state.get("can_finalize")),
             workflow_context=workflow_context,
             recent_archive=recent_archive,

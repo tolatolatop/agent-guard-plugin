@@ -45,8 +45,8 @@ def test_advance_stage_allows_legal_transition_and_blocks_illegal_transition() -
         raise AssertionError("Expected illegal transition to fail")
 
 
-def test_complete_step_updates_progress_with_explicit_scope_for_next_execution_step() -> None:
-    """Test that complete step updates progress with explicit scope for next execution step."""
+def test_complete_step_clears_legacy_dynamic_scope_for_next_execution_step() -> None:
+    """Test that complete step clears legacy dynamic scope for next execution step."""
     root_dir = make_temp_repo()
     (root_dir / ".agent" / "plan.yaml").write_text(
         "task_id: password-reset\n"
@@ -66,8 +66,6 @@ def test_complete_step_updates_progress_with_explicit_scope_for_next_execution_s
         current_step="red-001",
         completed_steps=[],
         remaining_steps=["red-001", "green-001"],
-        allowed_paths=["tests/**"],
-        forbidden_paths=["src/**"],
     )
 
     result = complete_step(
@@ -75,21 +73,17 @@ def test_complete_step_updates_progress_with_explicit_scope_for_next_execution_s
         "red-001",
         "GREEN_IMPL",
         next_step_id="green-001",
-        allowed_paths=["src/**", "tests/**"],
-        forbidden_paths=["infra/**"],
     )
 
     state = result["state"]
     assert state["completed_steps"] == []
     assert state["remaining_steps"] == []
     assert state["current_step"] is None
-    assert state["allowed_paths"] == ["src/**", "tests/**"]
-    assert state["forbidden_paths"] == ["infra/**"]
     assert plan_steps(root_dir)[0]["status"] == "done"
 
 
-def test_advance_stage_uses_explicit_scope_when_plan_step_is_missing() -> None:
-    """Test that advance stage uses explicit scope when plan step is missing."""
+def test_advance_stage_drops_legacy_dynamic_scope_when_plan_step_is_missing() -> None:
+    """Test that advance stage drops legacy dynamic scope when plan step is missing."""
     root_dir = make_temp_repo()
     write_state(root_dir, task_id="password-reset", stage="PLANNING")
 
@@ -97,15 +91,11 @@ def test_advance_stage_uses_explicit_scope_when_plan_step_is_missing() -> None:
         root_dir,
         "RED_TEST",
         step_id="red-001",
-        allowed_paths=["tests/**"],
-        forbidden_paths=["src/**"],
     )
 
     state = result["state"]
     assert state["stage"] == "RED_TEST"
     assert state["current_step"] == "red-001"
-    assert state["allowed_paths"] == ["tests/**"]
-    assert state["forbidden_paths"] == ["src/**"]
 
 
 def test_ready_to_summarize_is_blocked_without_successful_verification() -> None:
@@ -180,7 +170,7 @@ def test_needs_failure_analysis_cannot_exit_without_artifact() -> None:
     )
 
     try:
-        advance_stage(root_dir, "GREEN_IMPL", step_id="green-001", allowed_paths=["src/**"])
+        advance_stage(root_dir, "GREEN_IMPL", step_id="green-001")
     except RuntimeError as exc:
         assert "failure-analysis.md" in str(exc)
     else:
@@ -264,7 +254,7 @@ def test_cli_representative_flow_from_start_to_done() -> None:
     assert invoke_cli(root_dir, ["advance-stage", "--to", "PLANNING"])[0] == 0
     assert invoke_cli(
         root_dir,
-        ["advance-stage", "--to", "RED_TEST", "--step", "red-001", "--allowed-paths", "tests/**", "--forbidden-paths", "src/**"],
+        ["advance-stage", "--to", "RED_TEST", "--step", "red-001"],
     )[0] == 0
     assert invoke_cli(
         root_dir,
@@ -275,10 +265,6 @@ def test_cli_representative_flow_from_start_to_done() -> None:
             "GREEN_IMPL",
             "--next-step",
             "green-001",
-            "--allowed-paths",
-            "src/**,tests/**",
-            "--forbidden-paths",
-            "infra/**",
         ],
     )[0] == 0
 
@@ -335,7 +321,7 @@ def test_cli_failed_verify_requires_failure_analysis_then_allows_reentry() -> No
 
     code, payload = invoke_cli(
         root_dir,
-        ["advance-stage", "--to", "GREEN_IMPL", "--step", "green-001", "--allowed-paths", "src/**"],
+        ["advance-stage", "--to", "GREEN_IMPL", "--step", "green-001"],
     )
     assert code == 1
     assert "failure-analysis.md" in payload["error"]
@@ -343,6 +329,6 @@ def test_cli_failed_verify_requires_failure_analysis_then_allows_reentry() -> No
     (root_dir / ".agent" / "artifacts" / "failure-analysis.md").write_text("## Failure Summary\n", encoding="utf-8")
     code, _ = invoke_cli(
         root_dir,
-        ["advance-stage", "--to", "GREEN_IMPL", "--step", "green-001", "--allowed-paths", "src/**"],
+        ["advance-stage", "--to", "GREEN_IMPL", "--step", "green-001"],
     )
     assert code == 0
