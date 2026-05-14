@@ -1,3 +1,4 @@
+"""Workflow transition commands and guard enforcement."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -20,16 +21,19 @@ STAGE_TRANSITIONS = stage_transitions()
 
 
 def parse_scope_flag(value: str | bool | None) -> list[str]:
+    """Parse scope flag."""
     if not isinstance(value, str):
         return []
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
 def transition_conditions_for_stage(stage: str) -> dict[str, list[str]]:
+    """Transition conditions for stage."""
     return stage_exit_conditions(stage)
 
 
 def automatic_transitions() -> list[str]:
+    """Automatic transitions."""
     return [
         "start-task: IDLE -> CLARIFYING",
         "wizard: initializes directly into the selected starting stage",
@@ -40,9 +44,11 @@ def automatic_transitions() -> list[str]:
 
 
 def _has_active_task(state: dict[str, Any]) -> bool:
+    """Internal helper for has active task."""
     return bool(state.get("task_id"))
 
 def _required_artifacts_message(stage: str) -> str:
+    """Internal helper for required artifacts message."""
     required = stage_required_artifacts(stage)
     if not required:
         return f"{stage} has no required artifacts."
@@ -52,11 +58,13 @@ def _required_artifacts_message(stage: str) -> str:
 
 
 def _has_running_jobs(root_dir: Path) -> bool:
+    """Internal helper for has running jobs."""
     jobs = load_jobs(root_dir)
     return any(job.get("status") == "running" for job in jobs.get("jobs", []))
 
 
 def _require_direct_transition(from_stage: str, to_stage: str) -> None:
+    """Internal helper for require direct transition."""
     if to_stage not in STAGE_TRANSITIONS:
         raise RuntimeError(f"Unknown target stage: {to_stage}")
     if from_stage == "DONE":
@@ -74,6 +82,7 @@ def _guard_transition(
     allowed_paths: list[str],
     forbidden_paths: list[str],
 ) -> None:
+    """Internal helper for guard transition."""
     from_stage = str(state.get("stage"))
     _require_direct_transition(from_stage, to_stage)
     current_required = stage_required_artifacts(from_stage)
@@ -121,6 +130,7 @@ def _next_state_common(
     forbidden_paths: list[str],
     can_finalize_value: bool,
 ) -> dict[str, Any]:
+    """Internal helper for next state common."""
     next_state = dict(state)
     next_state["stage"] = to_stage
     next_state["current_step"] = current_step
@@ -146,6 +156,7 @@ def _append_transition_event(
     state: dict[str, Any],
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Internal helper for append transition event."""
     payload = {
         "hook": "WorkflowTransition",
         "command": command_name,
@@ -165,6 +176,7 @@ def advance_stage(
     allowed_paths: list[str] | None = None,
     forbidden_paths: list[str] | None = None,
 ) -> dict[str, Any]:
+    """Advance stage."""
     state = load_state(root_dir)
     allowed = list(allowed_paths or [])
     forbidden = list(forbidden_paths or [])
@@ -196,6 +208,7 @@ def complete_step(
     allowed_paths: list[str] | None = None,
     forbidden_paths: list[str] | None = None,
 ) -> dict[str, Any]:
+    """Complete step."""
     state = load_state(root_dir)
     current_stage = str(state.get("stage"))
     if current_stage not in set(complete_step_allowed_from_stages()):
@@ -236,6 +249,7 @@ def complete_step(
 
 
 def ready_to_summarize(root_dir: Path) -> dict[str, Any]:
+    """Move workflow state so it is ready to summarize."""
     state = load_state(root_dir)
     from_stage = str(state.get("stage"))
     _guard_transition(root_dir, state, "READY_TO_SUMMARIZE", "ready-to-summarize", None, [], [])
@@ -253,6 +267,7 @@ def ready_to_summarize(root_dir: Path) -> dict[str, Any]:
 
 
 def mark_done(root_dir: Path) -> dict[str, Any]:
+    """Mark done."""
     state = load_state(root_dir)
     from_stage = str(state.get("stage"))
     _guard_transition(root_dir, state, "DONE", "mark-done", None, [], [])

@@ -1,3 +1,4 @@
+"""Failure tracking and retry-loop protection helpers."""
 from __future__ import annotations
 
 import hashlib
@@ -14,15 +15,18 @@ DEFAULT_REPEAT_THRESHOLD = 2
 
 
 def read_failures(root_dir: Path) -> dict[str, Any]:
+    """Read failures."""
     return json.loads(failures_path(root_dir).read_text(encoding="utf-8"))
 
 
 def save_failures(root_dir: Path, failures: dict[str, Any]) -> dict[str, Any]:
+    """Save failures."""
     failures_path(root_dir).write_text(json.dumps(failures, indent=2) + "\n", encoding="utf-8")
     return failures
 
 
 def hash_failure(command: str, exit_code: int, log_path: Path | None) -> str:
+    """Hash failure."""
     log_contents = log_path.read_text(encoding="utf-8") if log_path and log_path.exists() else ""
     digest = hashlib.sha256()
     digest.update(f"{command}\n{exit_code}\n{log_contents}".encode("utf-8"))
@@ -30,6 +34,7 @@ def hash_failure(command: str, exit_code: int, log_path: Path | None) -> str:
 
 
 def latest_mtime(root_dir: Path) -> int:
+    """Return the latest mtime."""
     latest = 0
     for entry_name in ("src", "tests"):
         candidate = root_dir / entry_name
@@ -41,6 +46,7 @@ def latest_mtime(root_dir: Path) -> int:
 
 
 def record_command_result(root_dir: Path, command: str, exit_code: int, log_path: str | None) -> dict[str, Any]:
+    """Record command result."""
     state = load_state(root_dir)
     absolute_log = (root_dir / log_path) if log_path else None
     failure_hash = None if exit_code == 0 else hash_failure(command, exit_code, absolute_log)
@@ -96,6 +102,7 @@ def record_command_result(root_dir: Path, command: str, exit_code: int, log_path
 
 
 def check_failure_loop(root_dir: Path, threshold: int = DEFAULT_REPEAT_THRESHOLD) -> dict[str, Any]:
+    """Check failure loop."""
     failures = read_failures(root_dir)
     last_failure = failures.get("last_failure")
     if not last_failure:

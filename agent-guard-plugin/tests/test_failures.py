@@ -1,3 +1,4 @@
+"""Tests for test failures."""
 from pathlib import Path
 
 from agent_guard.failures import check_failure_loop, record_command_result
@@ -7,6 +8,7 @@ from .helpers import make_temp_repo, write_state
 
 
 def test_record_command_moves_stage_to_failure_analysis_outside_red_test() -> None:
+    """Test that record command moves stage to failure analysis outside red test."""
     root_dir = make_temp_repo()
     write_state(root_dir, stage="GREEN_IMPL")
 
@@ -19,6 +21,7 @@ def test_record_command_moves_stage_to_failure_analysis_outside_red_test() -> No
 
 
 def test_repeating_same_failed_command_twice_without_code_changes_is_blocked() -> None:
+    """Test that repeating same failed command twice without code changes is blocked."""
     root_dir = make_temp_repo()
     write_state(root_dir, stage="GREEN_IMPL")
 
@@ -34,6 +37,7 @@ def test_repeating_same_failed_command_twice_without_code_changes_is_blocked() -
 
 
 def test_verify_command_records_final_verification_result() -> None:
+    """Test that verify command records final verification result."""
     root_dir = make_temp_repo()
     write_state(root_dir, stage="VERIFY")
 
@@ -46,6 +50,7 @@ def test_verify_command_records_final_verification_result() -> None:
 
 
 def test_success_command_without_log_only_records_event() -> None:
+    """Test that success command without log only records event."""
     root_dir = make_temp_repo()
     write_state(root_dir, stage="GREEN_IMPL")
 

@@ -1,3 +1,4 @@
+"""Tests for test session start."""
 from agent_guard.runtime_adapter import get_session_reminder
 from agent_guard.task_reset import reset_task
 import os
@@ -6,6 +7,7 @@ from .helpers import make_temp_repo, write_state
 
 
 def test_session_start_includes_meta_skill_and_workflow_context() -> None:
+    """Test that session start includes meta skill and workflow context."""
     root_dir = make_temp_repo()
     write_state(
         root_dir,
@@ -42,6 +44,7 @@ def test_session_start_includes_meta_skill_and_workflow_context() -> None:
 
 
 def test_session_start_uses_claude_skill_layout_when_configured() -> None:
+    """Test that session start uses claude skill layout when configured."""
     root_dir = make_temp_repo()
     write_state(root_dir, task_id="password-reset", stage="RED_TEST")
     skills_dir = root_dir / ".claude" / "skills"
@@ -72,6 +75,7 @@ def test_session_start_uses_claude_skill_layout_when_configured() -> None:
 
 
 def test_session_start_includes_recent_archive_after_reset() -> None:
+    """Test that session start includes recent archive after reset."""
     root_dir = make_temp_repo()
     write_state(
         root_dir,
@@ -90,6 +94,7 @@ def test_session_start_includes_recent_archive_after_reset() -> None:
 
 
 def test_session_start_defaults_to_idle_when_agent_dir_is_missing() -> None:
+    """Test that session start defaults to idle when agent dir is missing."""
     root_dir = make_temp_repo()
     for child in (root_dir / ".agent").rglob("*"):
         if child.is_file():

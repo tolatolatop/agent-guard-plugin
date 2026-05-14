@@ -1,3 +1,4 @@
+"""Tests for test wizard."""
 import tempfile
 from io import StringIO
 from pathlib import Path
@@ -10,14 +11,17 @@ from agent_guard.wizard import run_wizard, slugify_task_id
 
 
 def make_repo() -> Path:
+    """Helper for make repo."""
     return Path(tempfile.mkdtemp(prefix="agent-guard-wizard-"))
 
 
 def test_slugify_task_id_normalizes_free_text() -> None:
+    """Test that slugify task id normalizes free text."""
     assert slugify_task_id("Init Video Clipper!") == "init-video-clipper"
 
 
 def test_wizard_writes_state_and_plan_from_plain_streams() -> None:
+    """Test that wizard writes state and plan from plain streams."""
     root = make_repo()
     answers = StringIO(
         "\n"
@@ -47,6 +51,7 @@ def test_wizard_writes_state_and_plan_from_plain_streams() -> None:
 
 
 def test_wizard_can_skip_plan_generation() -> None:
+    """Test that wizard can skip plan generation."""
     root = make_repo()
     answers = StringIO(
         "video-clipper\n"

@@ -1,3 +1,4 @@
+"""Job state helpers for background work tracking."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -8,6 +9,7 @@ from .state import DEFAULT_JOBS, jobs_path, read_json
 
 
 def load_jobs(root_dir: Path) -> dict[str, Any]:
+    """Load jobs."""
     file_path = jobs_path(root_dir)
     if not file_path.exists():
         return DEFAULT_JOBS.copy()
@@ -15,6 +17,7 @@ def load_jobs(root_dir: Path) -> dict[str, Any]:
 
 
 def check_job_poll(root_dir: Path, job_id: str) -> dict[str, str]:
+    """Check job poll."""
     jobs = load_jobs(root_dir)
     job = next((entry for entry in jobs.get("jobs", []) if entry.get("id") == job_id), None)
     if job is None:

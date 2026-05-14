@@ -1,9 +1,11 @@
+"""Tests for test plan."""
 from agent_guard.plan import load_plan, load_plan_summary, nonterminal_plan_steps, plan_steps
 
 from .helpers import make_temp_repo
 
 
 def test_plan_steps_accepts_minimal_name_description_status_schema() -> None:
+    """Test that plan steps accepts minimal name description status schema."""
     root_dir = make_temp_repo()
     (root_dir / ".agent" / "plan.yaml").write_text(
         "task_id: password-reset\n"
@@ -31,6 +33,7 @@ def test_plan_steps_accepts_minimal_name_description_status_schema() -> None:
 
 
 def test_plan_steps_rejects_legacy_scope_fields_without_minimal_fields() -> None:
+    """Test that plan steps rejects legacy scope fields without minimal fields."""
     root_dir = make_temp_repo()
     (root_dir / ".agent" / "plan.yaml").write_text(
         "steps:\n"
@@ -48,6 +51,7 @@ def test_plan_steps_rejects_legacy_scope_fields_without_minimal_fields() -> None
 
 
 def test_nonterminal_plan_steps_returns_steps_not_done_or_failed() -> None:
+    """Test that nonterminal plan steps returns steps not done or failed."""
     root_dir = make_temp_repo()
     (root_dir / ".agent" / "plan.yaml").write_text(
         "task_id: password-reset\n"

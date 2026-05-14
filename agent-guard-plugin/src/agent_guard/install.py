@@ -1,3 +1,4 @@
+"""Runtime installation and uninstallation helpers for supported tools."""
 from __future__ import annotations
 
 import json
@@ -18,6 +19,7 @@ SHORT_FLAG_ALIASES = {
 
 
 def parse_flags(args: list[str]) -> dict[str, str | bool]:
+    """Parse flags."""
     flags: dict[str, str | bool] = {}
     index = 0
     while index < len(args):
@@ -47,43 +49,52 @@ def parse_flags(args: list[str]) -> dict[str, str | bool]:
 
 
 def read_json_if_exists(file_path: Path, fallback: dict[str, Any]) -> dict[str, Any]:
+    """Read json if exists."""
     if not file_path.exists():
         return fallback
     return json.loads(file_path.read_text(encoding="utf-8"))
 
 
 def write_json(file_path: Path, value: dict[str, Any]) -> None:
+    """Write json."""
     file_path.parent.mkdir(parents=True, exist_ok=True)
     file_path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
 
 def shell_command(*parts: str) -> str:
+    """Shell command."""
     return " ".join(shlex.quote(part) for part in parts)
 
 
 def shell_assignment(key: str, value: str) -> str:
+    """Shell assignment."""
     return f"{key}={shlex.quote(value)}"
 
 
 def shared_skills_install_dir(scope: str, cwd: Path, home_dir: Path) -> Path:
+    """Shared skills install dir."""
     return cwd / ".agent-guard" / "skills" if scope == "project" else home_dir / ".agent-guard" / "skills"
 
 
 def claude_skills_install_dir(scope: str, cwd: Path, home_dir: Path) -> Path:
+    """Claude skills install dir."""
     return cwd / ".claude" / "skills" if scope == "project" else home_dir / ".claude" / "skills"
 
 
 def opencode_skills_install_dir(scope: str, cwd: Path, home_dir: Path) -> Path:
+    """Opencode skills install dir."""
     if scope == "project":
         return cwd / ".opencode" / "skills"
     return home_dir / ".config" / "opencode" / "skills"
 
 
 def packaged_skills_dir() -> Path:
+    """Packaged skills dir."""
     return Path(__file__).resolve().parent / "_bundled_skills"
 
 
 def source_skills_dir(plugin_root: Path) -> Path:
+    """Source skills dir."""
     candidates = [
         packaged_skills_dir(),
         plugin_root / "docs" / "skills",
@@ -96,10 +107,12 @@ def source_skills_dir(plugin_root: Path) -> Path:
 
 
 def skill_slug_from_source(source_file: Path) -> str:
+    """Skill slug from source."""
     return source_file.stem
 
 
 def install_skills_bundle(target_dir: Path, plugin_root: Path) -> list[str]:
+    """Install skills bundle."""
     target_dir.mkdir(parents=True, exist_ok=True)
     written_files: list[str] = []
     for source_file in sorted(source_skills_dir(plugin_root).glob("*.md")):
@@ -112,6 +125,7 @@ def install_skills_bundle(target_dir: Path, plugin_root: Path) -> list[str]:
 
 
 def install_claude_skills_bundle(target_dir: Path, plugin_root: Path) -> list[str]:
+    """Install claude skills bundle."""
     target_dir.mkdir(parents=True, exist_ok=True)
     written_files: list[str] = []
     for source_file in sorted(source_skills_dir(plugin_root).glob("*.md")):
@@ -128,6 +142,7 @@ def install_claude_skills_bundle(target_dir: Path, plugin_root: Path) -> list[st
 
 
 def install_opencode_skills_bundle(target_dir: Path, plugin_root: Path) -> list[str]:
+    """Install opencode skills bundle."""
     target_dir.mkdir(parents=True, exist_ok=True)
     written_files: list[str] = []
     for source_file in sorted(source_skills_dir(plugin_root).glob("*.md")):
@@ -144,6 +159,7 @@ def install_opencode_skills_bundle(target_dir: Path, plugin_root: Path) -> list[
 
 
 def uv_bridge_command(plugin_root: Path, action: str, skills_dir: Path) -> str:
+    """Uv bridge command."""
     return " ".join(
         [
             shell_assignment("AGENT_GUARD_SKILLS_DIR", str(skills_dir)),
@@ -153,20 +169,24 @@ def uv_bridge_command(plugin_root: Path, action: str, skills_dir: Path) -> str:
 
 
 def claude_config_file(scope: str, cwd: Path, home_dir: Path) -> Path:
+    """Claude config file."""
     return cwd / ".claude" / "settings.local.json" if scope == "project" else home_dir / ".claude" / "settings.json"
 
 
 def codex_hooks_file(scope: str, cwd: Path, home_dir: Path) -> Path:
+    """Codex hooks file."""
     return cwd / ".codex" / "hooks.json" if scope == "project" else home_dir / ".codex" / "hooks.json"
 
 
 def opencode_plugin_file(scope: str, cwd: Path, home_dir: Path) -> Path:
+    """Opencode plugin file."""
     if scope == "project":
         return cwd / ".opencode" / "plugins" / "agent-guard.js"
     return home_dir / ".config" / "opencode" / "plugins" / "agent-guard.js"
 
 
 def dedupe_hook_entries(entries: list[dict[str, Any]], marker: str) -> list[dict[str, Any]]:
+    """Deduplicate hook entries."""
     filtered: list[dict[str, Any]] = []
     for entry in entries:
         hooks = entry.get("hooks")
@@ -180,6 +200,7 @@ def dedupe_hook_entries(entries: list[dict[str, Any]], marker: str) -> list[dict
 
 
 def build_claude_hooks(plugin_root: Path, skills_dir: Path) -> dict[str, Any]:
+    """Build claude hooks."""
     return {
         "SessionStart": [
             {
@@ -219,6 +240,7 @@ def build_claude_hooks(plugin_root: Path, skills_dir: Path) -> dict[str, Any]:
 
 
 def merge_claude_hooks(existing_hooks: dict[str, Any], new_hooks: dict[str, Any], marker: str) -> dict[str, Any]:
+    """Merge claude hooks."""
     merged = dict(existing_hooks)
     for event_name, entries in new_hooks.items():
         existing_entries = merged.get(event_name, [])
@@ -229,6 +251,7 @@ def merge_claude_hooks(existing_hooks: dict[str, Any], new_hooks: dict[str, Any]
 
 
 def install_claude_code(cwd: Path, home_dir: Path, scope: str, plugin_root: Path) -> dict[str, Any]:
+    """Install claude code."""
     config_path = claude_config_file(scope, cwd, home_dir)
     config = read_json_if_exists(config_path, {})
     marker = "agent-guard-bridge"
@@ -249,6 +272,7 @@ def install_claude_code(cwd: Path, home_dir: Path, scope: str, plugin_root: Path
 
 
 def build_codex_hooks(plugin_root: Path, skills_dir: Path) -> dict[str, Any]:
+    """Build codex hooks."""
     return {
         "hooks": {
             "SessionStart": [
@@ -280,6 +304,7 @@ def build_codex_hooks(plugin_root: Path, skills_dir: Path) -> dict[str, Any]:
 
 
 def install_codex(cwd: Path, home_dir: Path, scope: str, plugin_root: Path) -> dict[str, Any]:
+    """Install codex."""
     hooks_path = codex_hooks_file(scope, cwd, home_dir)
     skills_dir = shared_skills_install_dir(scope, cwd, home_dir)
     skill_files = install_skills_bundle(skills_dir, plugin_root)
@@ -298,6 +323,7 @@ def install_codex(cwd: Path, home_dir: Path, scope: str, plugin_root: Path) -> d
 
 
 def build_opencode_plugin_source(plugin_root: Path, skills_dir: Path) -> str:
+    """Build opencode plugin source."""
     command = uv_bridge_command(plugin_root, "opencode-event", skills_dir)
     return f"""import {{ spawnSync }} from "node:child_process"
 
@@ -343,6 +369,7 @@ export const AgentGuardPlugin = async () => {{
 
 
 def install_opencode(cwd: Path, home_dir: Path, scope: str, plugin_root: Path) -> dict[str, Any]:
+    """Install opencode."""
     plugin_path = opencode_plugin_file(scope, cwd, home_dir)
     plugin_path.parent.mkdir(parents=True, exist_ok=True)
     skills_dir = opencode_skills_install_dir(scope, cwd, home_dir)
@@ -362,6 +389,7 @@ def install_opencode(cwd: Path, home_dir: Path, scope: str, plugin_root: Path) -
 
 
 def install_runtime(argv: list[str], cwd: Path, home_dir: Path | None, plugin_root: Path) -> dict[str, Any]:
+    """Install runtime."""
     flags = parse_flags(argv)
     runtime = flags.get("runtime")
     scope = flags.get("scope", "project")
@@ -379,10 +407,12 @@ def install_runtime(argv: list[str], cwd: Path, home_dir: Path | None, plugin_ro
 
 
 def _hook_matches_marker(hook: Any, marker: str) -> bool:
+    """Internal helper for hook matches marker."""
     return isinstance(hook, dict) and marker in str(hook.get("command", ""))
 
 
 def _remove_marked_hook_entries(hooks: dict[str, Any], marker: str) -> tuple[dict[str, Any], int]:
+    """Internal helper for remove marked hook entries."""
     cleaned: dict[str, Any] = {}
     removed = 0
 
@@ -410,6 +440,7 @@ def _remove_marked_hook_entries(hooks: dict[str, Any], marker: str) -> tuple[dic
 
 
 def _cleanup_empty_dirs(start_dir: Path, stop_dir: Path) -> None:
+    """Internal helper for cleanup empty dirs."""
     current = start_dir
     while True:
         if current == stop_dir:
@@ -422,6 +453,7 @@ def _cleanup_empty_dirs(start_dir: Path, stop_dir: Path) -> None:
 
 
 def _build_plan_result(runtime: str, scope: str, changes: list[dict[str, str]], notes: list[str] | None = None) -> dict[str, Any]:
+    """Internal helper for build plan result."""
     return {
         "runtime": runtime,
         "scope": scope,
@@ -431,6 +463,7 @@ def _build_plan_result(runtime: str, scope: str, changes: list[dict[str, str]], 
 
 
 def plan_uninstall_claude_code(cwd: Path, home_dir: Path, scope: str) -> dict[str, Any]:
+    """Plan uninstall claude code."""
     config_path = claude_config_file(scope, cwd, home_dir)
     if not config_path.exists():
         return _build_plan_result("claude-code", scope, [])
@@ -478,6 +511,7 @@ def plan_uninstall_claude_code(cwd: Path, home_dir: Path, scope: str) -> dict[st
 
 
 def plan_uninstall_codex(cwd: Path, home_dir: Path, scope: str) -> dict[str, Any]:
+    """Plan uninstall codex."""
     hooks_path = codex_hooks_file(scope, cwd, home_dir)
     if not hooks_path.exists():
         return _build_plan_result("codex", scope, [])
@@ -519,6 +553,7 @@ def plan_uninstall_codex(cwd: Path, home_dir: Path, scope: str) -> dict[str, Any
 
 
 def plan_uninstall_opencode(cwd: Path, home_dir: Path, scope: str) -> dict[str, Any]:
+    """Plan uninstall opencode."""
     plugin_path = opencode_plugin_file(scope, cwd, home_dir)
     skills_dir = opencode_skills_install_dir(scope, cwd, home_dir)
     changes: list[dict[str, str]] = []
@@ -547,6 +582,7 @@ def plan_uninstall_opencode(cwd: Path, home_dir: Path, scope: str) -> dict[str, 
 
 
 def plan_uninstall_runtime(argv: list[str], cwd: Path, home_dir: Path | None) -> dict[str, Any]:
+    """Plan uninstall runtime."""
     flags = parse_flags(argv)
     runtime = flags.get("runtime")
     scope = flags.get("scope", "project")
@@ -577,6 +613,7 @@ def plan_uninstall_runtime(argv: list[str], cwd: Path, home_dir: Path | None) ->
 
 
 def _render_uninstall_preview(plan: dict[str, Any], output: TextIO) -> None:
+    """Internal helper for render uninstall preview."""
     output.write("The following changes will be applied:\n")
     for change in plan["changes"]:
         output.write(f"- {change['action']}: {change['path']}\n")
@@ -584,10 +621,12 @@ def _render_uninstall_preview(plan: dict[str, Any], output: TextIO) -> None:
 
 
 def _confirm_uninstall(output: TextIO, input_stream: TextIO) -> bool:
+    """Internal helper for confirm uninstall."""
     return confirm_action("Proceed with uninstall?", input_stream, output)
 
 
 def apply_uninstall_plan(plan: dict[str, Any], cwd: Path, home_dir: Path | None) -> dict[str, Any]:
+    """Apply uninstall plan."""
     scope = plan["scope"]
     resolved_home = home_dir or Path(os.path.expanduser("~"))
 
@@ -644,6 +683,7 @@ def uninstall_runtime(
     output: TextIO,
     input_stream: TextIO,
 ) -> dict[str, Any]:
+    """Uninstall runtime."""
     flags = parse_flags(argv)
     assume_yes = bool(flags.get("yes"))
     plan = plan_uninstall_runtime(argv, cwd, home_dir)

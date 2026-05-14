@@ -1,3 +1,4 @@
+"""Task archival and reset helpers for starting the next task."""
 from __future__ import annotations
 
 import json
@@ -25,23 +26,28 @@ from .state import (
 
 
 def _slugify(value: str) -> str:
+    """Internal helper for slugify."""
     slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", value).strip("-")
     return slug or "task"
 
 
 def _archive_root(root_dir: Path) -> Path:
+    """Internal helper for archive root."""
     return agent_dir(root_dir) / "archive"
 
 
 def _plan_path(root_dir: Path) -> Path:
+    """Internal helper for plan path."""
     return agent_dir(root_dir) / "plan.yaml"
 
 
 def _write_json(file_path: Path, value: dict[str, Any]) -> None:
+    """Internal helper for write json."""
     file_path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
 
 def latest_archive(root_dir: Path) -> dict[str, Any] | None:
+    """Return the latest archive."""
     archive_root = _archive_root(root_dir)
     if not archive_root.exists():
         return None
@@ -66,12 +72,14 @@ def latest_archive(root_dir: Path) -> dict[str, Any] | None:
 
 
 def _is_resettable_state(state: dict[str, Any]) -> bool:
+    """Internal helper for is resettable state."""
     if state.get("stage") == "DONE":
         return True
     return state.get("stage") == "READY_TO_SUMMARIZE" and state.get("can_finalize") is True
 
 
 def _snapshot_state(root_dir: Path) -> dict[str, Any]:
+    """Internal helper for snapshot state."""
     snapshot: dict[str, Any] = {
         "state": json.loads(state_path(root_dir).read_text(encoding="utf-8")),
         "jobs": json.loads(jobs_path(root_dir).read_text(encoding="utf-8")),
@@ -84,6 +92,7 @@ def _snapshot_state(root_dir: Path) -> dict[str, Any]:
 
 
 def archive_current_task(root_dir: Path) -> dict[str, Any]:
+    """Archive current task."""
     ensure_agent_files(root_dir)
     state = load_state(root_dir)
     task_id = str(state.get("task_id") or "unset-task")
@@ -119,6 +128,7 @@ def archive_current_task(root_dir: Path) -> dict[str, Any]:
 
 
 def _reset_runtime_files(root_dir: Path, new_task_id: str) -> dict[str, Any]:
+    """Internal helper for reset runtime files."""
     live_artifacts = artifacts_dir(root_dir)
     if live_artifacts.exists():
         for child in list(live_artifacts.iterdir()):
@@ -145,6 +155,7 @@ def _reset_runtime_files(root_dir: Path, new_task_id: str) -> dict[str, Any]:
 
 
 def reset_task(root_dir: Path, new_task_id: str) -> dict[str, Any]:
+    """Reset task."""
     ensure_agent_files(root_dir)
     state = load_state(root_dir)
     if not _is_resettable_state(state):

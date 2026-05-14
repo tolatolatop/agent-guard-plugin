@@ -1,3 +1,4 @@
+"""Path-policy checks that gate file writes by workflow stage."""
 from __future__ import annotations
 
 import re
@@ -19,6 +20,7 @@ SENSITIVE_PATTERNS = [
 def normalize_path(target_path: str) -> str:
     # Policy matching is repo-relative, but hooks may send absolute paths.
     # Special-case .agent paths so they remain governed even when absolute.
+    """Normalize path."""
     normalized = target_path.replace("\\", "/").removeprefix("./")
 
     if normalized == ".agent" or normalized.startswith(".agent/"):
@@ -34,6 +36,7 @@ def normalize_path(target_path: str) -> str:
 
 
 def glob_to_regex(pattern: str) -> re.Pattern[str]:
+    """Glob to regex."""
     normalized = normalize_path(pattern)
     double_placeholder = "__DOUBLE_WILDCARD__"
     single_placeholder = "__SINGLE_WILDCARD__"
@@ -47,36 +50,44 @@ def glob_to_regex(pattern: str) -> re.Pattern[str]:
 
 
 def matches_any(target_path: str, patterns: list[str] | tuple[str, ...]) -> bool:
+    """Matches any."""
     normalized = normalize_path(target_path)
     return any(glob_to_regex(pattern).match(normalized) for pattern in patterns)
 
 
 def is_sensitive_path(target_path: str) -> bool:
+    """Return whether is sensitive path."""
     return matches_any(target_path, SENSITIVE_PATTERNS)
 
 
 def blocked(reason: str) -> dict[str, str]:
+    """Blocked."""
     return {"decision": "block", "reason": reason}
 
 
 def allowed(reason: str) -> dict[str, str]:
+    """Allowed."""
     return {"decision": "allow", "reason": reason}
 
 
 def is_stage_managed_only(stage: str) -> bool:
+    """Return whether is stage managed only."""
     return stage_spec(stage).get("writable") == "managed-only"
 
 
 def is_stage_read_only(stage: str) -> bool:
+    """Return whether is stage read only."""
     return stage_spec(stage).get("writable") == "none"
 
 
 def is_allowed_managed_path(stage: str, target_path: str) -> bool:
+    """Return whether is allowed managed path."""
     allowed_paths = tuple(stage_spec(stage).get("allowed_paths", []))
     return bool(allowed_paths) and matches_any(target_path, allowed_paths)
 
 
 def decide_write(state: dict[str, Any], target_path: str) -> dict[str, str]:
+    """Decide write."""
     normalized = normalize_path(target_path)
     stage = state["stage"]
     stage_rule = stage_spec(stage)

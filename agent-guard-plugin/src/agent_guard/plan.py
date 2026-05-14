@@ -1,3 +1,4 @@
+"""Helpers for reading and updating .agent/plan.yaml."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -9,10 +10,12 @@ from .state import agent_dir
 
 
 def plan_path(root_dir: Path) -> Path:
+    """Plan path."""
     return agent_dir(root_dir) / "plan.yaml"
 
 
 def load_plan(root_dir: Path) -> dict[str, Any] | None:
+    """Load plan."""
     file_path = plan_path(root_dir)
     if not file_path.exists():
         return None
@@ -33,6 +36,7 @@ def load_plan(root_dir: Path) -> dict[str, Any] | None:
 
 
 def _normalize_step(step: Any, index: int) -> dict[str, str]:
+    """Internal helper for normalize step."""
     if not isinstance(step, dict):
         raise RuntimeError(f"plan.yaml step at index {index} must be a mapping.")
 
@@ -46,6 +50,7 @@ def _normalize_step(step: Any, index: int) -> dict[str, str]:
 
 
 def plan_steps(root_dir: Path) -> list[dict[str, str]]:
+    """Plan steps."""
     data = load_plan(root_dir)
     if data is None:
         return []
@@ -55,6 +60,7 @@ def plan_steps(root_dir: Path) -> list[dict[str, str]]:
 def nonterminal_plan_steps(root_dir: Path) -> list[dict[str, str]]:
     # Only done/failed are terminal. Every other status keeps the plan open and
     # blocks finalization.
+    """Nonterminal plan steps."""
     terminal_statuses = {"done", "failed"}
     return [
         step for step in plan_steps(root_dir) if step.get("status", "").strip().lower() not in terminal_statuses
@@ -62,11 +68,13 @@ def nonterminal_plan_steps(root_dir: Path) -> list[dict[str, str]]:
 
 
 def first_nonterminal_plan_step_name(root_dir: Path) -> str | None:
+    """Return the first nonterminal plan step name."""
     pending = nonterminal_plan_steps(root_dir)
     return pending[0]["name"] if pending else None
 
 
 def update_plan_step_status(root_dir: Path, step_name: str, status: str) -> dict[str, Any]:
+    """Update plan step status."""
     data = load_plan(root_dir)
     if data is None:
         raise RuntimeError("plan.yaml does not exist.")
@@ -91,6 +99,7 @@ def update_plan_step_status(root_dir: Path, step_name: str, status: str) -> dict
 
 
 def load_plan_summary(root_dir: Path) -> dict[str, Any]:
+    """Load plan summary."""
     steps = plan_steps(root_dir)
     if not steps:
         data = load_plan(root_dir)

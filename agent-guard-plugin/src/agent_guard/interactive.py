@@ -1,3 +1,4 @@
+"""Interactive terminal prompts used by setup and uninstall flows."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,15 +11,18 @@ from prompt_toolkit.shortcuts import confirm
 
 
 def _is_tty(stream: TextIO) -> bool:
+    """Internal helper for is tty."""
     checker = getattr(stream, "isatty", None)
     return bool(checker and checker())
 
 
 def use_prompt_toolkit(input_stream: TextIO, output: TextIO) -> bool:
+    """Use prompt toolkit."""
     return _is_tty(input_stream) and _is_tty(output)
 
 
 def confirm_action(message: str, input_stream: TextIO, output: TextIO) -> bool:
+    """Confirm action."""
     if use_prompt_toolkit(input_stream, output):
         return bool(confirm(message=message))
 
@@ -34,6 +38,7 @@ def prompt_text(
     output: TextIO,
     default: str = "",
 ) -> str:
+    """Prompt for text."""
     if use_prompt_toolkit(input_stream, output):
         return prompt(f"{message}: ", default=default).strip()
 
@@ -51,6 +56,7 @@ def prompt_choice(
     output: TextIO,
     default: str,
 ) -> str:
+    """Prompt for choice."""
     if use_prompt_toolkit(input_stream, output):
         completer = WordCompleter(choices, ignore_case=True, sentence=True)
         while True:
@@ -73,6 +79,7 @@ def prompt_path(
     output: TextIO,
     default: str = "",
 ) -> str:
+    """Prompt for path."""
     if use_prompt_toolkit(input_stream, output):
         return prompt(f"{message}: ", default=default, completer=PathCompleter(expanduser=True)).strip()
 

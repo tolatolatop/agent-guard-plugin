@@ -1,3 +1,4 @@
+"""Finalization gates for workflow completion."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,6 +11,7 @@ from .state import load_state
 def can_finalize(root_dir: Path) -> dict[str, object]:
     # Finalization is intentionally lightweight: no running jobs, the workflow
     # has explicitly enabled finalization, and any plan steps are terminal.
+    """Can finalize."""
     state = load_state(root_dir)
     jobs = load_jobs(root_dir)
     reasons: list[str] = []

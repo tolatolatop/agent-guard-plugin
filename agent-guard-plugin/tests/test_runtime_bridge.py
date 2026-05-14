@@ -1,3 +1,4 @@
+"""Tests for test runtime bridge."""
 import json
 import os
 import subprocess
@@ -9,6 +10,7 @@ from .helpers import make_temp_repo
 
 
 def run_bridge(root_dir, action, payload):
+    """Helper for run bridge."""
     return subprocess.run(
         [sys.executable, "-m", "agent_guard.runtime_bridge", action],
         cwd=root_dir,
@@ -20,6 +22,7 @@ def run_bridge(root_dir, action, payload):
 
 
 def test_bridge_blocks_forbidden_write() -> None:
+    """Test that bridge blocks forbidden write."""
     root_dir = make_temp_repo()
     save_state(
         root_dir,
@@ -43,6 +46,7 @@ def test_bridge_blocks_forbidden_write() -> None:
 
 
 def test_bridge_allows_absolute_agent_artifact_write_within_repo() -> None:
+    """Test that bridge allows absolute agent artifact write within repo."""
     root_dir = make_temp_repo()
     save_state(
         root_dir,
@@ -69,6 +73,7 @@ def test_bridge_allows_absolute_agent_artifact_write_within_repo() -> None:
 
 
 def test_bridge_records_final_verification_log_only_for_verify() -> None:
+    """Test that bridge records final verification log only for verify."""
     root_dir = make_temp_repo()
     save_state(
         root_dir,
@@ -96,6 +101,7 @@ def test_bridge_records_final_verification_log_only_for_verify() -> None:
 
 
 def test_bridge_does_not_write_success_log_outside_verify() -> None:
+    """Test that bridge does not write success log outside verify."""
     root_dir = make_temp_repo()
     save_state(
         root_dir,
@@ -123,6 +129,7 @@ def test_bridge_does_not_write_success_log_outside_verify() -> None:
 
 
 def test_bridge_session_start_prefers_prompt_block_output() -> None:
+    """Test that bridge session start prefers prompt block output."""
     root_dir = make_temp_repo()
     result = run_bridge(root_dir, "session-start", {})
     assert result.returncode == 0
@@ -132,6 +139,7 @@ def test_bridge_session_start_prefers_prompt_block_output() -> None:
 
 
 def test_bridge_stop_allows_clarifying() -> None:
+    """Test that bridge stop allows clarifying."""
     root_dir = make_temp_repo()
     save_state(
         root_dir,
@@ -154,6 +162,7 @@ def test_bridge_stop_allows_clarifying() -> None:
 
 
 def test_bridge_stop_blocks_designing_when_stage_forbids_human_intervention() -> None:
+    """Test that bridge stop blocks designing when stage forbids human intervention."""
     root_dir = make_temp_repo()
     save_state(
         root_dir,
@@ -176,6 +185,7 @@ def test_bridge_stop_blocks_designing_when_stage_forbids_human_intervention() ->
 
 
 def test_bridge_stop_allows_planning() -> None:
+    """Test that bridge stop allows planning."""
     root_dir = make_temp_repo()
     save_state(
         root_dir,
@@ -198,6 +208,7 @@ def test_bridge_stop_allows_planning() -> None:
 
 
 def test_bridge_stop_blocks_red_test() -> None:
+    """Test that bridge stop blocks red test."""
     root_dir = make_temp_repo()
     save_state(
         root_dir,
@@ -220,6 +231,7 @@ def test_bridge_stop_blocks_red_test() -> None:
 
 
 def test_bridge_stop_blocks_ready_to_summarize_when_stage_forbids_human_intervention() -> None:
+    """Test that bridge stop blocks ready to summarize when stage forbids human intervention."""
     root_dir = make_temp_repo()
     save_state(
         root_dir,
@@ -243,6 +255,7 @@ def test_bridge_stop_blocks_ready_to_summarize_when_stage_forbids_human_interven
 
 
 def test_bridge_stop_allows_needs_human() -> None:
+    """Test that bridge stop allows needs human."""
     root_dir = make_temp_repo()
     save_state(
         root_dir,
@@ -265,6 +278,7 @@ def test_bridge_stop_allows_needs_human() -> None:
 
 
 def test_bridge_stop_allows_idle() -> None:
+    """Test that bridge stop allows idle."""
     root_dir = make_temp_repo()
     save_state(
         root_dir,
@@ -287,6 +301,7 @@ def test_bridge_stop_allows_idle() -> None:
 
 
 def test_bridge_stop_allows_done_without_rechecking_finalize() -> None:
+    """Test that bridge stop allows done without rechecking finalize."""
     root_dir = make_temp_repo()
     save_state(
         root_dir,
@@ -309,6 +324,7 @@ def test_bridge_stop_allows_done_without_rechecking_finalize() -> None:
 
 
 def test_bridge_session_start_uses_installed_skills_dir() -> None:
+    """Test that bridge session start uses installed skills dir."""
     root_dir = make_temp_repo()
     skills_dir = root_dir / ".agent-guard" / "skills"
     skills_dir.mkdir(parents=True, exist_ok=True)

@@ -1,3 +1,4 @@
+"""Tests for test install."""
 import json
 from io import StringIO
 import tempfile
@@ -16,12 +17,14 @@ from agent_guard.install import (
 
 
 def make_dirs() -> tuple[Path, Path]:
+    """Helper for make dirs."""
     root = Path(tempfile.mkdtemp(prefix="agent-guard-install-"))
     home = Path(tempfile.mkdtemp(prefix="agent-guard-home-"))
     return root, home
 
 
 def assert_dir_empty(path: Path) -> None:
+    """Helper for assert dir empty."""
     assert path.exists()
     assert list(path.iterdir()) == []
 
@@ -30,6 +33,7 @@ PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_install_writes_claude_code_project_settings_with_hook_commands() -> None:
+    """Test that install writes claude code project settings with hook commands."""
     root, home = make_dirs()
     result = install_runtime(["--runtime", "claude-code", "--scope", "project"], root, home, PLUGIN_ROOT)
 
@@ -48,6 +52,7 @@ def test_install_writes_claude_code_project_settings_with_hook_commands() -> Non
 
 
 def test_install_claude_removes_legacy_flat_skill_files() -> None:
+    """Test that install claude removes legacy flat skill files."""
     root, home = make_dirs()
     legacy_file = root / ".claude" / "skills" / "using-workflow.md"
     legacy_file.parent.mkdir(parents=True, exist_ok=True)
@@ -60,6 +65,7 @@ def test_install_claude_removes_legacy_flat_skill_files() -> None:
 
 
 def test_source_skills_dir_prefers_packaged_bundle_when_plugin_root_has_no_docs() -> None:
+    """Test that source skills dir prefers packaged bundle when plugin root has no docs."""
     root, _ = make_dirs()
 
     resolved = source_skills_dir(root)
@@ -69,6 +75,7 @@ def test_source_skills_dir_prefers_packaged_bundle_when_plugin_root_has_no_docs(
 
 
 def test_install_claude_skills_bundle_succeeds_without_plugin_docs() -> None:
+    """Test that install claude skills bundle succeeds without plugin docs."""
     root, home = make_dirs()
     fake_plugin_root = root / "installed-layout"
     fake_plugin_root.mkdir(parents=True, exist_ok=True)
@@ -80,6 +87,7 @@ def test_install_claude_skills_bundle_succeeds_without_plugin_docs() -> None:
 
 
 def test_install_claude_skills_bundle_errors_when_no_sources_exist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that install claude skills bundle errors when no sources exist."""
     empty_dir = tmp_path / "empty-skills"
     empty_dir.mkdir()
     monkeypatch.setattr("agent_guard.install.packaged_skills_dir", lambda: empty_dir)
@@ -89,6 +97,7 @@ def test_install_claude_skills_bundle_errors_when_no_sources_exist(tmp_path: Pat
 
 
 def test_parse_flags_supports_short_runtime_and_scope_aliases() -> None:
+    """Test that parse flags supports short runtime and scope aliases."""
     flags = parse_flags(["-r", "claude-code", "-s", "project"])
 
     assert flags["runtime"] == "claude-code"
@@ -96,6 +105,7 @@ def test_parse_flags_supports_short_runtime_and_scope_aliases() -> None:
 
 
 def test_install_writes_codex_hooks_json() -> None:
+    """Test that install writes codex hooks json."""
     root, home = make_dirs()
     install_runtime(["--runtime", "codex", "--scope", "project"], root, home, PLUGIN_ROOT)
 
@@ -110,6 +120,7 @@ def test_install_writes_codex_hooks_json() -> None:
 
 
 def test_install_writes_opencode_loader() -> None:
+    """Test that install writes opencode loader."""
     root, home = make_dirs()
     install_runtime(["--runtime", "opencode", "--scope", "project"], root, home, PLUGIN_ROOT)
 
@@ -124,6 +135,7 @@ def test_install_writes_opencode_loader() -> None:
 
 
 def test_install_opencode_removes_legacy_flat_skill_files() -> None:
+    """Test that install opencode removes legacy flat skill files."""
     root, home = make_dirs()
     legacy_file = root / ".opencode" / "skills" / "using-workflow.md"
     legacy_file.parent.mkdir(parents=True, exist_ok=True)
@@ -136,6 +148,7 @@ def test_install_opencode_removes_legacy_flat_skill_files() -> None:
 
 
 def test_opencode_loader_stays_thin() -> None:
+    """Test that opencode loader stays thin."""
     source = build_opencode_plugin_source(PLUGIN_ROOT, PLUGIN_ROOT / ".agent-guard" / "skills")
     assert "check-failure-loop" not in source
     assert "can-write" not in source
@@ -143,6 +156,7 @@ def test_opencode_loader_stays_thin() -> None:
 
 
 def test_uninstall_codex_lists_and_removes_hooks_after_confirmation() -> None:
+    """Test that uninstall codex lists and removes hooks after confirmation."""
     root, home = make_dirs()
     install_runtime(["--runtime", "codex", "--scope", "project"], root, home, PLUGIN_ROOT)
 
@@ -164,6 +178,7 @@ def test_uninstall_codex_lists_and_removes_hooks_after_confirmation() -> None:
 
 
 def test_uninstall_can_be_cancelled() -> None:
+    """Test that uninstall can be cancelled."""
     root, home = make_dirs()
     install_runtime(["--runtime", "opencode", "--scope", "project"], root, home, PLUGIN_ROOT)
 
@@ -181,6 +196,7 @@ def test_uninstall_can_be_cancelled() -> None:
 
 
 def test_uninstall_claude_removes_skills_bundle_after_confirmation() -> None:
+    """Test that uninstall claude removes skills bundle after confirmation."""
     root, home = make_dirs()
     install_runtime(["--runtime", "claude-code", "--scope", "project"], root, home, PLUGIN_ROOT)
 

@@ -1,3 +1,4 @@
+"""Interactive wizard helpers for initializing workflow state."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -13,12 +14,14 @@ WIZARD_STAGES = ["CLARIFYING", "PLANNING", "RED_TEST", "GREEN_IMPL"]
 
 
 def slugify_task_id(value: str) -> str:
+    """Slugify task id."""
     cleaned = "".join(ch.lower() if ch.isalnum() else "-" for ch in value.strip())
     collapsed = "-".join(part for part in cleaned.split("-") if part)
     return collapsed or "new-task"
 
 
 def default_paths_for_stage(stage: str) -> tuple[list[str], list[str]]:
+    """Return default paths for stage."""
     if stage == "RED_TEST":
         return ["tests/**"], ["src/**"]
     if stage == "GREEN_IMPL":
@@ -27,6 +30,7 @@ def default_paths_for_stage(stage: str) -> tuple[list[str], list[str]]:
 
 
 def parse_csv(value: str) -> list[str]:
+    """Parse csv."""
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
@@ -37,6 +41,7 @@ def write_plan_template(
     step_name: str | None,
     goal: str,
 ) -> Path:
+    """Write plan template."""
     step_identifier = step_name or (
         "red-001" if stage == "RED_TEST" else "green-001" if stage == "GREEN_IMPL" else "step-001"
     )
@@ -58,6 +63,7 @@ def write_plan_template(
 
 
 def run_wizard(root_dir: Path, input_stream: TextIO, output: TextIO) -> dict[str, Any]:
+    """Run wizard."""
     ensure_agent_files(root_dir)
 
     suggested_task = slugify_task_id(root_dir.name)

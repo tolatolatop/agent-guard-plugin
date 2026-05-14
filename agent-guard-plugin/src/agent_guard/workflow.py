@@ -1,3 +1,4 @@
+"""Workflow prompt construction and skill discovery helpers."""
 from __future__ import annotations
 
 import os
@@ -19,6 +20,7 @@ from .workflow_spec import (
 )
 
 def _parse_skill_metadata(file_path: Path, skill_id: str) -> dict[str, str]:
+    """Internal helper for parse skill metadata."""
     fallback_title = skill_id.replace("-", " ").replace("_", " ").title()
     metadata = {
         "title": fallback_title,
@@ -53,6 +55,7 @@ def _parse_skill_metadata(file_path: Path, skill_id: str) -> dict[str, str]:
 
 
 def discover_skills(base_dir: Path) -> list[dict[str, str]]:
+    """Discover skills."""
     if not base_dir.exists():
         return []
     discovered: dict[str, dict[str, str]] = {}
@@ -85,10 +88,12 @@ def discover_skills(base_dir: Path) -> list[dict[str, str]]:
 
 
 def get_stage_rules(stage: str) -> dict[str, Any]:
+    """Return stage rules."""
     return stage_spec(stage)
 
 
 def _read_skill_body(file_path: Path) -> str:
+    """Internal helper for read skill body."""
     text = file_path.read_text(encoding="utf-8")
     lines = text.splitlines()
     if lines and lines[0].strip() == "---":
@@ -99,6 +104,7 @@ def _read_skill_body(file_path: Path) -> str:
 
 
 def get_workflow_context(root_dir: Path, stage: str) -> dict[str, Any]:
+    """Return workflow context."""
     rules = get_stage_rules(stage)
     base_dir = (
         Path(os.environ["AGENT_GUARD_SKILLS_DIR"])
@@ -143,6 +149,7 @@ def build_session_prompt_block(
     workflow_context: dict[str, Any],
     recent_archive: dict[str, Any] | None = None,
 ) -> str:
+    """Build session prompt block."""
     transitions_out = ", ".join(workflow_context["transitions_out"]) or "none"
     transition_conditions = " | ".join(
         f"{target}: {', '.join(conditions)}"

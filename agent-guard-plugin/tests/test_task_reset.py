@@ -1,3 +1,4 @@
+"""Tests for test task reset."""
 import json
 from pathlib import Path
 
@@ -8,6 +9,7 @@ from .helpers import make_temp_repo, write_state
 
 
 def test_reset_task_requires_completed_state() -> None:
+    """Test that reset task requires completed state."""
     root_dir = make_temp_repo()
     write_state(root_dir, task_id="old-task", stage="GREEN_IMPL", current_step="green-001")
 
@@ -20,6 +22,7 @@ def test_reset_task_requires_completed_state() -> None:
 
 
 def test_reset_task_archives_current_records_and_initializes_new_task() -> None:
+    """Test that reset task archives current records and initializes new task."""
     root_dir = make_temp_repo()
     write_state(
         root_dir,

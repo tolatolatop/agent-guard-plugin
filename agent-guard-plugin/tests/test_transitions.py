@@ -1,3 +1,4 @@
+"""Tests for test transitions."""
 import json
 from contextlib import redirect_stdout
 from io import StringIO
@@ -11,11 +12,13 @@ from .helpers import make_temp_repo, write_state
 
 
 def read_events(root_dir) -> list[dict[str, object]]:
+    """Helper for read events."""
     lines = (root_dir / ".agent" / "events.jsonl").read_text(encoding="utf-8").splitlines()
     return [json.loads(line) for line in lines if line.strip()]
 
 
 def invoke_cli(root_dir, argv: list[str]) -> tuple[int, dict[str, object]]:
+    """Helper for invoke cli."""
     stdout = StringIO()
     code = 0
     with redirect_stdout(stdout):
@@ -27,6 +30,7 @@ def invoke_cli(root_dir, argv: list[str]) -> tuple[int, dict[str, object]]:
 
 
 def test_advance_stage_allows_legal_transition_and_blocks_illegal_transition() -> None:
+    """Test that advance stage allows legal transition and blocks illegal transition."""
     root_dir = make_temp_repo()
     write_state(root_dir, task_id="password-reset", stage="CLARIFYING")
 
@@ -42,6 +46,7 @@ def test_advance_stage_allows_legal_transition_and_blocks_illegal_transition() -
 
 
 def test_complete_step_updates_progress_with_explicit_scope_for_next_execution_step() -> None:
+    """Test that complete step updates progress with explicit scope for next execution step."""
     root_dir = make_temp_repo()
     (root_dir / ".agent" / "plan.yaml").write_text(
         "task_id: password-reset\n"
@@ -84,6 +89,7 @@ def test_complete_step_updates_progress_with_explicit_scope_for_next_execution_s
 
 
 def test_advance_stage_uses_explicit_scope_when_plan_step_is_missing() -> None:
+    """Test that advance stage uses explicit scope when plan step is missing."""
     root_dir = make_temp_repo()
     write_state(root_dir, task_id="password-reset", stage="PLANNING")
 
@@ -103,6 +109,7 @@ def test_advance_stage_uses_explicit_scope_when_plan_step_is_missing() -> None:
 
 
 def test_ready_to_summarize_is_blocked_without_successful_verification() -> None:
+    """Test that ready to summarize is blocked without successful verification."""
     root_dir = make_temp_repo()
     write_state(root_dir, task_id="password-reset", stage="VERIFY", remaining_steps=[])
 
@@ -115,6 +122,7 @@ def test_ready_to_summarize_is_blocked_without_successful_verification() -> None
 
 
 def test_ready_to_summarize_is_blocked_when_plan_has_nonterminal_steps() -> None:
+    """Test that ready to summarize is blocked when plan has nonterminal steps."""
     root_dir = make_temp_repo()
     (root_dir / ".agent" / "plan.yaml").write_text(
         "task_id: password-reset\n"
@@ -148,6 +156,7 @@ def test_ready_to_summarize_is_blocked_when_plan_has_nonterminal_steps() -> None
 
 
 def test_mark_done_is_blocked_unless_can_finalize_passes() -> None:
+    """Test that mark done is blocked unless can finalize passes."""
     root_dir = make_temp_repo()
     write_state(root_dir, task_id="password-reset", stage="READY_TO_SUMMARIZE", can_finalize=False)
 
@@ -160,6 +169,7 @@ def test_mark_done_is_blocked_unless_can_finalize_passes() -> None:
 
 
 def test_needs_failure_analysis_cannot_exit_without_artifact() -> None:
+    """Test that needs failure analysis cannot exit without artifact."""
     root_dir = make_temp_repo()
     write_state(
         root_dir,
@@ -178,6 +188,7 @@ def test_needs_failure_analysis_cannot_exit_without_artifact() -> None:
 
 
 def test_done_cannot_be_advanced_further() -> None:
+    """Test that done cannot be advanced further."""
     root_dir = make_temp_repo()
     write_state(root_dir, task_id="password-reset", stage="DONE", can_finalize=True)
 
@@ -190,6 +201,7 @@ def test_done_cannot_be_advanced_further() -> None:
 
 
 def test_transition_appends_event() -> None:
+    """Test that transition appends event."""
     root_dir = make_temp_repo()
     write_state(root_dir, task_id="password-reset", stage="CLARIFYING")
 
@@ -202,6 +214,7 @@ def test_transition_appends_event() -> None:
 
 
 def test_green_impl_cannot_advance_directly_to_verify() -> None:
+    """Test that green impl cannot advance directly to verify."""
     root_dir = make_temp_repo()
     write_state(
         root_dir,
@@ -221,6 +234,7 @@ def test_green_impl_cannot_advance_directly_to_verify() -> None:
 
 
 def test_verify_can_advance_directly_to_red_test_and_green_impl() -> None:
+    """Test that verify can advance directly to red test and green impl."""
     root_dir = make_temp_repo()
     write_state(root_dir, task_id="password-reset", stage="VERIFY", current_step="verify-001")
 
@@ -233,6 +247,7 @@ def test_verify_can_advance_directly_to_red_test_and_green_impl() -> None:
 
 
 def test_cli_representative_flow_from_start_to_done() -> None:
+    """Test that cli representative flow from start to done."""
     root_dir = make_temp_repo()
     (root_dir / ".agent" / "plan.yaml").write_text(
         "task_id: password-reset\n"
@@ -308,6 +323,7 @@ def test_cli_representative_flow_from_start_to_done() -> None:
 
 
 def test_cli_failed_verify_requires_failure_analysis_then_allows_reentry() -> None:
+    """Test that cli failed verify requires failure analysis then allows reentry."""
     root_dir = make_temp_repo()
     write_state(root_dir, task_id="password-reset", stage="VERIFY", current_step="verify-001")
     log_path = ".agent/artifacts/final-verification.log"

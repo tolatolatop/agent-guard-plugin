@@ -1,3 +1,4 @@
+"""Command-line entry points for agent-guard."""
 from __future__ import annotations
 
 import json
@@ -26,17 +27,20 @@ from .wizard import run_wizard
 
 
 def print_json(data: dict[str, Any], exit_code: int = 0) -> None:
+    """Print json."""
     sys.stdout.write(json.dumps(data, indent=2) + "\n")
     raise SystemExit(exit_code)
 
 
 def ensure_path_arg(rest: list[str], name: str) -> str:
+    """Ensure path arg."""
     if not rest:
         print_json({"error": f"Missing required argument: {name}"}, 1)
     return rest[0]
 
 
 def run_command(argv: list[str], cwd: Path) -> int:
+    """Run command."""
     if not argv:
         print_json({"error": "Missing command"}, 1)
 
@@ -187,10 +191,12 @@ def run_command(argv: list[str], cwd: Path) -> int:
 
 
 def main() -> None:
+    """Run the module entry point."""
     run_command(sys.argv[1:], Path.cwd())
 
 
 def install_main() -> None:
+    """Run the install entry point."""
     try:
         result = install_runtime(sys.argv[1:], Path.cwd(), Path(os.path.expanduser("~")), Path(__file__).resolve().parents[2])
         print_json({"ok": True, **result})
@@ -199,6 +205,7 @@ def install_main() -> None:
 
 
 def uninstall_main() -> None:
+    """Run the uninstall entry point."""
     try:
         result = uninstall_runtime(
             sys.argv[1:],

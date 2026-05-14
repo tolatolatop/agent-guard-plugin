@@ -1,3 +1,4 @@
+"""Adapters that turn workflow state into runtime-facing reminders."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -12,6 +13,7 @@ from .workflow import build_session_prompt_block, get_workflow_context
 def get_next_step(root_dir: Path, state: dict[str, Any]) -> str | None:
     # Prefer the plan as the source of truth; remaining_steps is only a legacy
     # fallback for older state files.
+    """Return next step."""
     plan_step = first_nonterminal_plan_step_name(root_dir)
     if plan_step:
         return plan_step
@@ -20,6 +22,7 @@ def get_next_step(root_dir: Path, state: dict[str, Any]) -> str | None:
 
 
 def get_session_reminder(root_dir: Path) -> dict[str, Any]:
+    """Return session reminder."""
     state = load_state(root_dir)
     next_step = get_next_step(root_dir, state)
     stage = state.get("stage", "IDLE")
