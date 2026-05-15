@@ -2,72 +2,75 @@
 
 ## Project Overview
 
-This repository implements an agent runtime guard plugin for long-running coding tasks.
+This repository contains `agent-guard-plugin`, a lightweight runtime guard for long-running coding tasks.
 
-The plugin’s purpose is not to make the model smarter. Its purpose is to make long-running agent work observable, resumable, interruptible, and harder to derail.
+The product goal is operational discipline, not model intelligence. The guard makes agent work:
 
-It provides lightweight workflow enforcement around coding agents by using:
+- observable
+- resumable
+- interruptible
+- harder to derail
 
-- external state files
-- hook scripts
-- command and result logging
-- path and stage gates
-- failure-loop detection
-- job polling controls
-- finalization gates
+It does that through:
 
-The plugin is inspired by workflow-harness systems such as Superpowers, but this project focuses on hardening runtime behavior rather than only injecting process instructions.
+- durable state in `.agent/`
+- thin runtime hooks and bridges
+- stage-based workflow gates
+- write controls
+- repeated-failure detection
+- finalization checks
 
-## Core Product Goal
+## Current Implementation Shape
 
-Build a minimal plugin named `agent-guard-plugin`.
+The implementation is Python-first and managed with `uv`.
 
-The plugin should reduce these failure modes:
+Main package layout:
 
-- the model stops before completing all planned steps
-- the model claims completion without verification
-- the model starts implementation before writing a failing test
-- the model repeatedly reruns the same failing command
-- the model fails to monitor long-running jobs
-- the model polls long-running jobs too frequently
-- the model modifies files outside the allowed task scope
-- the model loses task state after session restart or context compaction
+```text
+agent-guard-plugin/
+  pyproject.toml
+  plugin.json
+  .workflow.yaml
+  src/agent_guard/
+  docs/
+  tests/
+```
 
-## Non-Goals
+Important source modules:
 
-Do not build a full agent runtime.
+- `src/agent_guard/cli.py`
+- `src/agent_guard/workflow_spec.py`
+- `src/agent_guard/workflow.py`
+- `src/agent_guard/state.py`
+- `src/agent_guard/transitions.py`
+- `src/agent_guard/install.py`
+- `src/agent_guard/runtime_bridge.py`
 
-Do not build a model scheduler.
+Do not reintroduce the old JavaScript-oriented layout from earlier planning notes unless explicitly asked.
 
-Do not build complex multi-agent orchestration in the first version.
-
-Do not attempt to semantically prove code correctness.
-
-Do not rely on the model’s self-report as proof of completion.
-
-## Architecture Principles
+## Core Principles
 
 1. State is externalized.
-   The current stage, step, job status, verification status, and failure state must be stored in files under `.agent/`.
+   Workflow state must live under `.agent/`.
 
-2. Hooks are thin.
-   Hook scripts should delegate to the core CLI. Avoid putting business logic directly in shell scripts.
+2. Hooks stay thin.
+   Runtime integration should delegate to the Python CLI and bridge.
 
-3. Gates are explicit.
-   A step is complete only when the corresponding state and artifacts prove it.
+3. Gates are evidence-based.
+   Stage exit and task completion depend on state and artifacts, not self-report.
 
 4. Failures require analysis.
-   Repeating the same failed command without code or test changes must be blocked.
+   Repeating the same failure without meaningful change must stop progress.
 
-5. Finalization is gated.
-   The agent must not claim task completion unless the finalization gate passes.
+5. Workflow policy is declarative.
+   `.workflow.yaml` defines the workflow DSL; code evaluates built-in rules.
 
-6. Keep the first version small.
-   Prefer a correct, minimal implementation over a broad but fragile system.
+6. Keep the system small.
+   Prefer explicit, testable behavior over broad abstraction.
 
-## Runtime Directory Layout
+## Runtime State Layout
 
-The plugin should create and manage this directory inside the target repository:
+The plugin manages durable task memory in:
 
 ```text
 .agent/
@@ -76,78 +79,59 @@ The plugin should create and manage this directory inside the target repository:
   jobs.json
   failures.json
   events.jsonl
+  stage-artifacts.json
   artifacts/
-    design.md
+    DESIGN.md
+    PLAN.md
     red-test.log
-    green-test.log
     failure-analysis.md
-    review.json
-    final-verification.log
+    review.md
+    summary.md
 ```
 
-The `.agent/` directory is the durable task memory. The model may forget; this directory must not.
+Notes:
 
-## Plugin Source Layout
+- `.agent/state.json` is protected and must not be edited directly.
+- `stage-artifacts.json` records stage entry time plus required artifact mtimes.
+- Required artifacts must exist and be updated during the active stage before exit is allowed.
 
-Use this source layout unless there is a strong reason to change it:
+## Workflow Model
 
-```text
-agent-guard-plugin/
-  plugin.json
+The canonical workflow source is [`agent-guard-plugin/.workflow.yaml`](./agent-guard-plugin/.workflow.yaml).
 
-  hooks/
-    session-start.sh
-    before-write.sh
-    after-command.sh
-    before-final-response.sh
-    job-monitor.sh
-    failure-loop.sh
+It uses a grouped DSL:
 
-  bin/
-    agent-guard
+- top level:
+  - `workflow`
+  - `globals`
+  - `stages`
+- per stage:
+  - `intent`
+  - `permissions`
+  - `transitions`
+  - `evidence`
 
-  lib/
-    state.js
-    plan.js
-    path-policy.js
-    jobs.js
-    failures.js
-    gates.js
-    events.js
-    runtime-adapter.js
+Important workflow rules:
 
-  templates/
-    failure-analysis.md
-    review.schema.json
-    plan.example.yaml
+- write control is static and workflow-driven
+- no dynamic path scope is used at runtime
+- `artifacts_required` are hard gates
+- `artifacts_expected` are soft guidance only
+- `artifacts_required` also appear in display/projection automatically
 
-  tests/
-```
+### Global Workflow Policies
 
-If the implementation language changes, preserve the same conceptual module boundaries.
+Current global policy areas are:
 
-## Core Data Files
+- `globals.paths`
+- `globals.failures`
+- `globals.finalization`
+- `globals.wizard`
+- `globals.install`
 
-### `.agent/state.json`
+`globals.install.skills.match` and `exclude_match` may provide default install-time skill filters. If workflow defaults match nothing, install should warn and fall back to full skill installation instead of blocking.
 
-Minimum shape:
-
-```json
-{
-  "task_id": "password-reset",
-  "stage": "RED_TEST",
-  "current_step": "red-001",
-  "completed_steps": [],
-  "remaining_steps": ["red-001", "green-001", "review-001", "verify-001"],
-  "allowed_paths": ["tests/**"],
-  "forbidden_paths": ["src/**", "infra/**", ".github/**"],
-  "can_finalize": false,
-  "last_verification": null,
-  "needs_human": false
-}
-```
-
-Supported stages:
+## Supported Stages
 
 ```text
 IDLE
@@ -164,446 +148,123 @@ NEEDS_HUMAN
 DONE
 ```
 
-### `.agent/plan.yaml`
+Core transition expectations:
 
-Minimum shape:
+- `PLANNING -> RED_TEST` or `PLANNING -> GREEN_IMPL` requires `.agent/plan.yaml`
+- `GREEN_IMPL -> VERIFY` is not direct; it must pass through `REVIEW`
+- `REVIEW -> VERIFY` requires `.agent/artifacts/review.md`
+- `NEEDS_FAILURE_ANALYSIS` requires `.agent/artifacts/failure-analysis.md`
+- `READY_TO_SUMMARIZE -> DONE` is only legal through `mark-done`
+
+## Workflow Commands
+
+These are the main workflow progression commands:
+
+- `agent-guard start-task <task-id>`
+- `agent-guard status`
+- `agent-guard session-start`
+- `agent-guard next-step`
+- `agent-guard advance-stage --to <stage> [--step <step-id>]`
+- `agent-guard complete-step <step-id> --next-stage <stage> [--next-step <step-id>]`
+- `agent-guard ready-to-summarize`
+- `agent-guard mark-done`
+
+Use `complete-step` when a real step finished. Use `advance-stage` for stage-only moves.
+
+Do not document or prioritize non-workflow commands when the task is specifically about workflow guidance unless needed.
+
+## Write Control
+
+Write control is intentionally minimal now.
+
+Global write policy:
+
+- `globals.paths.protected`
+- `globals.paths.sensitive`
+
+Per-stage write policy:
+
+- `permissions.write.allow`
+- `permissions.write.deny`
+
+Current behavior is workflow-driven and static:
+
+- no runtime `allowed_paths`
+- no runtime `forbidden_paths`
+- no `scoped`
+- no `managed-only`
+
+Do not reintroduce dynamic write-scope behavior unless explicitly requested.
+
+## Evidence and Exit Gates
+
+Stage exit is controlled by `evidence.required`.
+
+Supported required-artifact forms:
+
+1. Simple path
 
 ```yaml
-task_id: password-reset
-
-steps:
-  - id: red-001
-    stage: RED_TEST
-    goal: Add failing test for expired reset token
-    allowed_paths:
-      - tests/**
-    forbidden_paths:
-      - src/**
-    commands:
-      - pytest tests/auth/test_password_reset.py
-    success_condition: "test fails for missing expiry validation"
-
-  - id: green-001
-    stage: GREEN_IMPL
-    goal: Implement minimal expiry validation
-    allowed_paths:
-      - src/auth/**
-      - tests/auth/**
-    forbidden_paths:
-      - infra/**
-      - .github/**
-    commands:
-      - pytest tests/auth/test_password_reset.py
-    success_condition: "password reset tests pass"
-
-  - id: verify-001
-    stage: VERIFY
-    goal: Run final verification
-    commands:
-      - pytest
-      - ruff check .
+required:
+  - .agent/artifacts/review.md
 ```
 
-### `.agent/jobs.json`
+2. Path plus content gate
 
-Minimum shape:
-
-```json
-{
-  "jobs": [
-    {
-      "id": "job-001",
-      "command": "pytest",
-      "status": "running",
-      "started_at": "2026-05-11T10:00:00Z",
-      "last_polled_at": null,
-      "next_poll_after": "2026-05-11T10:01:00Z",
-      "poll_count": 0,
-      "max_polls": 20
-    }
-  ]
-}
+```yaml
+required:
+  - path: .agent/artifacts/failure-analysis.md
+    matches: '^## Failure Summary'
+    message: failure-analysis.md must start with the Failure Summary section.
 ```
 
-### `.agent/failures.json`
+Exit behavior:
 
-Minimum shape:
+- if a required artifact is missing: block
+- if it existed before stage entry but was not updated in the stage: block
+- if `matches` is configured and content does not match: block with configured `message`
 
-```json
-{
-  "last_failure": {
-    "command": "pytest tests/auth/test_password_reset.py",
-    "exit_code": 1,
-    "failure_hash": "abc123",
-    "repeat_count": 2,
-    "code_changed_since_last_failure": false,
-    "log_path": ".agent/artifacts/red-test.log"
-  }
-}
-```
+## Finalization
 
-### `.agent/events.jsonl`
+Task completion is separate from ordinary stage flow.
 
-Append one JSON object per event.
+Current finalization checks come from `globals.finalization.require` and built-in rules in code.
 
-Example:
+Finalization should be treated as completion evidence, not as a place to enforce extra review content rules.
 
-```json
-{"ts":"2026-05-11T10:00:00Z","hook":"SessionStart","action":"inject_state","stage":"RED_TEST"}
-{"ts":"2026-05-11T10:01:00Z","hook":"BeforeWrite","decision":"block","reason":"src forbidden during RED_TEST"}
-{"ts":"2026-05-11T10:02:00Z","hook":"AfterCommand","command":"pytest","exit_code":1}
-```
+## Skills and Installation
 
-## Required CLI
+The installer can update runtime integrations for:
 
-Implement a CLI named `agent-guard`.
+- `claude-code`
+- `codex`
+- `opencode`
 
-Minimum commands:
+Selective skill installation is supported through:
 
-```bash
-agent-guard init
-agent-guard start-task <task-id>
-agent-guard status
-agent-guard session-start
-agent-guard can-write <path>
-agent-guard record-command --cmd "<command>" --exit-code <code> --log <path>
-agent-guard check-failure-loop
-agent-guard check-job-poll <job-id>
-agent-guard can-finalize
-agent-guard next-step
-```
+- `--match REGEX`
+- `--exclude-match REGEX`
 
-Prefer stable JSON output from CLI commands so hooks can consume them.
+CLI filters override workflow defaults.
 
-Example output for a blocked write:
-
-```json
-{
-  "decision": "block",
-  "reason": "Current stage is RED_TEST. src/** is forbidden. Write tests/** first."
-}
-```
-
-## Hook Responsibilities
-
-### `SessionStartHook`
-
-Implemented by `hooks/session-start.sh`.
-
-Purpose:
-
-- read `.agent/state.json`
-- read `.agent/plan.yaml` if available
-- read `.agent/jobs.json` if available
-- output a concise state reminder for the agent
-
-The reminder must include:
-
-- current task
-- current stage
-- current step
-- allowed paths
-- forbidden paths
-- next required action
-- whether finalization is allowed
-
-### `BeforeWriteHook`
-
-Implemented by `hooks/before-write.sh`.
-
-Purpose:
-
-- block writes outside `allowed_paths`
-- block writes inside `forbidden_paths`
-- block production-code writes during `RED_TEST`
-- block further source changes during `READY_TO_SUMMARIZE`
-- require human escalation for sensitive files
-
-Sensitive files include:
-
-```text
-.github/**
-infra/**
-migrations/**
-package-lock.json
-pnpm-lock.yaml
-yarn.lock
-poetry.lock
-Cargo.lock
-```
-
-Lockfiles may be modified only if the current step explicitly allows them.
-
-### `AfterCommandHook`
-
-Implemented by `hooks/after-command.sh`.
-
-Purpose:
-
-- record command
-- record exit code
-- record log path
-- compute or store a failure hash for failed commands
-- update `.agent/failures.json`
-- update `.agent/events.jsonl`
-- if command failed, set stage to `NEEDS_FAILURE_ANALYSIS` unless the current stage is intentionally `RED_TEST`
-
-During `RED_TEST`, a failing test can be valid. The implementation must distinguish expected RED failure from unexpected command failure using the current step metadata.
-
-### `FailureLoopHook`
-
-Implemented by `hooks/failure-loop.sh`.
-
-Purpose:
-
-- detect same command plus same failure hash plus no code changes
-- block repeated retries after the configured threshold
-- require `.agent/artifacts/failure-analysis.md`
-
-Default threshold: 2 repeated identical failures.
-
-Required failure analysis template:
-
-```markdown
-## Failure Summary
-
-## Evidence
-
-## Hypothesis
-
-## Most Likely Root Cause
-
-## Minimal Fix
-
-## Next Verification Command
-```
-
-### `JobMonitorHook`
-
-Implemented by `hooks/job-monitor.sh`.
-
-Purpose:
-
-- register long-running jobs
-- prevent polling before `next_poll_after`
-- prevent finalization while jobs are still running
-- move jobs to terminal state when they complete
-- escalate to `NEEDS_HUMAN` if max poll count is exceeded
-
-Default polling rules:
-
-```text
-unit tests: 10-30 seconds
-full test suite: 30-60 seconds
-build: 60 seconds
-deployment-like commands: require human approval
-```
-
-### `BeforeFinalResponseHook`
-
-Implemented by `hooks/before-final-response.sh`.
-
-Purpose:
-
-Block completion unless all are true:
-
-- `remaining_steps` is empty
-- no running jobs exist
-- latest final verification has `exit_code == 0`
-- review artifact exists if the plan includes review
-- `can_finalize == true`
-
-If blocked, report the exact missing condition.
-
-## Stage Rules
-
-### `RED_TEST`
-
-Allowed:
-
-- write tests
-- run targeted tests
-- save failing test logs
-
-Forbidden:
-
-- write production source files
-- claim implementation is complete
-- run broad refactors
-
-### `GREEN_IMPL`
-
-Allowed:
-
-- write minimal production code
-- update tests if required
-- run targeted verification
-
-Forbidden:
-
-- broad refactors
-- unrelated formatting
-- dependency upgrades unless explicitly planned
-
-### `REVIEW`
-
-Allowed:
-
-- read diff
-- read files
-- write review artifact
-
-Forbidden:
-
-- source modifications unless the review has been converted into a new implementation step
-
-### `VERIFY`
-
-Allowed:
-
-- run verification commands
-- write verification logs
-
-Forbidden:
-
-- new implementation work unless verification fails and the state moves to `NEEDS_FAILURE_ANALYSIS`
-
-### `READY_TO_SUMMARIZE`
-
-Allowed:
-
-- summarize work
-- list changed files
-- list verification commands and results
-- ask user for next action
-
-Forbidden:
-
-- further code changes
-
-## Failure Handling Rules
-
-Never rerun the same failing command repeatedly without a change or analysis.
-
-If the same failure appears twice and no code changed, switch to analysis mode.
-
-In analysis mode, do not modify source files until `.agent/artifacts/failure-analysis.md` exists.
-
-The analysis must identify evidence from logs, not only speculate.
-
-## Finalization Rules
-
-Do not say the task is complete unless `agent-guard can-finalize` passes.
-
-If finalization fails, state what is missing and continue with the next required action.
-
-Valid completion evidence includes:
-
-- completed steps
-- verification command
-- exit code
-- log path
-- review artifact if applicable
-
-Invalid completion evidence:
-
-- “looks good”
-- “should pass”
-- “I believe this is fixed”
-- “tests were not run, but…”
-
-## Development Workflow for This Repository
-
-When implementing this plugin:
-
-1. Start with a small design note if the task is non-trivial.
-2. Implement one feature at a time.
-3. Add tests for the state transition or gate being implemented.
-4. Prefer pure functions in `lib/`.
-5. Keep hooks thin.
-6. Run the relevant test command before claiming completion.
-7. Do not introduce broad framework changes unless asked.
+If the task is about workflow behavior, prioritize the workflow DSL and skill docs over install details.
 
 ## Testing Expectations
 
-At minimum, add tests for:
+Before claiming completion on code changes, run relevant tests. Prefer targeted pytest runs first, then full suite when appropriate.
 
-- state loading and saving
-- path allowlist and denylist matching
-- stage-based write blocking
-- command result recording
-- repeated failure detection
-- finalization gate
-- job polling interval logic
+Common commands:
 
-Prefer small deterministic tests over integration-heavy tests.
-
-## Coding Style
-
-- Keep modules small.
-- Use explicit names.
-- Avoid hidden global state.
-- Validate JSON/YAML input.
-- Fail closed when state is missing or invalid.
-- Emit actionable error messages.
-- Prefer stable machine-readable JSON for CLI output.
-
-## Safety Rules
-
-Never run destructive commands unless the user explicitly asks and the current task state permits it.
-
-Commands requiring explicit approval:
-
-```text
-rm -rf
-git reset --hard
-git clean -fd
-git push --force
-dropdb
-terraform apply
-terraform destroy
-kubectl delete
-docker system prune
+```bash
+uv run pytest -q
+uv run pytest -q tests/test_workflow_spec.py
+uv run pytest -q tests/test_install.py
 ```
 
-Do not modify these paths unless explicitly planned:
+## Working Rules For Agents
 
-```text
-.github/**
-infra/**
-migrations/**
-```
-
-## Expected First Milestone
-
-The first milestone is not the full plugin.
-
-Build only:
-
-- `.agent/state.json` support
-- `agent-guard init`
-- `agent-guard status`
-- `agent-guard can-write <path>`
-- `agent-guard record-command`
-- `agent-guard check-failure-loop`
-- `agent-guard can-finalize`
-- thin hook scripts that call the CLI
-
-A successful first milestone should demonstrate these cases:
-
-1. During `RED_TEST`, writing `src/**` is blocked.
-2. During `RED_TEST`, writing `tests/**` is allowed.
-3. Repeating the same failed command twice without changes is blocked.
-4. Finalization is blocked when verification is missing.
-5. Finalization is allowed only when state says all steps are complete and verification passed.
-
-## Agent Behavior Rules
-
-When working in this repository:
-
-- Do not skip state updates.
-- Do not claim completion without running or recording verification.
-- Do not modify files outside the current task scope.
-- Do not add complex abstractions before the minimal hook/CLI path works.
-- If a requirement is ambiguous, ask before implementing.
-- If tests fail twice with the same failure, stop and analyze before retrying.
+- Do not edit `.agent/state.json` directly.
+- Do not bypass workflow commands for stage progression.
+- Do not claim completion without satisfying workflow evidence and finalization gates.
+- Do not reintroduce outdated concepts such as dynamic path scopes or review.json.
+- Keep docs aligned with the current grouped DSL and Python implementation.
