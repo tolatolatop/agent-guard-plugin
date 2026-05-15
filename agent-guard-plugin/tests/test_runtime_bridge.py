@@ -297,5 +297,5 @@ def test_bridge_session_start_uses_installed_skills_dir() -> None:
     )
     assert result.returncode == 0
     payload = json.loads(result.stdout)
-    assert "Using Workflow skill:" in payload["hookSpecificOutput"]["additionalContext"]
+    assert "Workflow Navigator:" in payload["hookSpecificOutput"]["additionalContext"]
     assert "nav" in payload["hookSpecificOutput"]["additionalContext"]

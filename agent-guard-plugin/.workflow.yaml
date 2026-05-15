@@ -65,6 +65,9 @@ globals:
       - RED_TEST
       - GREEN_IMPL
 
+  session_start:
+    navigator_skill: using-workflow
+
   install:
     skills:
       # Optional default skill selection used by `agent-guard install`

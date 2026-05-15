@@ -23,10 +23,7 @@ def get_session_reminder(root_dir: Path) -> dict[str, Any]:
     stage = state.get("stage", "IDLE")
     workflow_context = get_workflow_context(root_dir, stage)
     recent_archive = latest_archive(root_dir)
-    meta_skill = next(
-        (skill for skill in workflow_context["skill_catalog"] if skill.get("id") == "using-workflow"),
-        workflow_context["skill_catalog"][0],
-    )
+    navigator = workflow_context["session_start_navigator"]
     return {
         "task": state.get("task_id"),
         "stage": stage,
@@ -34,10 +31,10 @@ def get_session_reminder(root_dir: Path) -> dict[str, Any]:
         "next_required_action": next_step,
         "can_finalize": state.get("can_finalize"),
         "meta_skill": {
-            "name": "Using Workflow",
-            "path": meta_skill["path"],
-            "absolute_path": meta_skill["absolute_path"],
-            "instruction": "Consult this navigator first, then load specialist workflow skills on demand.",
+            "name": navigator["name"],
+            "path": navigator["path"],
+            "absolute_path": navigator["absolute_path"],
+            "instruction": navigator["instruction"],
         },
         "workflow": workflow_context,
         "recent_archive": recent_archive,

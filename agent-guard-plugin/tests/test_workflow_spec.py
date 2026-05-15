@@ -7,6 +7,7 @@ from agent_guard.workflow_spec import (
     install_defaults,
     normalize_workflow_spec,
     path_policy,
+    session_start_defaults,
     stage_required_artifact_rules,
     stage_policy_view,
     stage_policy_roles,
@@ -78,6 +79,7 @@ def test_policy_sections_are_loaded_from_workflow_spec() -> None:
     assert failure_policy()["repeat_threshold"] == 2
     assert "successful_last_verification" in finalization_policy()["required_rules"]
     assert wizard_defaults()["start_stages"] == ["CLARIFYING", "PLANNING", "RED_TEST", "GREEN_IMPL"]
+    assert session_start_defaults()["navigator_skill"] == "using-workflow"
     assert install_defaults()["skill_match"] == []
     assert install_defaults()["skill_exclude_match"] == []
     assert stage_write_policy("RED_TEST")["writable_paths"] == ["tests/**"]
@@ -135,6 +137,7 @@ def test_workflow_policy_view_exposes_grouped_globals_and_stages() -> None:
     assert ".github/**" in workflow["globals"]["paths"]["sensitive"]
     assert workflow["globals"]["failures"]["repeat_threshold"] == 2
     assert "successful_last_verification" in workflow["globals"]["finalization"]["require"]
+    assert workflow["globals"]["session_start"]["navigator_skill"] == "using-workflow"
     assert workflow["globals"]["install"]["skills"]["match"] == []
     assert "RED_TEST" in workflow["stages"]
 
@@ -159,6 +162,7 @@ def test_workflow_policy_roles_mark_global_gate_types() -> None:
     assert roles["globals"]["paths"] == "hard_gate"
     assert roles["globals"]["finalization"] == "hard_gate"
     assert roles["globals"]["wizard"] == "soft_prompt"
+    assert roles["globals"]["session_start"] == "soft_prompt"
     assert roles["globals"]["install"] == "soft_prompt"
 
 
@@ -188,6 +192,9 @@ def test_normalize_workflow_spec_accepts_grouped_dsl_shape() -> None:
             },
             "wizard": {
                 "start_stages": ["RED_TEST"],
+            },
+            "session_start": {
+                "navigator_skill": "workflow-core",
             },
             "install": {
                 "skills": {
@@ -238,6 +245,7 @@ def test_normalize_workflow_spec_accepts_grouped_dsl_shape() -> None:
     assert normalized["failure_policy"]["fingerprint_roots"] == ["src", "tests"]
     assert normalized["finalization_policy"]["required_rules"] == ["successful_last_verification"]
     assert normalized["wizard_defaults"]["start_stages"] == ["RED_TEST"]
+    assert normalized["session_start_defaults"]["navigator_skill"] == "workflow-core"
     assert normalized["install_defaults"]["skill_match"] == ["workflow"]
     assert normalized["install_defaults"]["skill_exclude_match"] == ["failure"]
     assert normalized["stages"]["RED_TEST"]["goal"] == "Create a failing test."

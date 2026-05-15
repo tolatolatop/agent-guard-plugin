@@ -143,6 +143,7 @@ def normalize_workflow_spec(spec: dict[str, Any]) -> dict[str, Any]:
     failures = _require_mapping(globals_config.get("failures", {}), ".workflow.yaml globals.failures")
     finalization = _require_mapping(globals_config.get("finalization", {}), ".workflow.yaml globals.finalization")
     wizard = _require_mapping(globals_config.get("wizard", {}), ".workflow.yaml globals.wizard")
+    session_start = _require_mapping(globals_config.get("session_start", {}), ".workflow.yaml globals.session_start")
     install = _require_mapping(globals_config.get("install", {}), ".workflow.yaml globals.install")
     install_skills = _require_mapping(install.get("skills", {}), ".workflow.yaml globals.install.skills")
     grouped_stages = _require_mapping(spec.get("stages", {}), ".workflow.yaml stages")
@@ -174,6 +175,9 @@ def normalize_workflow_spec(spec: dict[str, Any]) -> dict[str, Any]:
         "wizard_defaults": {
             "start_stages": _string_list(wizard.get("start_stages", []), ".workflow.yaml globals.wizard.start_stages"),
         },
+        "session_start_defaults": {
+            "navigator_skill": str(session_start.get("navigator_skill", "using-workflow")),
+        },
         "install_defaults": {
             "skill_match": _string_list(install_skills.get("match", []), ".workflow.yaml globals.install.skills.match"),
             "skill_exclude_match": _string_list(
@@ -191,7 +195,7 @@ def normalize_workflow_spec(spec: dict[str, Any]) -> dict[str, Any]:
 def validate_workflow_spec(spec: dict[str, Any]) -> None:
     """Validate core workflow policy sections and rule names."""
     _require_mapping(spec.get("stages", {}), ".workflow.yaml stages")
-    for section_name in ("path_policy", "failure_policy", "finalization_policy", "wizard_defaults", "install_defaults"):
+    for section_name in ("path_policy", "failure_policy", "finalization_policy", "wizard_defaults", "session_start_defaults", "install_defaults"):
         _require_mapping(spec.get(section_name, {}), f".workflow.yaml {section_name}")
     for stage_name, stage_data in workflow_stages_from_spec(spec).items():
         _validate_stage_rules(stage_name, _require_mapping(stage_data, f".workflow.yaml stage {stage_name}"))
@@ -390,6 +394,9 @@ def workflow_policy_view() -> dict[str, Any]:
                 "messages": finalization_policy()["rule_messages"],
             },
             "wizard": wizard_defaults(),
+            "session_start": {
+                "navigator_skill": session_start_defaults()["navigator_skill"],
+            },
             "install": {
                 "skills": {
                     "match": install_defaults()["skill_match"],
@@ -413,6 +420,7 @@ def workflow_policy_roles() -> dict[str, Any]:
             "failures": "hard_gate",
             "finalization": "hard_gate",
             "wizard": "soft_prompt",
+            "session_start": "soft_prompt",
             "install": "soft_prompt",
         },
         "stages": {
@@ -580,6 +588,17 @@ def install_defaults() -> dict[str, list[str]]:
         "skill_exclude_match": [
             str(item) for item in _require_list(config.get("skill_exclude_match", []), ".workflow.yaml install_defaults.skill_exclude_match")
         ],
+    }
+
+
+def session_start_defaults() -> dict[str, Any]:
+    """Normalized session-start prompt defaults."""
+    config = _require_mapping(load_workflow_spec().get("session_start_defaults", {}), ".workflow.yaml session_start_defaults")
+    skill_id = str(config.get("navigator_skill", "")).strip()
+    if not skill_id:
+        raise RuntimeError(".workflow.yaml session_start_defaults.navigator_skill must be a non-empty string.")
+    return {
+        "navigator_skill": skill_id,
     }
 
 

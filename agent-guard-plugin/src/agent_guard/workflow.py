@@ -13,6 +13,7 @@ from .transitions import (
 from .workflow_spec import (
     complete_step_allowed_from_stages,
     global_gates,
+    session_start_defaults,
     stage_policy_view,
     transition_graph_mermaid,
     workflow_metadata,
@@ -38,7 +39,7 @@ def _parse_skill_metadata(file_path: Path, skill_id: str) -> dict[str, str]:
                 key, value = stripped.split(":", 1)
                 normalized_key = key.strip().lower()
                 normalized_value = value.strip()
-                if normalized_key == "name" and normalized_value:
+                if normalized_key == "name" and normalized_value and normalized_value != skill_id:
                     metadata["title"] = normalized_value
                 elif normalized_key == "description" and normalized_value:
                     metadata["description"] = normalized_value
@@ -103,6 +104,36 @@ def _read_skill_body(file_path: Path) -> str:
     return text.strip()
 
 
+def resolve_session_start_navigator(skill_catalog: list[dict[str, str]]) -> dict[str, str]:
+    """Resolve the configured navigator skill from the discovered catalog."""
+    skill_id = session_start_defaults()["navigator_skill"]
+    navigator_skill = next(
+        (skill for skill in skill_catalog if skill.get("id") == skill_id),
+        None,
+    )
+    if navigator_skill is None and skill_catalog:
+        navigator_skill = skill_catalog[0]
+    if navigator_skill is None:
+        return {
+            "skill_id": skill_id,
+            "name": "Using Workflow",
+            "instruction": "Consult this navigator first, then load specialist workflow skills on demand.",
+            "prompt_heading": "Workflow Navigator",
+            "path": None,
+            "absolute_path": None,
+            "body": "",
+        }
+    return {
+        "skill_id": navigator_skill["id"],
+        "name": navigator_skill.get("title") or "Using Workflow",
+        "instruction": "Consult this navigator first, then load specialist workflow skills on demand.",
+        "prompt_heading": "Workflow Navigator",
+        "path": navigator_skill["path"],
+        "absolute_path": navigator_skill["absolute_path"],
+        "body": _read_skill_body(Path(navigator_skill["absolute_path"])),
+    }
+
+
 def get_workflow_context(root_dir: Path, stage: str) -> dict[str, Any]:
     """Return workflow context."""
     rules = stage_policy_view(stage)
@@ -112,10 +143,7 @@ def get_workflow_context(root_dir: Path, stage: str) -> dict[str, Any]:
         else packaged_skills_dir()
     )
     skill_catalog = discover_skills(base_dir)
-    using_workflow_skill = next(
-        (skill for skill in skill_catalog if skill.get("id") == "using-workflow"),
-        None,
-    )
+    navigator = resolve_session_start_navigator(skill_catalog)
     # This dictionary is the single payload used by session-start and related
     # reminders, so it keeps prompt generation and machine-readable state aligned.
     return {
@@ -152,7 +180,7 @@ def get_workflow_context(root_dir: Path, stage: str) -> dict[str, Any]:
         "complete_step_allowed_from_stages": complete_step_allowed_from_stages(),
         "global_gates": global_gates(),
         "skill_catalog": skill_catalog,
-        "using_workflow_skill_body": _read_skill_body(Path(using_workflow_skill["absolute_path"])) if using_workflow_skill else "",
+        "session_start_navigator": navigator,
     }
 
 
@@ -181,7 +209,7 @@ def build_session_prompt_block(
     stage_required_artifacts = workflow_context["stage_required_artifacts"] or ["<none>"]
     transition_graph = workflow_context["transition_graph_mermaid"]
     complete_step_allowed = workflow_context["complete_step_allowed_from_stages"] or ["<none>"]
-    using_workflow_skill_body = workflow_context["using_workflow_skill_body"]
+    navigator = workflow_context["session_start_navigator"]
     archive_line = ""
     if recent_archive:
         archive_line = (
@@ -213,7 +241,7 @@ def build_session_prompt_block(
         + f"Stage artifacts: {stage_display_artifacts}\n"
         + f"Stage required artifacts: {stage_required_artifacts}\n"
         + f"Complete-step allowed from: {complete_step_allowed}\n"
-        "Using Workflow skill:\n"
-        f"{using_workflow_skill_body}"
+        + f"{navigator['prompt_heading']}:\n"
+        + f"{navigator['body']}"
         f"{archive_line}"
     )
