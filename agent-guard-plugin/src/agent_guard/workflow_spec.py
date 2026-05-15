@@ -151,8 +151,25 @@ def _apply_plan_path_policy(plan_mode: str, writable_paths: list[str], denied_pa
     normalized_writable = [str(item) for item in writable_paths if str(item) != ".agent/plan.yaml"]
     normalized_denied = [str(item) for item in denied_paths if str(item) != ".agent/plan.yaml"]
     if plan_mode == "create":
-        return [*normalized_writable, ".agent/plan.yaml"], normalized_denied
-    return normalized_writable, [*normalized_denied, ".agent/plan.yaml"]
+        if ".agent/plan.yaml" not in normalized_writable:
+            normalized_writable = [*normalized_writable, ".agent/plan.yaml"]
+        return normalized_writable, normalized_denied
+    if ".agent/**" not in normalized_denied and ".agent/plan.yaml" not in normalized_denied:
+        normalized_denied = [*normalized_denied, ".agent/plan.yaml"]
+    return normalized_writable, normalized_denied
+
+
+def _apply_plan_artifact_defaults(
+    plan_mode: str,
+    expected_artifacts: list[str],
+    required_artifacts: list[dict[str, str]],
+) -> tuple[list[str], list[dict[str, str]]]:
+    """Bind plan-related artifact expectations to the stage plan mode."""
+    normalized_expected = [str(item) for item in expected_artifacts if str(item) != ".agent/plan.yaml"]
+    normalized_required = [dict(item) for item in required_artifacts if item.get("path") != ".agent/plan.yaml"]
+    if plan_mode == "create":
+        return [*normalized_expected, ".agent/plan.yaml"], [*normalized_required, {"path": ".agent/plan.yaml"}]
+    return normalized_expected, normalized_required
 
 
 def _normalize_stage_from_grouped(stage_name: str, stage_data: dict[str, Any]) -> dict[str, Any]:
@@ -181,6 +198,12 @@ def _normalize_stage_from_grouped(stage_name: str, stage_data: dict[str, Any]) -
         _string_list(write.get("deny", []), f".workflow.yaml grouped stage {stage_name} permissions.write.deny"),
     )
 
+    expected_artifacts, required_artifacts = _apply_plan_artifact_defaults(
+        plan_mode,
+        _string_list(evidence.get("expected", []), f".workflow.yaml grouped stage {stage_name} evidence.expected"),
+        _normalize_required_artifacts(evidence.get("required", []), f".workflow.yaml grouped stage {stage_name} evidence.required"),
+    )
+
     normalized: dict[str, Any] = {
         "goal": str(intent.get("goal", "")),
         "allowed_actions": _string_list(actions.get("allow", []), f".workflow.yaml grouped stage {stage_name} permissions.actions.allow"),
@@ -189,8 +212,8 @@ def _normalize_stage_from_grouped(stage_name: str, stage_data: dict[str, Any]) -
         "entry_conditions": {
             "any": _require_list(transitions.get("enter_when", []), f".workflow.yaml grouped stage {stage_name} transitions.enter_when"),
         },
-        "artifacts_expected": _string_list(evidence.get("expected", []), f".workflow.yaml grouped stage {stage_name} evidence.expected"),
-        "artifacts_required": _normalize_required_artifacts(evidence.get("required", []), f".workflow.yaml grouped stage {stage_name} evidence.required"),
+        "artifacts_expected": expected_artifacts,
+        "artifacts_required": required_artifacts,
         "write_policy": {
             "writable_paths": writable_paths,
             "denied_paths": denied_paths,
@@ -240,6 +263,15 @@ def _normalize_stage_from_canonical(stage_name: str, stage_data: dict[str, Any])
         _string_list(deny.get("write", []), f".workflow.yaml canonical stage {stage_name} deny.write"),
     )
 
+    expected_artifacts, required_artifacts = _apply_plan_artifact_defaults(
+        plan_mode,
+        _string_list(stage_data.get("expect", []), f".workflow.yaml canonical stage {stage_name} expect"),
+        [
+            _normalize_required_artifact_entry(item, f".workflow.yaml canonical stage {stage_name} exit")
+            for item in _require_list(stage_data.get("exit", []), f".workflow.yaml canonical stage {stage_name} exit")
+        ],
+    )
+
     normalized: dict[str, Any] = {
         "goal": str(stage_data.get("goal", "")),
         "allowed_actions": _string_list(allow.get("actions", []), f".workflow.yaml canonical stage {stage_name} allow.actions"),
@@ -251,11 +283,8 @@ def _normalize_stage_from_canonical(stage_name: str, stage_data: dict[str, Any])
                 for item in _require_list(stage_data.get("enter", []), f".workflow.yaml canonical stage {stage_name} enter")
             ],
         },
-        "artifacts_expected": _string_list(stage_data.get("expect", []), f".workflow.yaml canonical stage {stage_name} expect"),
-        "artifacts_required": [
-            _normalize_required_artifact_entry(item, f".workflow.yaml canonical stage {stage_name} exit")
-            for item in _require_list(stage_data.get("exit", []), f".workflow.yaml canonical stage {stage_name} exit")
-        ],
+        "artifacts_expected": expected_artifacts,
+        "artifacts_required": required_artifacts,
         "write_policy": {
             "writable_paths": writable_paths,
             "denied_paths": denied_paths,
@@ -610,6 +639,9 @@ def _compat_stage_from_expected_artifact(flat_spec: dict[str, Any], artifact_pat
         expected = stage_data.get("artifacts_expected", [])
         if isinstance(expected, list) and artifact_path in expected:
             return str(stage_name)
+        for item in stage_required_artifact_rules_from_spec(flat_spec, stage_name):
+            if item["path"] == artifact_path:
+                return str(stage_name)
     return None
 
 

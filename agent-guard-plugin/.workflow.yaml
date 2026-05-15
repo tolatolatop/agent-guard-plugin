@@ -129,9 +129,9 @@ stages:
     enter:
       - rule: active_task
         display: active task exists
-    exit: []
-    expect:
+    exit:
       - .agent/artifacts/DESIGN.md
+    expect: []
     next:
       - PLANNING
 
@@ -139,8 +139,7 @@ stages:
     goal: Break work into explicit steps with clear success conditions and required evidence.
     plan: create
     allow:
-      write:
-        - .agent/plan.yaml
+      write: []
       actions:
         - write or refine plan.yaml
         - refine the next concrete workflow steps in .agent/plan.yaml
@@ -153,10 +152,8 @@ stages:
     enter:
       - rule: active_task
         display: active task exists
-    exit:
-      - .agent/plan.yaml
-    expect:
-      - .agent/plan.yaml
+    exit: []
+    expect: []
     next:
       - RED_TEST
       - GREEN_IMPL
@@ -176,7 +173,6 @@ stages:
     deny:
       write:
         - src/**
-        - .agent/plan.yaml
       actions:
         - write production code
         - claim implementation is complete
@@ -193,8 +189,7 @@ stages:
     plan: advance
     allow:
       write:
-        - src/**
-        - tests/**
+        - "**"
       actions:
         - write minimal production code
         - update tests if required
@@ -203,7 +198,7 @@ stages:
       human: false
     deny:
       write:
-        - .agent/plan.yaml
+        - .agent/**
       actions:
         - broad refactors
         - unrelated formatting
@@ -251,14 +246,13 @@ stages:
       stop: false
       human: false
     deny:
-      write:
-        - .agent/plan.yaml
+      write: []
       actions:
         - new implementation work unless the state moves to NEEDS_FAILURE_ANALYSIS
     enter: []
-    exit: []
-    expect:
+    exit:
       - .agent/artifacts/final-verification.log
+    expect: []
     next:
       - READY_TO_SUMMARIZE
       - RED_TEST
@@ -292,9 +286,9 @@ stages:
       - rule: all_plan_steps_terminal
         display: all plan steps must be done or failed
       - display: can_finalize enabled only through ready-to-summarize
-    exit: []
-    expect:
+    exit:
       - .agent/artifacts/summary.md
+    expect: []
     next:
       - DONE
 

@@ -117,7 +117,7 @@ def test_ready_to_summarize_is_blocked_without_successful_verification() -> None
     try:
         ready_to_summarize(root_dir)
     except RuntimeError as exc:
-        assert "last_verification" in str(exc)
+        assert "final-verification.log" in str(exc)
     else:
         raise AssertionError("Expected ready-to-summarize to fail")
 
@@ -147,6 +147,7 @@ def test_ready_to_summarize_is_blocked_when_plan_has_nonterminal_steps() -> None
             "recorded_at": "2026-05-12T10:00:00Z",
         },
     )
+    (root_dir / ".agent" / "artifacts" / "final-verification.log").write_text("ok\n", encoding="utf-8")
 
     try:
         ready_to_summarize(root_dir)
@@ -160,6 +161,7 @@ def test_mark_done_is_blocked_unless_can_finalize_passes() -> None:
     """Test that mark done is blocked unless can finalize passes."""
     root_dir = make_temp_repo()
     write_state(root_dir, task_id="password-reset", stage="READY_TO_SUMMARIZE", can_finalize=False)
+    (root_dir / ".agent" / "artifacts" / "summary.md").write_text("# Summary\n", encoding="utf-8")
 
     try:
         mark_done(root_dir)
@@ -192,6 +194,7 @@ def test_mark_done_is_blocked_when_plan_has_nonterminal_steps() -> None:
             "recorded_at": "2026-05-14T10:00:00Z",
         },
     )
+    (root_dir / ".agent" / "artifacts" / "summary.md").write_text("# Summary\n", encoding="utf-8")
 
     try:
         mark_done(root_dir)
@@ -199,6 +202,56 @@ def test_mark_done_is_blocked_when_plan_has_nonterminal_steps() -> None:
         assert "all plan steps must be done or failed" in str(exc)
     else:
         raise AssertionError("Expected mark-done to fail when plan.yaml is not terminal")
+
+
+def test_mark_done_is_blocked_without_summary_artifact() -> None:
+    """Test that READY_TO_SUMMARIZE cannot exit without summary.md."""
+    root_dir = make_temp_repo()
+    write_state(
+        root_dir,
+        task_id="password-reset",
+        stage="READY_TO_SUMMARIZE",
+        can_finalize=True,
+        last_verification={
+            "command": "pytest",
+            "exit_code": 0,
+            "log_path": ".agent/artifacts/final-verification.log",
+            "recorded_at": "2026-05-14T10:00:00Z",
+        },
+    )
+    (root_dir / ".agent" / "plan.yaml").write_text(
+        "task_id: password-reset\n"
+        "steps:\n"
+        "  - name: verify-001\n"
+        "    description: run verification\n"
+        "    status: done\n",
+        encoding="utf-8",
+    )
+
+    try:
+        mark_done(root_dir)
+    except RuntimeError as exc:
+        assert "summary.md" in str(exc)
+    else:
+        raise AssertionError("Expected mark-done to fail without summary.md")
+
+
+def test_designing_cannot_exit_without_design_artifact() -> None:
+    """Test that DESIGNING cannot exit without DESIGN.md."""
+    root_dir = make_temp_repo()
+    write_state(
+        root_dir,
+        task_id="password-reset",
+        stage="DESIGNING",
+        current_step="design-001",
+    )
+
+    try:
+        advance_stage(root_dir, "PLANNING", step_id="design-001")
+    except RuntimeError as exc:
+        assert "DESIGN.md" in str(exc)
+    else:
+        raise AssertionError("Expected DESIGNING exit to be blocked")
 
 
 def test_needs_failure_analysis_cannot_exit_without_artifact() -> None:
@@ -296,11 +349,16 @@ def test_verify_can_advance_directly_to_red_test_and_green_impl() -> None:
     """Test that verify can advance directly to red test and green impl."""
     root_dir = make_temp_repo()
     write_state(root_dir, task_id="password-reset", stage="VERIFY", current_step="verify-001")
+    (root_dir / ".agent" / "artifacts" / "final-verification.log").write_text("ok\n", encoding="utf-8")
 
     result = advance_stage(root_dir, "RED_TEST")
     assert result["state"]["stage"] == "RED_TEST"
 
     write_state(root_dir, task_id="password-reset", stage="VERIFY", current_step="verify-001")
+    verification_log = root_dir / ".agent" / "artifacts" / "final-verification.log"
+    verification_log.write_text("ok\n", encoding="utf-8")
+    log_mtime = verification_log.stat().st_mtime_ns
+    os.utime(verification_log, ns=(log_mtime + 1_000_000, log_mtime + 1_000_000))
     result = advance_stage(root_dir, "GREEN_IMPL")
     assert result["state"]["stage"] == "GREEN_IMPL"
 
@@ -370,6 +428,7 @@ def test_cli_representative_flow_from_start_to_done() -> None:
             },
         },
     )
+    (root_dir / ".agent" / "artifacts" / "final-verification.log").write_text("ok\n", encoding="utf-8")
     assert invoke_cli(root_dir, ["ready-to-summarize"])[0] == 0
     (root_dir / ".agent" / "artifacts" / "summary.md").write_text(
         "Implemented password reset flow and verified with pytest.\n",

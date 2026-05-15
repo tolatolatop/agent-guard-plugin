@@ -39,6 +39,7 @@ def test_ready_to_summarize_exit_conditions_follow_done_entry_conditions() -> No
     conditions = stage_exit_conditions("READY_TO_SUMMARIZE")
 
     assert conditions["DONE"] == [
+        ".agent/artifacts/summary.md must exist",
         "use mark-done",
         "can-finalize must pass",
     ]
@@ -59,6 +60,30 @@ def test_review_exit_conditions_include_required_review_artifact() -> None:
 
     assert conditions["VERIFY"] == [
         ".agent/artifacts/review.md must exist",
+    ]
+
+
+def test_designing_exit_conditions_include_required_design_artifact() -> None:
+    """Test that leaving DESIGNING requires the design artifact."""
+    conditions = stage_exit_conditions("DESIGNING")
+
+    assert conditions["PLANNING"] == [
+        ".agent/artifacts/DESIGN.md must exist",
+        "active task exists",
+    ]
+
+
+def test_verify_exit_conditions_include_final_verification_log() -> None:
+    """Test that leaving VERIFY requires the final verification log artifact."""
+    conditions = stage_exit_conditions("VERIFY")
+
+    assert conditions["READY_TO_SUMMARIZE"] == [
+        ".agent/artifacts/final-verification.log must exist",
+        "use ready-to-summarize",
+        "last_verification.exit_code must be 0",
+        "no running jobs",
+        "all plan steps must be done or failed",
+        "can_finalize enabled only through ready-to-summarize",
     ]
 
 
@@ -264,6 +289,71 @@ def test_normalize_workflow_spec_accepts_grouped_dsl_shape() -> None:
     assert normalized["stages"]["RED_TEST"]["allows_complete_step"] is True
     assert normalized["stages"]["RED_TEST"]["forbid_needs_human"]["display"] == "stay in stage"
     assert normalized["stages"]["RED_TEST"]["artifacts_required"] == []
+
+
+def test_normalize_workflow_spec_applies_plan_create_defaults_in_canonical_dsl() -> None:
+    """Test that plan:create injects plan.yaml write and artifact defaults."""
+    canonical = {
+        "version": 2,
+        "workflow": {
+            "id": "canonical-example",
+            "title": "Canonical Example",
+            "description": "DSL compatibility test",
+            "entry": "PLANNING",
+        },
+        "globals": {
+            "protected": [".agent/state.json"],
+            "sensitive": [".github/**"],
+            "failures": {
+                "repeat_threshold": 2,
+                "fingerprint_roots": ["src", "tests"],
+            },
+            "finalize": {
+                "require": [{"rule": "successful_last_verification"}],
+                "messages": {
+                    "successful_last_verification": "last_verification.exit_code must be 0",
+                },
+            },
+            "wizard": {
+                "start_stages": ["PLANNING"],
+            },
+            "session_start": {
+                "navigator_skill": "workflow-core",
+            },
+            "install": {
+                "skills": {
+                    "match": ["workflow"],
+                    "exclude_match": ["failure"],
+                }
+            },
+        },
+        "stages": {
+            "PLANNING": {
+                "goal": "Create a plan.",
+                "plan": "create",
+                "allow": {
+                    "write": [],
+                    "actions": ["write or refine plan.yaml"],
+                    "stop": True,
+                    "human": True,
+                },
+                "deny": {
+                    "write": [],
+                    "actions": ["execute unplanned broad changes"],
+                },
+                "enter": [],
+                "exit": [],
+                "expect": [],
+                "next": [],
+            },
+        },
+    }
+
+    normalized = normalize_workflow_spec(canonical)
+
+    assert normalized["stages"]["PLANNING"]["write_policy"]["writable_paths"] == [".agent/plan.yaml"]
+    assert normalized["stages"]["PLANNING"]["artifacts_expected"] == [".agent/plan.yaml"]
+    assert normalized["stages"]["PLANNING"]["artifacts_required"] == [{"path": ".agent/plan.yaml"}]
 
 
 def test_grouped_workflow_example_file_normalizes_and_validates() -> None:

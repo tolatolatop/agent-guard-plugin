@@ -86,6 +86,17 @@ def test_session_start_uses_claude_skill_layout_when_configured() -> None:
     assert "# Using Workflow" in reminder["prompt_block"]
 
 
+def test_session_start_projects_green_impl_write_scope() -> None:
+    """Test that GREEN_IMPL exposes the widened non-.agent write scope."""
+    root_dir = make_temp_repo()
+    write_state(root_dir, task_id="password-reset", stage="GREEN_IMPL", current_step="green-001")
+
+    reminder = get_session_reminder(root_dir)
+
+    assert reminder["workflow"]["stage_writable_paths"] == ["**"]
+    assert reminder["workflow"]["stage_denied_paths"] == [".agent/**"]
+
+
 def test_session_start_includes_recent_archive_after_reset() -> None:
     """Test that session start includes recent archive after reset."""
     root_dir = make_temp_repo()

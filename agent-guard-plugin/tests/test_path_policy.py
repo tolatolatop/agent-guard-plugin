@@ -32,10 +32,10 @@ def test_red_test_allows_test_writes_in_allowed_scope() -> None:
     assert result["decision"] == "allow"
 
 
-def test_sensitive_paths_require_approval() -> None:
-    """Test that sensitive paths require approval."""
+def test_green_impl_allows_sensitive_paths_when_stage_explicitly_allows_all_non_agent_writes() -> None:
+    """Test that GREEN_IMPL may write sensitive paths once the stage explicitly allows all non-.agent paths."""
     result = decide_write({**DEFAULT_STATE, "task_id": "password-reset", "stage": "GREEN_IMPL"}, ".github/workflows/ci.yml")
-    assert result["decision"] == "block"
+    assert result["decision"] == "allow"
 
 
 def test_state_json_cannot_be_modified_directly() -> None:
@@ -43,6 +43,12 @@ def test_state_json_cannot_be_modified_directly() -> None:
     result = decide_write({**DEFAULT_STATE, "task_id": "password-reset", "stage": "GREEN_IMPL"}, ".agent/state.json")
     assert result["decision"] == "block"
     assert "managed by agent-guard" in result["reason"]
+
+
+def test_green_impl_blocks_other_agent_writes() -> None:
+    """Test that GREEN_IMPL still blocks .agent writes outside managed system updates."""
+    result = decide_write({**DEFAULT_STATE, "task_id": "password-reset", "stage": "GREEN_IMPL"}, ".agent/events.jsonl")
+    assert result["decision"] == "block"
 
 
 def test_planning_allows_agent_plan_updates_only() -> None:
