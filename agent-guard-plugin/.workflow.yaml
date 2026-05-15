@@ -142,8 +142,7 @@ stages:
     permissions:
       write:
         allow:
-          - .agent/**
-          - ./DESIGN.md
+          - .agent/artifacts/DESIGN.md
         deny: []
       actions:
         allow:
@@ -174,8 +173,7 @@ stages:
     permissions:
       write:
         allow:
-          - .agent/**
-          - ./PLAN.md
+          - .agent/plan.yaml
         deny: []
       actions:
         allow:
@@ -273,7 +271,7 @@ stages:
     permissions:
       write:
         allow:
-          - .agent/**
+          - .agent/artifacts/review.md
         deny: []
       actions:
         allow:
@@ -302,7 +300,7 @@ stages:
     permissions:
       write:
         allow:
-          - .agent/artifacts/**
+          - .agent/artifacts/final-verification.log
         deny: []
       actions:
         allow:
