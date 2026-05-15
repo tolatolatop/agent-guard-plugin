@@ -54,29 +54,29 @@ def test_planning_allows_agent_plan_updates_only() -> None:
     assert result["decision"] == "allow"
 
 
-def test_planning_allows_root_plan_markdown() -> None:
-    """Test that planning allows root plan markdown."""
+def test_planning_blocks_root_plan_markdown() -> None:
+    """Test that planning blocks root plan markdown outside the managed artifact path."""
     result = decide_write(
         {**DEFAULT_STATE, "task_id": "init-video-clipper", "stage": "PLANNING"},
         "./PLAN.md",
     )
-    assert result["decision"] == "allow"
+    assert result["decision"] == "block"
 
 
-def test_designing_allows_root_design_markdown() -> None:
-    """Test that designing allows root design markdown."""
+def test_designing_blocks_root_design_markdown() -> None:
+    """Test that designing blocks root design markdown outside the managed artifact path."""
     result = decide_write(
         {**DEFAULT_STATE, "task_id": "init-video-clipper", "stage": "DESIGNING"},
         "./DESIGN.md",
     )
-    assert result["decision"] == "allow"
+    assert result["decision"] == "block"
 
 
 def test_planning_allows_absolute_agent_artifact_paths() -> None:
     """Test that planning allows absolute agent artifact paths."""
     result = decide_write(
         {**DEFAULT_STATE, "task_id": "init-video-clipper", "stage": "PLANNING"},
-        "/tmp/test-guard/.agent/artifacts/DESIGN.md",
+        "/tmp/test-guard/.agent/plan.yaml",
     )
     assert result["decision"] == "allow"
 

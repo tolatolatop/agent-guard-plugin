@@ -119,7 +119,7 @@ def test_stage_policy_view_exposes_grouped_ddd_shape() -> None:
 
     assert stage["intent"]["goal"] == "Create a failing test that proves the missing behavior."
     assert stage["permissions"]["write"]["allow"] == ["tests/**"]
-    assert stage["permissions"]["write"]["deny"] == ["src/**"]
+    assert stage["permissions"]["write"]["deny"] == ["src/**", ".agent/plan.yaml"]
     assert stage["permissions"]["commands"]["complete_step"] == "allow"
     assert stage["permissions"]["handoff"]["human_stop"] == "deny"
     assert stage["transitions"]["to"] == ["GREEN_IMPL", "NEEDS_FAILURE_ANALYSIS"]

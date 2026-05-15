@@ -33,8 +33,4 @@ packages = ["src/agent_guard"]
 
 [tool.hatch.build.targets.wheel.force-include]
 ".workflow.yaml" = "agent_guard/.workflow.yaml"
-"docs/skills/failure-analysis.md" = "agent_guard/_bundled_skills/failure-analysis.md"
-"docs/skills/finalization-checklist.md" = "agent_guard/_bundled_skills/finalization-checklist.md"
-"docs/skills/plan-yaml.md" = "agent_guard/_bundled_skills/plan-yaml.md"
-"docs/skills/using-workflow.md" = "agent_guard/_bundled_skills/using-workflow.md"
-"docs/skills/workflow-core.md" = "agent_guard/_bundled_skills/workflow-core.md"
+"docs/skills" = "agent_guard/_bundled_skills"

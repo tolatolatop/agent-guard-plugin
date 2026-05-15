@@ -3,6 +3,7 @@ import json
 from io import StringIO
 import tempfile
 from pathlib import Path
+import tomllib
 import pytest
 
 from agent_guard.install import (
@@ -100,6 +101,15 @@ def test_packaged_skills_dir_falls_back_to_repo_docs_when_bundle_missing(
 
     assert resolved == docs_dir
     assert (resolved / "using-workflow.md").exists()
+
+
+def test_wheel_force_include_maps_docs_skills_directory() -> None:
+    """Test that wheel packaging includes the full docs/skills directory."""
+    pyproject = tomllib.loads((PLUGIN_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    force_include = pyproject["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
+
+    assert force_include["docs/skills"] == "agent_guard/_bundled_skills"
+    assert "docs/skills/using-workflow.md" not in force_include
 
 
 def test_install_claude_skills_bundle_succeeds_without_plugin_docs() -> None:

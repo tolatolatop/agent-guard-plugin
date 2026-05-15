@@ -6,7 +6,7 @@ import sys
 
 from agent_guard.state import save_state
 
-from .helpers import make_temp_repo
+from .helpers import make_temp_repo, runtime_test_env
 
 
 def run_bridge(root_dir, action, payload):
@@ -18,6 +18,7 @@ def run_bridge(root_dir, action, payload):
         text=True,
         capture_output=True,
         check=False,
+        env=runtime_test_env(),
     )
 
 
@@ -43,8 +44,8 @@ def test_bridge_blocks_forbidden_write() -> None:
     assert "denied during RED_TEST" in result.stderr
 
 
-def test_bridge_allows_absolute_agent_artifact_write_within_repo() -> None:
-    """Test that bridge allows absolute agent artifact write within repo."""
+def test_bridge_allows_absolute_agent_plan_write_within_repo() -> None:
+    """Test that bridge allows absolute agent plan write within repo."""
     root_dir = make_temp_repo()
     save_state(
         root_dir,
@@ -63,7 +64,7 @@ def test_bridge_allows_absolute_agent_artifact_write_within_repo() -> None:
     result = run_bridge(
         root_dir,
         "pre-write",
-        {"tool_input": {"file_path": str(root_dir / ".agent" / "artifacts" / "DESIGN.md")}},
+        {"tool_input": {"file_path": str(root_dir / ".agent" / "plan.yaml")}},
     )
     assert result.returncode == 0
 
@@ -316,7 +317,7 @@ def test_bridge_session_start_uses_installed_skills_dir() -> None:
         text=True,
         capture_output=True,
         check=False,
-        env={**os.environ, "AGENT_GUARD_SKILLS_DIR": str(skills_dir)},
+        env={**runtime_test_env(), "AGENT_GUARD_SKILLS_DIR": str(skills_dir)},
     )
     assert result.returncode == 0
     payload = json.loads(result.stdout)

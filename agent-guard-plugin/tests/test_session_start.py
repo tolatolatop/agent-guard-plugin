@@ -32,7 +32,7 @@ def test_session_start_includes_meta_skill_and_workflow_context() -> None:
     assert reminder["workflow"]["transition_graph_mermaid"]
     assert any(skill["id"] == "plan-yaml" for skill in reminder["workflow"]["skill_catalog"])
     assert reminder["workflow"]["stage_writable_paths"] == ["tests/**"]
-    assert reminder["workflow"]["stage_denied_paths"] == ["src/**"]
+    assert reminder["workflow"]["stage_denied_paths"] == ["src/**", ".agent/plan.yaml"]
     assert reminder["workflow"]["stage_expected_artifacts"] == [".agent/artifacts/red-test.log"]
     assert reminder["workflow"]["stage_required_artifacts"] == []
     assert reminder["workflow"]["complete_step_allowed_from_stages"] == ["RED_TEST", "GREEN_IMPL", "REVIEW", "VERIFY"]

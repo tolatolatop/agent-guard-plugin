@@ -1,4 +1,5 @@
 .agent/
+.agent-guard/skills/
 .venv/
 .pytest_cache/
 __pycache__/
