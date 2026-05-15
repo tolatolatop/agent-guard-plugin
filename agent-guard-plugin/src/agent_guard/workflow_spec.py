@@ -137,13 +137,22 @@ def _legacy_plan_mode(stage_name: str) -> str:
     if stage_name in {"READY_TO_SUMMARIZE", "DONE"}:
         return "complete"
     if stage_name in {"RED_TEST", "GREEN_IMPL", "REVIEW", "VERIFY", "NEEDS_FAILURE_ANALYSIS"}:
-        return "follow"
+        return "advance" if stage_name in {"RED_TEST", "GREEN_IMPL", "REVIEW", "VERIFY"} else "follow"
     return "deny"
 
 
 def _legacy_stop_allowed(stage_name: str) -> bool:
     """Compatibility stop behavior for the current grouped workflow."""
     return stage_name in {"IDLE", "CLARIFYING", "PLANNING", "NEEDS_HUMAN", "DONE"}
+
+
+def _apply_plan_path_policy(plan_mode: str, writable_paths: list[str], denied_paths: list[str]) -> tuple[list[str], list[str]]:
+    """Bind .agent/plan.yaml write access to the stage plan mode."""
+    normalized_writable = [str(item) for item in writable_paths if str(item) != ".agent/plan.yaml"]
+    normalized_denied = [str(item) for item in denied_paths if str(item) != ".agent/plan.yaml"]
+    if plan_mode == "create":
+        return [*normalized_writable, ".agent/plan.yaml"], normalized_denied
+    return normalized_writable, [*normalized_denied, ".agent/plan.yaml"]
 
 
 def _normalize_stage_from_grouped(stage_name: str, stage_data: dict[str, Any]) -> dict[str, Any]:
@@ -165,6 +174,13 @@ def _normalize_stage_from_grouped(stage_name: str, stage_data: dict[str, Any]) -
     if human_stop not in {"allow", "deny"}:
         raise RuntimeError(f".workflow.yaml grouped stage {stage_name} permissions.handoff.human_stop must be allow or deny.")
 
+    plan_mode = _legacy_plan_mode(stage_name)
+    writable_paths, denied_paths = _apply_plan_path_policy(
+        plan_mode,
+        _string_list(write.get("allow", []), f".workflow.yaml grouped stage {stage_name} permissions.write.allow"),
+        _string_list(write.get("deny", []), f".workflow.yaml grouped stage {stage_name} permissions.write.deny"),
+    )
+
     normalized: dict[str, Any] = {
         "goal": str(intent.get("goal", "")),
         "allowed_actions": _string_list(actions.get("allow", []), f".workflow.yaml grouped stage {stage_name} permissions.actions.allow"),
@@ -176,9 +192,10 @@ def _normalize_stage_from_grouped(stage_name: str, stage_data: dict[str, Any]) -
         "artifacts_expected": _string_list(evidence.get("expected", []), f".workflow.yaml grouped stage {stage_name} evidence.expected"),
         "artifacts_required": _normalize_required_artifacts(evidence.get("required", []), f".workflow.yaml grouped stage {stage_name} evidence.required"),
         "write_policy": {
-            "writable_paths": _string_list(write.get("allow", []), f".workflow.yaml grouped stage {stage_name} permissions.write.allow"),
-            "denied_paths": _string_list(write.get("deny", []), f".workflow.yaml grouped stage {stage_name} permissions.write.deny"),
+            "writable_paths": writable_paths,
+            "denied_paths": denied_paths,
         },
+        "plan_mode": plan_mode,
     }
     if complete_step == "allow":
         normalized["allows_complete_step"] = True
@@ -216,9 +233,12 @@ def _normalize_stage_from_canonical(stage_name: str, stage_data: dict[str, Any])
     """Normalize one canonical stage into the flat internal workflow format."""
     allow = _require_mapping(stage_data.get("allow", {}), f".workflow.yaml canonical stage {stage_name} allow")
     deny = _require_mapping(stage_data.get("deny", {}), f".workflow.yaml canonical stage {stage_name} deny")
-    complete_step = str(stage_data.get("complete_step", "deny"))
-    if complete_step not in {"allow", "deny"}:
-        raise RuntimeError(f".workflow.yaml canonical stage {stage_name} complete_step must be allow or deny.")
+    plan_mode = str(stage_data.get("plan", "deny"))
+    writable_paths, denied_paths = _apply_plan_path_policy(
+        plan_mode,
+        _string_list(allow.get("write", []), f".workflow.yaml canonical stage {stage_name} allow.write"),
+        _string_list(deny.get("write", []), f".workflow.yaml canonical stage {stage_name} deny.write"),
+    )
 
     normalized: dict[str, Any] = {
         "goal": str(stage_data.get("goal", "")),
@@ -237,12 +257,12 @@ def _normalize_stage_from_canonical(stage_name: str, stage_data: dict[str, Any])
             for item in _require_list(stage_data.get("exit", []), f".workflow.yaml canonical stage {stage_name} exit")
         ],
         "write_policy": {
-            "writable_paths": _string_list(allow.get("write", []), f".workflow.yaml canonical stage {stage_name} allow.write"),
-            "denied_paths": _string_list(deny.get("write", []), f".workflow.yaml canonical stage {stage_name} deny.write"),
+            "writable_paths": writable_paths,
+            "denied_paths": denied_paths,
         },
-        "plan_mode": str(stage_data.get("plan", "deny")),
+        "plan_mode": plan_mode,
     }
-    if complete_step == "allow":
+    if str(stage_data.get("plan", "deny")) == "advance":
         normalized["allows_complete_step"] = True
     if bool(stage_data.get("final", False)):
         normalized["is_final_stage"] = True
@@ -441,7 +461,7 @@ def validate_canonical_workflow_spec(spec: dict[str, Any]) -> None:
         if isinstance(item, dict) and item.get("rule") and item["rule"] not in allowed_rule_names():
             raise RuntimeError(f"Unknown finalization rules in .workflow.yaml: {item['rule']}")
 
-    allowed_plan_modes = {"deny", "create", "follow", "complete"}
+    allowed_plan_modes = {"deny", "create", "follow", "advance", "complete"}
     for stage_name, raw_stage in stages.items():
         stage_data = _require_mapping(raw_stage, f".workflow.yaml canonical stage {stage_name}")
         if str(stage_data.get("plan", "deny")) not in allowed_plan_modes:
@@ -1132,5 +1152,5 @@ def complete_step_allowed_from_stages() -> list[str]:
     return [
         stage_name
         for stage_name, stage_data in workflow_stages().items()
-        if stage_data.get("allows_complete_step") is True
+        if stage_data.get("allows_complete_step") is True or stage_data.get("plan_mode") == "advance"
     ]

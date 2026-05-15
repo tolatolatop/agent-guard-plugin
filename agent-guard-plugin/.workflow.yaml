@@ -80,7 +80,6 @@ stages:
         - run implementation or verification work before a task is started
         - claim work is complete
         - skip state initialization
-    complete_step: deny
     enter:
       - rule: active_task
         display: task_id must be set
@@ -105,7 +104,6 @@ stages:
       write: []
       actions:
         - start implementation before requirements are clear
-    complete_step: deny
     enter: []
     exit: []
     expect: []
@@ -128,7 +126,6 @@ stages:
       write: []
       actions:
         - broad implementation before the design is settled
-    complete_step: deny
     enter:
       - rule: active_task
         display: active task exists
@@ -153,7 +150,6 @@ stages:
       write: []
       actions:
         - execute unplanned broad changes
-    complete_step: deny
     enter:
       - rule: active_task
         display: active task exists
@@ -167,7 +163,7 @@ stages:
 
   RED_TEST:
     goal: Create a failing test that proves the missing behavior.
-    plan: follow
+    plan: advance
     allow:
       write:
         - tests/**
@@ -184,7 +180,6 @@ stages:
       actions:
         - write production code
         - claim implementation is complete
-    complete_step: allow
     enter: []
     exit: []
     expect:
@@ -195,7 +190,7 @@ stages:
 
   GREEN_IMPL:
     goal: Implement the smallest code change that makes the targeted test pass.
-    plan: follow
+    plan: advance
     allow:
       write:
         - src/**
@@ -213,7 +208,6 @@ stages:
         - broad refactors
         - unrelated formatting
         - dependency upgrades unless planned
-    complete_step: allow
     enter: []
     exit: []
     expect: []
@@ -223,7 +217,7 @@ stages:
 
   REVIEW:
     goal: Review the diff and capture review evidence without changing code.
-    plan: follow
+    plan: advance
     allow:
       write:
         - .agent/artifacts/review.md
@@ -237,7 +231,6 @@ stages:
       write: []
       actions:
         - modify source unless review findings create a new implementation step
-    complete_step: allow
     enter: []
     exit:
       - .agent/artifacts/review.md
@@ -248,7 +241,7 @@ stages:
 
   VERIFY:
     goal: Run verification commands and record final evidence.
-    plan: follow
+    plan: advance
     allow:
       write:
         - .agent/artifacts/final-verification.log
@@ -262,7 +255,6 @@ stages:
         - .agent/plan.yaml
       actions:
         - new implementation work unless the state moves to NEEDS_FAILURE_ANALYSIS
-    complete_step: allow
     enter: []
     exit: []
     expect:
@@ -289,7 +281,6 @@ stages:
       write: []
       actions:
         - further code changes
-    complete_step: deny
     enter:
       - rule: required_command
         value: ready-to-summarize
@@ -324,7 +315,6 @@ stages:
       actions:
         - rerun the same failing command without analysis
         - continue source edits without evidence
-    complete_step: deny
     enter: []
     exit:
       - path: .agent/artifacts/failure-analysis.md
@@ -353,7 +343,6 @@ stages:
       write: []
       actions:
         - continue sensitive or ambiguous work without approval
-    complete_step: deny
     enter: []
     exit: []
     expect: []
@@ -377,7 +366,6 @@ stages:
       write: []
       actions:
         - resume editing under the completed task
-    complete_step: deny
     enter:
       - rule: required_command
         value: mark-done

@@ -289,7 +289,8 @@ def test_canonical_workflow_projects_legacy_grouped_dsl() -> None:
         {"rule": "all_plan_steps_terminal"},
     ]
     assert workflow["stages"]["PLANNING"]["plan"] == "create"
-    assert workflow["stages"]["GREEN_IMPL"]["plan"] == "follow"
+    assert workflow["stages"]["RED_TEST"]["plan"] == "advance"
+    assert workflow["stages"]["GREEN_IMPL"]["plan"] == "advance"
     assert workflow["stages"]["READY_TO_SUMMARIZE"]["plan"] == "complete"
     assert workflow["stages"]["PLANNING"]["exit"] == [".agent/plan.yaml"]
     assert workflow["stages"]["NEEDS_FAILURE_ANALYSIS"]["exit"] == [
@@ -306,7 +307,7 @@ def test_canonical_helpers_resolve_legacy_completion_and_entry_stages() -> None:
     assert canonical_entry_stage() == "CLARIFYING"
     assert canonical_completion_ready_stage() == "READY_TO_SUMMARIZE"
     assert canonical_completion_stage() == "DONE"
-    assert canonical_stage_plan_mode("VERIFY") == "follow"
+    assert canonical_stage_plan_mode("VERIFY") == "advance"
     assert canonical_stage_spec("DONE")["final"] is True
 
 

@@ -54,6 +54,15 @@ def test_planning_allows_agent_plan_updates_only() -> None:
     assert result["decision"] == "allow"
 
 
+def test_clarifying_blocks_agent_plan_updates_when_plan_mode_is_not_create() -> None:
+    """Test that non-create plan modes automatically block plan.yaml writes."""
+    result = decide_write(
+        {**DEFAULT_STATE, "task_id": "init-video-clipper", "stage": "CLARIFYING"},
+        ".agent/plan.yaml",
+    )
+    assert result["decision"] == "block"
+
+
 def test_planning_blocks_root_plan_markdown() -> None:
     """Test that planning blocks root plan markdown outside the managed artifact path."""
     result = decide_write(
