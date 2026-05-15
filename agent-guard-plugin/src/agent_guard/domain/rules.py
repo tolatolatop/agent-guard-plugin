@@ -39,6 +39,9 @@ def _no_running_jobs(context: RuleContext, value: Any | None) -> bool:
 
 
 def _all_plan_steps_terminal(context: RuleContext, value: Any | None) -> bool:
+    plan = PlanRepository(context.root_dir).load_raw()
+    if plan is None:
+        return False
     return not any(step.status.strip().lower() not in {"done", "failed"} for step in PlanRepository(context.root_dir).load_steps())
 
 

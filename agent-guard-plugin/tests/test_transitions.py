@@ -173,6 +173,39 @@ def test_mark_done_is_blocked_unless_can_finalize_passes() -> None:
         raise AssertionError("Expected mark-done to fail")
 
 
+def test_mark_done_is_blocked_when_plan_has_nonterminal_steps() -> None:
+    """Test that mark-done re-checks plan terminal state before entering DONE."""
+    root_dir = make_temp_repo()
+    (root_dir / ".agent" / "plan.yaml").write_text(
+        "task_id: password-reset\n"
+        "steps:\n"
+        "  - name: verify-001\n"
+        "    description: run verification\n"
+        "    status: in_progress\n",
+        encoding="utf-8",
+    )
+    write_state(
+        root_dir,
+        task_id="password-reset",
+        stage="READY_TO_SUMMARIZE",
+        can_finalize=True,
+        remaining_steps=[],
+        last_verification={
+            "command": "pytest",
+            "exit_code": 0,
+            "log_path": ".agent/artifacts/final-verification.log",
+            "recorded_at": "2026-05-14T10:00:00Z",
+        },
+    )
+
+    try:
+        mark_done(root_dir)
+    except RuntimeError as exc:
+        assert "all plan steps must be done or failed" in str(exc)
+    else:
+        raise AssertionError("Expected mark-done to fail when plan.yaml is not terminal")
+
+
 def test_needs_failure_analysis_cannot_exit_without_artifact() -> None:
     """Test that needs failure analysis cannot exit without artifact."""
     root_dir = make_temp_repo()

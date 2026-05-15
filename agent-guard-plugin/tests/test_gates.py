@@ -14,8 +14,8 @@ def test_finalization_is_blocked_when_verification_is_missing() -> None:
     assert "last_verification.exit_code must be 0" in result["reasons"]
 
 
-def test_finalization_is_allowed_only_when_state_is_complete_and_verification_passed() -> None:
-    """Test that finalization is allowed only when state is complete and verification passed."""
+def test_finalization_is_blocked_when_plan_is_missing() -> None:
+    """Test that finalization is blocked when plan.yaml is missing."""
     root_dir = make_temp_repo()
     write_state(
         root_dir,
@@ -30,7 +30,8 @@ def test_finalization_is_allowed_only_when_state_is_complete_and_verification_pa
     )
 
     result = can_finalize(root_dir)
-    assert result["decision"] == "allow"
+    assert result["decision"] == "block"
+    assert "all plan steps must be done or failed" in "\n".join(result["reasons"]).lower()
 
 
 def test_finalization_is_blocked_when_plan_has_nonterminal_steps() -> None:
