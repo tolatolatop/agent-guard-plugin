@@ -1,13 +1,18 @@
 """Tests for test workflow spec."""
 from pathlib import Path
 
+import yaml
+
 from agent_guard.workflow_spec import (
     failure_policy,
     finalization_policy,
     install_defaults,
+    load_workflow_spec,
     normalize_workflow_spec,
+    packaged_workflow_path,
     path_policy,
     session_start_defaults,
+    source_workflow_path,
     stage_required_artifact_rules,
     stage_policy_view,
     stage_policy_roles,
@@ -257,8 +262,6 @@ def test_normalize_workflow_spec_accepts_grouped_dsl_shape() -> None:
 
 def test_grouped_workflow_example_file_normalizes_and_validates() -> None:
     """Test that the checked-in grouped workflow example stays parseable."""
-    import yaml
-
     example_path = Path(__file__).resolve().parents[1] / "docs" / "grouped-workflow.example.yaml"
     payload = yaml.safe_load(example_path.read_text(encoding="utf-8"))
     normalized = normalize_workflow_spec(payload)
@@ -266,3 +269,42 @@ def test_grouped_workflow_example_file_normalizes_and_validates() -> None:
     assert normalized["metadata"]["id"] == "standard-ddd-example"
     assert normalized["stages"]["REVIEW"]["artifacts_required"] == [{"path": ".agent/artifacts/review.md"}]
     assert normalized["stages"]["READY_TO_SUMMARIZE"]["allowed_next_stages"] == ["DONE"]
+
+
+def test_load_workflow_spec_reports_friendly_message_for_invalid_yaml(monkeypatch, tmp_path: Path) -> None:
+    """Test that invalid workflow YAML reports a repair-required message."""
+    workflow_file = tmp_path / ".workflow.yaml"
+    workflow_file.write_text("workflow: [\n", encoding="utf-8")
+    load_workflow_spec.cache_clear()
+    monkeypatch.setattr("agent_guard.workflow_spec.packaged_workflow_path", lambda: workflow_file)
+    monkeypatch.setattr("agent_guard.workflow_spec.source_workflow_path", lambda: workflow_file)
+
+    try:
+        load_workflow_spec()
+    except RuntimeError as exc:
+        assert ".workflow.yaml appears damaged" in str(exc)
+        assert "cannot continue" in str(exc)
+    else:
+        raise AssertionError("Expected invalid workflow YAML to fail")
+    finally:
+        load_workflow_spec.cache_clear()
+
+
+def test_load_workflow_spec_reports_friendly_message_for_non_mapping(monkeypatch, tmp_path: Path) -> None:
+    """Test that non-mapping workflow documents report a repair-required message."""
+    workflow_file = tmp_path / ".workflow.yaml"
+    workflow_file.write_text("- bad\n", encoding="utf-8")
+    load_workflow_spec.cache_clear()
+    monkeypatch.setattr("agent_guard.workflow_spec.packaged_workflow_path", lambda: workflow_file)
+    monkeypatch.setattr("agent_guard.workflow_spec.source_workflow_path", lambda: workflow_file)
+
+    try:
+        load_workflow_spec()
+    except RuntimeError as exc:
+        assert ".workflow.yaml appears damaged" in str(exc)
+        assert "cannot continue" in str(exc)
+        assert "top-level document must be a YAML mapping" in str(exc)
+    else:
+        raise AssertionError("Expected non-mapping workflow YAML to fail")
+    finally:
+        load_workflow_spec.cache_clear()

@@ -29,6 +29,14 @@ DEFAULT_STAGE_ARTIFACTS: dict[str, Any] = {
 }
 
 
+def _state_file_error(file_path: Path, detail: str) -> RuntimeError:
+    """Build a user-facing state corruption error."""
+    return RuntimeError(
+        f"{file_path.name} appears damaged at {file_path}. {detail} "
+        "The current task cannot continue until this file is repaired or restored."
+    )
+
+
 def agent_dir(root_dir: Path) -> Path:
     """Agent dir."""
     return root_dir / AGENT_DIR
@@ -143,9 +151,9 @@ def read_json(file_path: Path, label: str) -> dict[str, Any]:
     try:
         value = json.loads(file_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise RuntimeError(f"{label} is invalid JSON: {exc}") from exc
+        raise _state_file_error(file_path, f"JSON parsing failed: {exc}.") from exc
     if not isinstance(value, dict):
-        raise RuntimeError(f"{label} must contain a JSON object.")
+        raise _state_file_error(file_path, "The top-level JSON value must be an object.")
     return value
 
 
@@ -161,7 +169,10 @@ def validate_state(state: dict[str, Any]) -> dict[str, Any]:
     ]
     for key in required_keys:
         if key not in state:
-            raise RuntimeError(f"state.json is missing required key: {key}")
+            raise RuntimeError(
+                f"state.json appears damaged. Missing required key: {key}. "
+                "The current task cannot continue until .agent/state.json is repaired or restored."
+            )
     state.pop("completed_steps", None)
     state.pop("remaining_steps", None)
     state.pop("allowed_paths", None)

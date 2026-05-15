@@ -87,6 +87,36 @@ def test_state_drops_legacy_step_fields_when_loading_and_saving() -> None:
     assert "remaining_steps" not in state
 
 
+def test_state_load_reports_friendly_message_when_json_is_invalid() -> None:
+    """Test that invalid state JSON reports a repair-required message."""
+    root_dir = make_temp_repo()
+    (root_dir / ".agent" / "state.json").write_text("{invalid\n", encoding="utf-8")
+
+    try:
+        load_state(root_dir)
+    except RuntimeError as exc:
+        assert "appears damaged" in str(exc)
+        assert "cannot continue" in str(exc)
+        assert "state.json" in str(exc)
+    else:
+        raise AssertionError("Expected invalid state JSON to fail")
+
+
+def test_state_load_reports_friendly_message_when_required_key_is_missing() -> None:
+    """Test that missing required keys are reported as corruption."""
+    root_dir = make_temp_repo()
+    (root_dir / ".agent" / "state.json").write_text('{"task_id": null}\n', encoding="utf-8")
+
+    try:
+        load_state(root_dir)
+    except RuntimeError as exc:
+        assert "appears damaged" in str(exc)
+        assert "cannot continue" in str(exc)
+        assert "Missing required key" in str(exc)
+    else:
+        raise AssertionError("Expected invalid state shape to fail")
+
+
 def test_stage_artifact_snapshot_tracks_stage_entry() -> None:
     """Test that stage artifact snapshots are recorded when the stage changes."""
     root_dir = make_temp_repo()

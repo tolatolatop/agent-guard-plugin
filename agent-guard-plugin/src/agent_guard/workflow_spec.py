@@ -11,6 +11,14 @@ import yaml
 from .domain.rules import allowed_rule_names
 
 
+def _workflow_file_error(candidate: Path, detail: str) -> RuntimeError:
+    """Build a user-facing workflow-spec corruption error."""
+    return RuntimeError(
+        f".workflow.yaml appears damaged at {candidate}. {detail} "
+        "agent-guard cannot continue until this file is repaired or restored."
+    )
+
+
 def packaged_workflow_path() -> Path:
     """Packaged workflow path."""
     return Path(__file__).resolve().parent / ".workflow.yaml"
@@ -29,13 +37,18 @@ def load_workflow_spec() -> dict[str, Any]:
     for candidate in (packaged_workflow_path(), source_workflow_path()):
         if not candidate.exists():
             continue
-        data = yaml.safe_load(candidate.read_text(encoding="utf-8")) or {}
+        try:
+            data = yaml.safe_load(candidate.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError as exc:
+            raise _workflow_file_error(candidate, f"YAML parsing failed: {exc}.") from exc
         if not isinstance(data, dict):
-            raise RuntimeError(f"Workflow spec must be a YAML mapping: {candidate}")
+            raise _workflow_file_error(candidate, "The top-level document must be a YAML mapping.")
         normalized = normalize_workflow_spec(data)
         validate_workflow_spec(normalized)
         return normalized
-    raise RuntimeError("Could not locate .workflow.yaml.")
+    raise RuntimeError(
+        "Could not locate .workflow.yaml. agent-guard cannot continue until the workflow definition is restored."
+    )
 
 
 def _require_mapping(value: Any, label: str) -> dict[str, Any]:
