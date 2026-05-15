@@ -132,6 +132,13 @@ def test_parse_flags_supports_short_runtime_and_scope_aliases() -> None:
     assert flags["scope"] == "project"
 
 
+def test_parse_flags_supports_short_interactive_alias() -> None:
+    """Test that parse flags supports the short interactive alias."""
+    flags = parse_flags(["-i"])
+
+    assert flags["interactive"] is True
+
+
 def test_parse_flags_accumulates_repeated_match_flags() -> None:
     """Test that repeated skill selection flags accumulate."""
     flags = parse_flags(["--match", "workflow", "--match", "final", "--exclude-match", "failure"])
@@ -216,6 +223,69 @@ def test_install_runtime_uses_workflow_defaults_when_cli_filters_are_absent(
     assert (root / ".claude" / "skills" / "workflow-core" / "SKILL.md").exists()
     assert not (root / ".claude" / "skills" / "using-workflow" / "SKILL.md").exists()
     assert result["notes"][0] == "Installed Claude Code hooks into a settings JSON file."
+
+
+def test_install_runtime_supports_interactive_prompts() -> None:
+    """Test that install_runtime can collect options interactively."""
+    root, home = make_dirs()
+    answers = StringIO("codex\nproject\n\n\n")
+
+    result = install_runtime(
+        ["--interactive"],
+        root,
+        home,
+        PLUGIN_ROOT,
+        input_stream=answers,
+        output=StringIO(),
+    )
+
+    assert result["runtime"] == "codex"
+    assert result["scope"] == "project"
+    assert (root / ".codex" / "hooks.json").exists()
+    assert (root / ".agent-guard" / "skills" / "workflow-core.md").exists()
+
+
+def test_install_runtime_supports_short_interactive_alias() -> None:
+    """Test that install_runtime can collect options through -i."""
+    root, home = make_dirs()
+    answers = StringIO("codex\nproject\n\n\n")
+
+    result = install_runtime(
+        ["-i"],
+        root,
+        home,
+        PLUGIN_ROOT,
+        input_stream=answers,
+        output=StringIO(),
+    )
+
+    assert result["runtime"] == "codex"
+    assert (root / ".codex" / "hooks.json").exists()
+
+
+def test_install_runtime_interactive_filters_override_workflow_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that interactive filter input overrides workflow-default skill filters."""
+    monkeypatch.setattr(
+        "agent_guard.install.workflow_install_defaults",
+        lambda: {"skill_match": ["definitely-no-such-skill"], "skill_exclude_match": []},
+    )
+    root, home = make_dirs()
+    answers = StringIO("claude-code\nproject\nworkflow-core\n\n")
+
+    result = install_runtime(
+        ["--interactive"],
+        root,
+        home,
+        PLUGIN_ROOT,
+        input_stream=answers,
+        output=StringIO(),
+    )
+
+    assert result["runtime"] == "claude-code"
+    assert (root / ".claude" / "skills" / "workflow-core" / "SKILL.md").exists()
+    assert not (root / ".claude" / "skills" / "using-workflow" / "SKILL.md").exists()
 
 
 def test_install_writes_codex_hooks_json() -> None:

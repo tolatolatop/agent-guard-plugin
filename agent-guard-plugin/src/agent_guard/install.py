@@ -6,19 +6,56 @@ import os
 import re
 import shlex
 import shutil
+import sys
 from pathlib import Path
 from typing import Any, TextIO
 
-from .interactive import confirm_action
+from .interactive import confirm_action, prompt_choice, prompt_text
 from .workflow_spec import install_defaults as workflow_install_defaults
 
 SUPPORTED_RUNTIMES = ("claude-code", "codex", "opencode")
 SUPPORTED_SCOPES = ("project", "user")
 SHORT_FLAG_ALIASES = {
+    "-i": "interactive",
     "-r": "runtime",
     "-s": "scope",
 }
 MULTI_VALUE_FLAGS = {"match", "exclude-match"}
+
+
+def _csv_patterns(value: str) -> list[str]:
+    """Parse comma-separated interactive regex input."""
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def prompt_install_options(
+    flags: dict[str, Any],
+    input_stream: TextIO,
+    output: TextIO,
+) -> dict[str, Any]:
+    """Prompt for install options when interactive mode is requested."""
+    updated = dict(flags)
+    default_runtime = str(updated.get("runtime") or "codex")
+    default_scope = str(updated.get("scope") or "project")
+    updated["runtime"] = prompt_choice("Runtime", list(SUPPORTED_RUNTIMES), input_stream, output, default_runtime)
+    updated["scope"] = prompt_choice("Scope", list(SUPPORTED_SCOPES), input_stream, output, default_scope)
+
+    match_default = ",".join(str(item) for item in updated.get("match", [])) if isinstance(updated.get("match"), list) else ""
+    exclude_default = ",".join(str(item) for item in updated.get("exclude-match", [])) if isinstance(updated.get("exclude-match"), list) else ""
+    include_raw = prompt_text("Include skill regexes (comma-separated, blank for defaults)", input_stream, output, default=match_default)
+    exclude_raw = prompt_text("Exclude skill regexes (comma-separated, blank for defaults)", input_stream, output, default=exclude_default)
+
+    include_patterns = _csv_patterns(include_raw)
+    exclude_patterns = _csv_patterns(exclude_raw)
+    if include_patterns:
+        updated["match"] = include_patterns
+    elif "match" in updated:
+        updated.pop("match", None)
+    if exclude_patterns:
+        updated["exclude-match"] = exclude_patterns
+    elif "exclude-match" in updated:
+        updated.pop("exclude-match", None)
+    return updated
 
 
 def parse_flags(args: list[str]) -> dict[str, Any]:
@@ -527,9 +564,20 @@ def install_opencode(
     }
 
 
-def install_runtime(argv: list[str], cwd: Path, home_dir: Path | None, plugin_root: Path) -> dict[str, Any]:
+def install_runtime(
+    argv: list[str],
+    cwd: Path,
+    home_dir: Path | None,
+    plugin_root: Path,
+    input_stream: TextIO | None = None,
+    output: TextIO | None = None,
+) -> dict[str, Any]:
     """Install runtime."""
     flags = parse_flags(argv)
+    install_input = input_stream or sys.stdin
+    install_output = output or sys.stdout
+    if bool(flags.get("interactive")):
+        flags = prompt_install_options(flags, install_input, install_output)
     runtime = flags.get("runtime")
     scope = flags.get("scope", "project")
     if runtime not in SUPPORTED_RUNTIMES:
