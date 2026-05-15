@@ -206,6 +206,7 @@ stages:
           - tests/**
         deny:
           - src/**
+          - .agent/plan.yaml
       actions:
         allow:
           - write tests
@@ -237,7 +238,8 @@ stages:
         allow:
           - src/**
           - tests/**
-        deny: []
+        deny:
+          - .agent/plan.yaml
       actions:
         allow:
           - write minimal production code
@@ -269,7 +271,8 @@ stages:
       write:
         allow:
           - .agent/artifacts/review.md
-        deny: []
+        deny:
+          - .agent/plan.yaml
       actions:
         allow:
           - read diff
@@ -298,7 +301,8 @@ stages:
       write:
         allow:
           - .agent/artifacts/final-verification.log
-        deny: []
+        deny:
+          - .agent/plan.yaml
       actions:
         allow:
           - run verification commands
