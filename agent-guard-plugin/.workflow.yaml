@@ -1,17 +1,10 @@
-# Standard grouped DSL workflow definition for agent-guard.
-#
-# This file is intentionally declarative:
-# - `workflow` identifies the policy document
-# - `globals` defines cross-stage hard gates
-# - `stages` define intent, permissions, transitions, and evidence
-# - built-in rule names must come from the evaluator registry in code
-
-version: 1
+version: 2
 
 workflow:
   id: standard-ddd-example
   title: Standard Workflow Example
   description: Reference workflow showing policy-driven task execution for agent-guard.
+  entry: CLARIFYING
 
 global_gates:
   - Do not write outside stage permissions.
@@ -20,37 +13,31 @@ global_gates:
   - Do not modify .agent/state.json directly; use agent-guard workflow commands to change task state.
 
 globals:
-  paths:
-    # Hard-blocked managed files. These are not ordinary task-scoped paths.
-    protected:
-      - .agent/state.json
-    # Sensitive paths are blocked unless a stage explicitly allows them.
-    sensitive:
-      - .github/**
-      - infra/**
-      - migrations/**
-      - package-lock.json
-      - pnpm-lock.yaml
-      - yarn.lock
-      - poetry.lock
-      - Cargo.lock
+  protected:
+    - .agent/state.json
+
+  sensitive:
+    - .github/**
+    - infra/**
+    - migrations/**
+    - package-lock.json
+    - pnpm-lock.yaml
+    - yarn.lock
+    - poetry.lock
+    - Cargo.lock
 
   failures:
-    # Number of identical failures allowed before analysis becomes mandatory.
     repeat_threshold: 2
-    # Directories used to fingerprint whether code changed between retries.
     fingerprint_roots:
       - src
       - tests
 
-  finalization:
-    # Built-in rule names evaluated by the rule registry in code.
+  finalize:
     require:
-      - no_running_jobs
-      - successful_last_verification
-      - can_finalize_flag
-      - all_plan_steps_terminal
-    # User-facing messages emitted when a required rule fails.
+      - rule: no_running_jobs
+      - rule: successful_last_verification
+      - rule: can_finalize_flag
+      - rule: all_plan_steps_terminal
     messages:
       no_running_jobs: running jobs still exist
       successful_last_verification: last_verification.exit_code must be 0
@@ -58,7 +45,6 @@ globals:
       all_plan_steps_terminal: all plan steps must be done or failed
 
   wizard:
-    # Stages exposed as entry choices by the interactive wizard.
     start_stages:
       - CLARIFYING
       - PLANNING
@@ -70,390 +56,334 @@ globals:
 
   install:
     skills:
-      # Optional default skill selection used by `agent-guard install`
-      # when no explicit CLI --match / --exclude-match flags are given.
       match: []
       exclude_match: []
 
 stages:
   IDLE:
-    intent:
-      goal: Load task state and determine the next concrete step.
-    permissions:
+    goal: Load task state and determine the next concrete step.
+    plan: deny
+    allow:
       write:
-        allow:
-          - .agent/**
-        deny: []
+        - .agent/**
       actions:
-        allow:
-          - read .agent state
-          - inspect plan and job files
-          - explore repository directories and files in read-only mode
-          - start-task when task_id is unset
-        deny:
-          - modify files before a task is started
-          - run implementation or verification work before a task is started
-          - claim work is complete
-          - skip state initialization
-      commands:
-        complete_step: deny
-      handoff:
-        human_stop: allow
-    transitions:
-      to:
-        - CLARIFYING
-      enter_when:
-        - rule: active_task
-          display: task_id must be set
-    evidence:
-      expected: []
-      required: []
+        - read .agent state
+        - inspect plan and job files
+        - explore repository directories and files in read-only mode
+        - start-task when task_id is unset
+      stop: true
+      human: true
+    deny:
+      write: []
+      actions:
+        - modify files before a task is started
+        - run implementation or verification work before a task is started
+        - claim work is complete
+        - skip state initialization
+    complete_step: deny
+    enter:
+      - rule: active_task
+        display: task_id must be set
+    exit: []
+    expect: []
+    next:
+      - CLARIFYING
 
   CLARIFYING:
-    intent:
-      goal: Resolve task intent, assumptions, and missing inputs before implementation.
-    permissions:
+    goal: Resolve task intent, assumptions, and missing inputs before implementation.
+    plan: deny
+    allow:
       write:
-        allow:
-          - .agent/**
-        deny: []
+        - .agent/**
       actions:
-        allow:
-          - clarify requirements
-          - inspect repository state
-          - capture unresolved risks
-        deny:
-          - start implementation before requirements are clear
-      commands:
-        complete_step: deny
-      handoff:
-        human_stop: allow
-    transitions:
-      to:
-        - DESIGNING
-        - PLANNING
-      enter_when: []
-    evidence:
-      expected: []
-      required: []
+        - clarify requirements
+        - inspect repository state
+        - capture unresolved risks
+      stop: true
+      human: true
+    deny:
+      write: []
+      actions:
+        - start implementation before requirements are clear
+    complete_step: deny
+    enter: []
+    exit: []
+    expect: []
+    next:
+      - DESIGNING
+      - PLANNING
 
   DESIGNING:
-    intent:
-      goal: Write the smallest design needed to guide implementation safely.
-    permissions:
+    goal: Write the smallest design needed to guide implementation safely.
+    plan: deny
+    allow:
       write:
-        allow:
-          - .agent/artifacts/DESIGN.md
-        deny: []
-      actions:
-        allow:
-          - draft a design note
-          - identify artifacts and validation steps
-        deny:
-          - broad implementation before the design is settled
-      commands:
-        complete_step: deny
-      handoff:
-        human_stop: deny
-        deny_message: Current stage does not allow human intervention; continue advancing the task.
-    transitions:
-      to:
-        - PLANNING
-      enter_when:
-        - rule: active_task
-          display: active task exists
-    evidence:
-      expected:
         - .agent/artifacts/DESIGN.md
-      required: []
+      actions:
+        - draft a design note
+        - identify artifacts and validation steps
+      stop: false
+      human: false
+    deny:
+      write: []
+      actions:
+        - broad implementation before the design is settled
+    complete_step: deny
+    enter:
+      - rule: active_task
+        display: active task exists
+    exit: []
+    expect:
+      - .agent/artifacts/DESIGN.md
+    next:
+      - PLANNING
 
   PLANNING:
-    intent:
-      goal: Break work into explicit steps with clear success conditions and required evidence.
-    permissions:
+    goal: Break work into explicit steps with clear success conditions and required evidence.
+    plan: create
+    allow:
       write:
-        allow:
-          - .agent/plan.yaml
-        deny: []
+        - .agent/plan.yaml
       actions:
-        allow:
-          - write or refine plan.yaml
-          - refine the next concrete workflow steps in .agent/plan.yaml
-        deny:
-          - execute unplanned broad changes
-      commands:
-        complete_step: deny
-      handoff:
-        human_stop: allow
-    transitions:
-      to:
-        - RED_TEST
-        - GREEN_IMPL
-      enter_when:
-        - rule: active_task
-          display: active task exists
-    evidence:
-      expected:
-        - .agent/plan.yaml
-      required:
-        - .agent/plan.yaml
+        - write or refine plan.yaml
+        - refine the next concrete workflow steps in .agent/plan.yaml
+      stop: true
+      human: true
+    deny:
+      write: []
+      actions:
+        - execute unplanned broad changes
+    complete_step: deny
+    enter:
+      - rule: active_task
+        display: active task exists
+    exit:
+      - .agent/plan.yaml
+    expect:
+      - .agent/plan.yaml
+    next:
+      - RED_TEST
+      - GREEN_IMPL
 
   RED_TEST:
-    intent:
-      goal: Create a failing test that proves the missing behavior.
-    permissions:
+    goal: Create a failing test that proves the missing behavior.
+    plan: follow
+    allow:
       write:
-        allow:
-          - tests/**
-        deny:
-          - src/**
-          - .agent/plan.yaml
+        - tests/**
       actions:
-        allow:
-          - write tests
-          - run targeted tests
-          - save failing logs
-        deny:
-          - write production code
-          - claim implementation is complete
-      commands:
-        complete_step: allow
-      handoff:
-        human_stop: deny
-        deny_message: Current stage does not allow human intervention; continue advancing the task.
-    transitions:
-      to:
-        - GREEN_IMPL
-        - NEEDS_FAILURE_ANALYSIS
-      enter_when: []
-    evidence:
-      expected:
-        - .agent/artifacts/red-test.log
-      required: []
+        - write tests
+        - run targeted tests
+        - save failing logs
+      stop: false
+      human: false
+    deny:
+      write:
+        - src/**
+        - .agent/plan.yaml
+      actions:
+        - write production code
+        - claim implementation is complete
+    complete_step: allow
+    enter: []
+    exit: []
+    expect:
+      - .agent/artifacts/red-test.log
+    next:
+      - GREEN_IMPL
+      - NEEDS_FAILURE_ANALYSIS
 
   GREEN_IMPL:
-    intent:
-      goal: Implement the smallest code change that makes the targeted test pass.
-    permissions:
+    goal: Implement the smallest code change that makes the targeted test pass.
+    plan: follow
+    allow:
       write:
-        allow:
-          - src/**
-          - tests/**
-        deny:
-          - .agent/plan.yaml
+        - src/**
+        - tests/**
       actions:
-        allow:
-          - write minimal production code
-          - update tests if required
-          - run targeted verification
-        deny:
-          - broad refactors
-          - unrelated formatting
-          - dependency upgrades unless planned
-      commands:
-        complete_step: allow
-      handoff:
-        human_stop: deny
-        deny_message: Current stage does not allow human intervention; continue advancing the task.
-    transitions:
-      to:
-        - REVIEW
-        - NEEDS_FAILURE_ANALYSIS
-      enter_when: []
-    evidence:
-      expected:
-        - .agent/artifacts/command-failure.log
-      required: []
+        - write minimal production code
+        - update tests if required
+        - run targeted verification
+      stop: false
+      human: false
+    deny:
+      write:
+        - .agent/plan.yaml
+      actions:
+        - broad refactors
+        - unrelated formatting
+        - dependency upgrades unless planned
+    complete_step: allow
+    enter: []
+    exit: []
+    expect: []
+    next:
+      - REVIEW
+      - NEEDS_FAILURE_ANALYSIS
 
   REVIEW:
-    intent:
-      goal: Review the diff and capture review evidence without changing code.
-    permissions:
+    goal: Review the diff and capture review evidence without changing code.
+    plan: follow
+    allow:
       write:
-        allow:
-          - .agent/artifacts/review.md
-        deny:
-          - .agent/plan.yaml
-      actions:
-        allow:
-          - read diff
-          - read files
-          - write review artifact
-        deny:
-          - modify source unless review findings create a new implementation step
-      commands:
-        complete_step: allow
-      handoff:
-        human_stop: deny
-        deny_message: Current stage does not allow human intervention; continue advancing the task.
-    transitions:
-      to:
-        - VERIFY
-        - GREEN_IMPL
-      enter_when: []
-    evidence:
-      required:
         - .agent/artifacts/review.md
+      actions:
+        - read diff
+        - read files
+        - write review artifact
+      stop: false
+      human: false
+    deny:
+      write: []
+      actions:
+        - modify source unless review findings create a new implementation step
+    complete_step: allow
+    enter: []
+    exit:
+      - .agent/artifacts/review.md
+    expect: []
+    next:
+      - VERIFY
+      - GREEN_IMPL
 
   VERIFY:
-    intent:
-      goal: Run verification commands and record final evidence.
-    permissions:
+    goal: Run verification commands and record final evidence.
+    plan: follow
+    allow:
       write:
-        allow:
-          - .agent/artifacts/final-verification.log
-        deny:
-          - .agent/plan.yaml
-      actions:
-        allow:
-          - run verification commands
-          - write final verification log
-        deny:
-          - new implementation work unless the state moves to NEEDS_FAILURE_ANALYSIS
-      commands:
-        complete_step: allow
-      handoff:
-        human_stop: deny
-        deny_message: Current stage does not allow human intervention; continue advancing the task.
-    transitions:
-      to:
-        - READY_TO_SUMMARIZE
-        - RED_TEST
-        - GREEN_IMPL
-        - NEEDS_FAILURE_ANALYSIS
-      enter_when: []
-    evidence:
-      expected:
         - .agent/artifacts/final-verification.log
-      required: []
+      actions:
+        - run verification commands
+        - write final verification log
+      stop: false
+      human: false
+    deny:
+      write:
+        - .agent/plan.yaml
+      actions:
+        - new implementation work unless the state moves to NEEDS_FAILURE_ANALYSIS
+    complete_step: allow
+    enter: []
+    exit: []
+    expect:
+      - .agent/artifacts/final-verification.log
+    next:
+      - READY_TO_SUMMARIZE
+      - RED_TEST
+      - GREEN_IMPL
+      - NEEDS_FAILURE_ANALYSIS
 
   READY_TO_SUMMARIZE:
-    intent:
-      goal: Summarize completed work and verification results without further edits.
-    permissions:
+    goal: Summarize completed work and verification results without further edits.
+    plan: complete
+    allow:
       write:
-        allow:
-          - .agent/artifacts/summary.md
-        deny: []
-      actions:
-        allow:
-          - summarize work
-          - list changed files
-          - report verification commands and results
-        deny:
-          - further code changes
-      commands:
-        complete_step: deny
-      handoff:
-        human_stop: deny
-        deny_message: Current stage does not allow human intervention; continue advancing the task.
-    transitions:
-      to:
-        - DONE
-      enter_when:
-        - rule: required_command
-          value: ready-to-summarize
-          display: use ready-to-summarize
-        - rule: successful_last_verification
-          display: last_verification.exit_code must be 0
-        - rule: no_running_jobs
-          display: no running jobs
-        - rule: all_plan_steps_terminal
-          display: all plan steps must be done or failed
-        - display: can_finalize enabled only through ready-to-summarize
-    evidence:
-      expected:
         - .agent/artifacts/summary.md
-      required: []
+      actions:
+        - summarize work
+        - list changed files
+        - report verification commands and results
+      stop: false
+      human: false
+    deny:
+      write: []
+      actions:
+        - further code changes
+    complete_step: deny
+    enter:
+      - rule: required_command
+        value: ready-to-summarize
+        display: use ready-to-summarize
+      - rule: successful_last_verification
+        display: last_verification.exit_code must be 0
+      - rule: no_running_jobs
+        display: no running jobs
+      - rule: all_plan_steps_terminal
+        display: all plan steps must be done or failed
+      - display: can_finalize enabled only through ready-to-summarize
+    exit: []
+    expect:
+      - .agent/artifacts/summary.md
+    next:
+      - DONE
 
   NEEDS_FAILURE_ANALYSIS:
-    intent:
-      goal: Stop retry loops and produce evidence-backed failure analysis before changing code again.
-    permissions:
+    goal: Stop retry loops and produce evidence-backed failure analysis before changing code again.
+    plan: follow
+    allow:
       write:
-        allow:
-          - .agent/artifacts/**
-        deny: []
+        - .agent/artifacts/**
       actions:
-        allow:
-          - inspect logs
-          - write failure-analysis.md
-          - identify minimal fix and next verification command
-        deny:
-          - rerun the same failing command without analysis
-          - continue source edits without evidence
-      commands:
-        complete_step: deny
-      handoff:
-        human_stop: deny
-        deny_message: Current stage does not allow human intervention; continue advancing the task.
-    transitions:
-      to:
-        - RED_TEST
-        - GREEN_IMPL
-        - VERIFY
-        - NEEDS_HUMAN
-      enter_when: []
-    evidence:
-      required:
-        - path: .agent/artifacts/failure-analysis.md
-          matches: '^## Failure Summary'
-          message: failure-analysis.md must start with the Failure Summary section.
+        - inspect logs
+        - write failure-analysis.md
+        - identify minimal fix and next verification command
+      stop: false
+      human: false
+    deny:
+      write: []
+      actions:
+        - rerun the same failing command without analysis
+        - continue source edits without evidence
+    complete_step: deny
+    enter: []
+    exit:
+      - path: .agent/artifacts/failure-analysis.md
+        matches: '^## Failure Summary'
+        message: failure-analysis.md must start with the Failure Summary section.
+    expect: []
+    next:
+      - RED_TEST
+      - GREEN_IMPL
+      - VERIFY
+      - NEEDS_HUMAN
 
   NEEDS_HUMAN:
-    intent:
-      goal: Escalate blocked or risky work for human review.
-    permissions:
+    goal: Escalate blocked or risky work for human review.
+    plan: deny
+    allow:
       write:
-        allow:
-          - .agent/**
-        deny: []
+        - .agent/**
       actions:
-        allow:
-          - report blocker
-          - request approval
-          - pause risky actions
-        deny:
-          - continue sensitive or ambiguous work without approval
-      commands:
-        complete_step: deny
-      handoff:
-        human_stop: allow
-    transitions:
-      to:
-        - CLARIFYING
-        - PLANNING
-      enter_when: []
-    evidence:
-      expected: []
-      required: []
+        - report blocker
+        - request approval
+        - pause risky actions
+      stop: true
+      human: true
+    deny:
+      write: []
+      actions:
+        - continue sensitive or ambiguous work without approval
+    complete_step: deny
+    enter: []
+    exit: []
+    expect: []
+    next:
+      - CLARIFYING
+      - PLANNING
 
   DONE:
-    intent:
-      goal: Task is complete; preserve state and await the next task.
-    permissions:
+    goal: Task is complete; preserve state and await the next task.
+    plan: complete
+    final: true
+    allow:
       write:
-        allow:
-          - .agent/**
-        deny: []
+        - .agent/**
       actions:
-        allow:
-          - report completion evidence
-          - wait for next instruction
-        deny:
-          - resume editing under the completed task
-      commands:
-        complete_step: deny
-      handoff:
-        human_stop: allow
-    transitions:
-      to: []
-      enter_when:
-        - rule: required_command
-          value: mark-done
-          display: use mark-done
-        - rule: can_finalize_passes
-          display: can-finalize must pass
-    evidence:
-      expected: []
-      required: []
+        - report completion evidence
+        - wait for next instruction
+      stop: true
+      human: true
+    deny:
+      write: []
+      actions:
+        - resume editing under the completed task
+    complete_step: deny
+    enter:
+      - rule: required_command
+        value: mark-done
+        display: use mark-done
+      - rule: can_finalize_passes
+        display: can-finalize must pass
+    exit: []
+    expect: []
+    next: []

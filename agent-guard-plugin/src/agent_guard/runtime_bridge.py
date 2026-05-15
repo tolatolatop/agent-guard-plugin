@@ -10,7 +10,13 @@ from typing import Any
 
 from .cli import run_command
 from .state import artifacts_dir, load_state
-from .workflow_spec import stage_forbid_needs_human_display
+from .workflow_spec import (
+    canonical_completion_ready_stage,
+    canonical_expected_failure_stage,
+    canonical_stage_stop_allowed,
+    canonical_verification_stage,
+    stage_forbid_needs_human_display,
+)
 
 
 def _load_stdin_json() -> dict[str, Any]:
@@ -116,9 +122,9 @@ def _extract_exit_code(payload: dict[str, Any]) -> int:
 
 def _log_target_for_command(stage: str | None, exit_code: int) -> str | None:
     """Internal helper for log target for command."""
-    if stage == "VERIFY":
+    if stage == canonical_verification_stage():
         return ".agent/artifacts/final-verification.log"
-    if stage == "RED_TEST" and exit_code != 0:
+    if stage == canonical_expected_failure_stage() and exit_code != 0:
         return ".agent/artifacts/red-test.log"
     if exit_code != 0:
         return ".agent/artifacts/command-failure.log"
@@ -210,12 +216,13 @@ def _handle_stop(cwd: Path) -> None:
         # Stages with forbid_needs_human must keep progressing through the
         # workflow instead of ending the interaction with a final response.
         _fail(f"agent-guard blocked final response: {forbid_display}")
-    if stage in {"IDLE", "CLARIFYING", "DESIGNING", "PLANNING", "NEEDS_HUMAN", "DONE"}:
+    if stage and canonical_stage_stop_allowed(str(stage)):
         raise SystemExit(0)
-    if stage != "READY_TO_SUMMARIZE" and state.get("can_finalize") is not True:
+    ready_stage = canonical_completion_ready_stage()
+    if stage != ready_stage and state.get("can_finalize") is not True:
         _fail(
             "agent-guard blocked final response: "
-            f"stage {stage} is still active. Reach REVIEW completion and READY_TO_SUMMARIZE, or move to an allowed stop stage first."
+            f"stage {stage} is still active. Reach the completion-ready stage {ready_stage}, or move to an allowed stop stage first."
         )
     code, payload = _cli_json(["can-finalize"], cwd)
     if code != 0:

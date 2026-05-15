@@ -72,9 +72,9 @@ class TaskSession:
             "needs_human": self.needs_human,
         }
 
-    def start(self, task_id: str) -> "TaskSession":
+    def start(self, task_id: str, entry_stage: str = "CLARIFYING") -> "TaskSession":
         """Start or resume a task session."""
-        next_stage = "CLARIFYING" if self.stage == "IDLE" else self.stage
+        next_stage = entry_stage if self.stage == "IDLE" else self.stage
         return self.with_updates(task_id=task_id, stage=next_stage)
 
     def with_updates(self, **changes: Any) -> "TaskSession":
@@ -90,7 +90,7 @@ class TaskSession:
         can_finalize: bool = False,
     ) -> "TaskSession":
         """Advance the session to another stage."""
-        next_can_finalize = can_finalize if stage in {"READY_TO_SUMMARIZE", "DONE"} else False
+        next_can_finalize = can_finalize
         next_needs_human = self.needs_human
         if self.stage in {"NEEDS_FAILURE_ANALYSIS", "NEEDS_HUMAN"} and stage != "NEEDS_HUMAN":
             next_needs_human = False
@@ -105,21 +105,21 @@ class TaskSession:
             needs_human=next_needs_human,
         )
 
-    def mark_ready_to_summarize(self) -> "TaskSession":
+    def mark_ready_to_summarize(self, stage: str = "READY_TO_SUMMARIZE") -> "TaskSession":
         """Mark the session ready for final summarization."""
-        return self.advance_to("READY_TO_SUMMARIZE", current_step=None, can_finalize=True)
+        return self.advance_to(stage, current_step=None, can_finalize=True)
 
-    def mark_done(self) -> "TaskSession":
+    def mark_done(self, stage: str = "DONE") -> "TaskSession":
         """Mark the session done."""
-        return self.advance_to("DONE", current_step=None, can_finalize=True)
+        return self.advance_to(stage, current_step=None, can_finalize=True)
 
     def record_verification(self, record: VerificationRecord) -> "TaskSession":
         """Record the latest verification result."""
         return self.with_updates(last_verification=record)
 
-    def enter_failure_analysis(self) -> "TaskSession":
+    def enter_failure_analysis(self, stage: str = "NEEDS_FAILURE_ANALYSIS") -> "TaskSession":
         """Escalate the session into failure analysis."""
-        return self.advance_to("NEEDS_FAILURE_ANALYSIS", current_step=self.current_step, can_finalize=False)
+        return self.advance_to(stage, current_step=self.current_step, can_finalize=False)
 
     def enter_needs_human(self) -> "TaskSession":
         """Escalate the session for human review."""

@@ -10,6 +10,7 @@ from ..infrastructure.repositories import StateRepository
 from ..path_policy import stage_rule_for
 from ..runtime_adapter import get_next_step, get_session_reminder
 from ..state import AGENT_DIR, ensure_agent_files
+from ..workflow_spec import canonical_entry_stage
 
 
 def initialize_workspace(root_dir: Path) -> dict[str, Any]:
@@ -23,7 +24,7 @@ def start_task(root_dir: Path, task_id: str) -> dict[str, Any]:
     ensure_agent_files(root_dir)
     repo = StateRepository(root_dir)
     session = repo.load()
-    updated = repo.save(session.start(task_id))
+    updated = repo.save(session.start(task_id, entry_stage=canonical_entry_stage()))
     return {"ok": True, "state": updated.to_mapping()}
 
 

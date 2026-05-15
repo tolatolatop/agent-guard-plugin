@@ -23,6 +23,7 @@ from .state import (
     save_state,
     state_path,
 )
+from .workflow_spec import canonical_completion_ready_stage, canonical_completion_stage, canonical_entry_stage
 
 
 def _slugify(value: str) -> str:
@@ -73,9 +74,9 @@ def latest_archive(root_dir: Path) -> dict[str, Any] | None:
 
 def _is_resettable_state(state: dict[str, Any]) -> bool:
     """Internal helper for is resettable state."""
-    if state.get("stage") == "DONE":
+    if state.get("stage") == canonical_completion_stage():
         return True
-    return state.get("stage") == "READY_TO_SUMMARIZE" and state.get("can_finalize") is True
+    return state.get("stage") == canonical_completion_ready_stage() and state.get("can_finalize") is True
 
 
 def _snapshot_state(root_dir: Path) -> dict[str, Any]:
@@ -148,7 +149,7 @@ def _reset_runtime_files(root_dir: Path, new_task_id: str) -> dict[str, Any]:
     new_state = {
         **DEFAULT_STATE,
         "task_id": new_task_id,
-        "stage": "CLARIFYING",
+        "stage": canonical_entry_stage(),
     }
     save_state(root_dir, new_state)
     return new_state
@@ -161,7 +162,8 @@ def reset_task(root_dir: Path, new_task_id: str) -> dict[str, Any]:
     if not _is_resettable_state(state):
         raise RuntimeError(
             "reset-task is only allowed when the current task is complete. "
-            "Move the state to DONE or READY_TO_SUMMARIZE with can_finalize=true first."
+            f"Move the state to {canonical_completion_stage()} or "
+            f"{canonical_completion_ready_stage()} with can_finalize=true first."
         )
 
     archive_result = archive_current_task(root_dir)

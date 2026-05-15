@@ -4,6 +4,12 @@ from pathlib import Path
 import yaml
 
 from agent_guard.workflow_spec import (
+    canonical_completion_ready_stage,
+    canonical_completion_stage,
+    canonical_entry_stage,
+    canonical_stage_plan_mode,
+    canonical_stage_spec,
+    canonical_workflow_spec,
     failure_policy,
     finalization_policy,
     install_defaults,
@@ -269,6 +275,39 @@ def test_grouped_workflow_example_file_normalizes_and_validates() -> None:
     assert normalized["metadata"]["id"] == "standard-ddd-example"
     assert normalized["stages"]["REVIEW"]["artifacts_required"] == [{"path": ".agent/artifacts/review.md"}]
     assert normalized["stages"]["READY_TO_SUMMARIZE"]["allowed_next_stages"] == ["DONE"]
+
+
+def test_canonical_workflow_projects_legacy_grouped_dsl() -> None:
+    """Test that the legacy grouped workflow is projected into the canonical Phase 1 model."""
+    workflow = canonical_workflow_spec()
+
+    assert workflow["workflow"]["entry"] == "CLARIFYING"
+    assert workflow["globals"]["finalize"]["require"] == [
+        {"rule": "no_running_jobs"},
+        {"rule": "successful_last_verification"},
+        {"rule": "can_finalize_flag"},
+        {"rule": "all_plan_steps_terminal"},
+    ]
+    assert workflow["stages"]["PLANNING"]["plan"] == "create"
+    assert workflow["stages"]["GREEN_IMPL"]["plan"] == "follow"
+    assert workflow["stages"]["READY_TO_SUMMARIZE"]["plan"] == "complete"
+    assert workflow["stages"]["PLANNING"]["exit"] == [".agent/plan.yaml"]
+    assert workflow["stages"]["NEEDS_FAILURE_ANALYSIS"]["exit"] == [
+        {
+            "path": ".agent/artifacts/failure-analysis.md",
+            "matches": "^## Failure Summary",
+            "message": "failure-analysis.md must start with the Failure Summary section.",
+        }
+    ]
+
+
+def test_canonical_helpers_resolve_legacy_completion_and_entry_stages() -> None:
+    """Test that canonical helper APIs preserve the legacy workflow behavior."""
+    assert canonical_entry_stage() == "CLARIFYING"
+    assert canonical_completion_ready_stage() == "READY_TO_SUMMARIZE"
+    assert canonical_completion_stage() == "DONE"
+    assert canonical_stage_plan_mode("VERIFY") == "follow"
+    assert canonical_stage_spec("DONE")["final"] is True
 
 
 def test_load_workflow_spec_reports_friendly_message_for_invalid_yaml(monkeypatch, tmp_path: Path) -> None:

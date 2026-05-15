@@ -11,7 +11,15 @@ from .models import FailureRecord, GuardDecision, TaskSession, VerificationRecor
 from .rules import RuleContext, evaluate_rule
 from ..events import append_event
 from ..infrastructure.repositories import FailuresRepository, JobsRepository, StateRepository
-from ..workflow_spec import failure_policy, finalization_policy, path_policy, stage_required_artifact_rules
+from ..workflow_spec import (
+    canonical_expected_failure_stage,
+    canonical_failure_analysis_stage,
+    canonical_verification_stage,
+    failure_policy,
+    finalization_policy,
+    path_policy,
+    stage_required_artifact_rules,
+)
 
 
 def normalize_path(target_path: str) -> str:
@@ -137,9 +145,6 @@ class StageExitPolicyService:
 class FailurePolicyService:
     """Policy service for command recording and failure-loop detection."""
 
-    EXPECTED_FAILURE_STAGE = "RED_TEST"
-    ANALYSIS_STAGE = "NEEDS_FAILURE_ANALYSIS"
-
     def __init__(self, root_dir: Path):
         self.root_dir = root_dir
         self.state_repo = StateRepository(root_dir)
@@ -190,11 +195,14 @@ class FailurePolicyService:
             )
         self.failures_repo.save(failure)
 
-        expected_red_failure = session.stage == self.EXPECTED_FAILURE_STAGE and exit_code != 0
+        expected_failure_stage = canonical_expected_failure_stage()
+        analysis_stage = canonical_failure_analysis_stage()
+        verification_stage = canonical_verification_stage()
+        expected_red_failure = session.stage == expected_failure_stage and exit_code != 0
         next_session = session
-        if exit_code != 0 and not expected_red_failure:
-            next_session = next_session.enter_failure_analysis()
-        if session.stage == "VERIFY":
+        if exit_code != 0 and not expected_red_failure and analysis_stage:
+            next_session = next_session.enter_failure_analysis(analysis_stage)
+        if verification_stage and session.stage == verification_stage:
             next_session = next_session.record_verification(
                 VerificationRecord(
                     command=command,
