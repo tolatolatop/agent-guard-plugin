@@ -66,28 +66,48 @@ DONE
   -> reset-task / next-task only
 ```
 
-Use these commands for mainline progression:
+## Command Manual
 
-- `agent-guard complete-step <step-id> --next-stage <stage> [--next-step <step-id>]`
+Use only these workflow commands during normal stage progression:
+
+- `agent-guard start-task <task-id>`
+  Starts a new task and moves `IDLE` into `CLARIFYING`.
+- `agent-guard status`
+  Shows the current task, stage, step, and plan summary.
+- `agent-guard session-start`
+  Shows the current workflow reminder before continuing work.
+- `agent-guard next-step`
+  Shows the next step derived from state and plan.
 - `agent-guard advance-stage --to <stage> [--step <step-id>]`
+  Moves to another stage without marking a plan step complete.
+- `agent-guard complete-step <step-id> --next-stage <stage> [--next-step <step-id>]`
+  Marks the current workflow step complete and advances to the next stage.
 - `agent-guard ready-to-summarize`
+  Moves `VERIFY` into `READY_TO_SUMMARIZE` when verification is complete.
 - `agent-guard mark-done`
+  Moves `READY_TO_SUMMARIZE` into `DONE`.
 
-Transition rules:
+Use them like this:
 
-- Prefer `complete-step` whenever a real workflow step finished and the corresponding `plan.yaml` step should be marked `done`.
-- Use `advance-stage` for stage-only moves such as `CLARIFYING -> PLANNING` or when re-entering execution with the same step context.
-- `PLANNING -> RED_TEST` or `PLANNING -> GREEN_IMPL` uses static stage write permissions; it does not accept runtime scope overrides.
-- `GREEN_IMPL` must pass through `REVIEW` before entering `VERIFY`; direct `GREEN_IMPL -> VERIFY` is not allowed.
+- Use `start-task` once at task start.
+- Use `status`, `session-start`, and `next-step` to rehydrate workflow context before acting.
+- Prefer `complete-step` when a real planned step finished.
+- Use `advance-stage` for stage-only moves such as `CLARIFYING -> PLANNING` or `REVIEW -> GREEN_IMPL`.
+- Use `ready-to-summarize` only after `VERIFY` is satisfied.
+- Use `mark-done` only from `READY_TO_SUMMARIZE`.
+
+## Transition Rules
+
+- `PLANNING -> RED_TEST` or `PLANNING -> GREEN_IMPL` requires `.agent/plan.yaml`.
+- `GREEN_IMPL` must pass through `REVIEW` before entering `VERIFY`.
 - `REVIEW -> VERIFY` requires `.agent/artifacts/review.md`.
-- `VERIFY -> READY_TO_SUMMARIZE` requires successful `last_verification`, no running jobs, and the explicit `ready-to-summarize` command.
-- `VERIFY` may return directly to `RED_TEST` or `GREEN_IMPL` when more test or implementation work is needed.
-- `READY_TO_SUMMARIZE -> DONE` is only legal through `mark-done`, which internally requires `agent-guard can-finalize` to pass.
+- `VERIFY -> READY_TO_SUMMARIZE` requires the explicit `ready-to-summarize` command.
+- `VERIFY` may return to `RED_TEST`, `GREEN_IMPL`, or `NEEDS_FAILURE_ANALYSIS`.
 - `NEEDS_FAILURE_ANALYSIS` cannot exit until `.agent/artifacts/failure-analysis.md` exists.
+- `READY_TO_SUMMARIZE -> DONE` is only legal through `mark-done`.
 
-Global workflow gates:
+## Workflow Discipline
 
-- Respect the current stage permissions, especially write boundaries and required evidence.
-- When adding an artifact, state the allowed modification scope or directory up front.
-- Do not retry identical failures without analysis.
-- Do not finalize without passing `can-finalize`.
+- Respect the current stage permissions and required evidence.
+- Do not skip intermediate stages in the state machine.
+- Do not leave a stage without producing its required artifacts.
