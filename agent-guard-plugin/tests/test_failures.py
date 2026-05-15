@@ -1,6 +1,7 @@
 """Tests for test failures."""
 from pathlib import Path
 
+from agent_guard.domain.models import TaskSession
 from agent_guard.failures import check_failure_loop, record_command_result
 from agent_guard.state import load_state
 
@@ -58,3 +59,18 @@ def test_success_command_without_log_only_records_event() -> None:
 
     assert result["failure"] is None
     assert "log_path" not in result["event"]
+
+
+def test_task_session_advance_clears_needs_human_after_escalation_stage() -> None:
+    """Test that advancing from an escalation stage clears needs_human."""
+    session = TaskSession(
+        task_id="password-reset",
+        stage="NEEDS_HUMAN",
+        current_step="green-001",
+        needs_human=True,
+    )
+
+    next_session = session.advance_to("GREEN_IMPL", current_step="green-001")
+
+    assert next_session.stage == "GREEN_IMPL"
+    assert next_session.needs_human is False

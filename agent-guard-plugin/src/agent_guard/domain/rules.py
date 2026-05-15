@@ -61,10 +61,6 @@ def _failure_analysis_present(context: RuleContext, value: Any | None) -> bool:
     return (context.root_dir / target).exists()
 
 
-def _remaining_steps_empty(context: RuleContext, value: Any | None) -> bool:
-    return not context.session.remaining_steps
-
-
 def _can_finalize_flag(context: RuleContext, value: Any | None) -> bool:
     return context.session.can_finalize is True
 
@@ -84,7 +80,6 @@ RULE_EVALUATORS: dict[str, RuleEvaluator] = {
     "review_artifact_present": _review_artifact_present,
     "required_artifact_exists": _required_artifact_exists,
     "failure_analysis_present": _failure_analysis_present,
-    "remaining_steps_empty": _remaining_steps_empty,
     "can_finalize_flag": _can_finalize_flag,
     "can_finalize_passes": _can_finalize_passes,
 }

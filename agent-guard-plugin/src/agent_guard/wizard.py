@@ -44,15 +44,12 @@ def run_wizard(root_dir: Path, input_stream: TextIO, output: TextIO) -> dict[str
     current_step = prompt_text("Current step id", input_stream, output, default="")
     create_plan = confirm_action("Create or replace .agent/plan.yaml?", input_stream, output)
 
-    remaining_steps = [current_step] if current_step else []
     state = save_state(
         root_dir,
         {
             "task_id": task_id,
             "stage": stage,
             "current_step": current_step or None,
-            "completed_steps": [],
-            "remaining_steps": remaining_steps,
             "can_finalize": False,
             "last_verification": None,
             "needs_human": False,

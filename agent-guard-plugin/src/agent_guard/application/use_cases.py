@@ -23,8 +23,7 @@ def start_task(root_dir: Path, task_id: str) -> dict[str, Any]:
     ensure_agent_files(root_dir)
     repo = StateRepository(root_dir)
     session = repo.load()
-    next_stage = "CLARIFYING" if session.stage == "IDLE" else session.stage
-    updated = repo.save(session.with_updates(task_id=task_id, stage=next_stage))
+    updated = repo.save(session.start(task_id))
     return {"ok": True, "state": updated.to_mapping()}
 
 

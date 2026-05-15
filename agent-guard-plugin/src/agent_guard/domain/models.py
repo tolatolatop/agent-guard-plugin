@@ -45,8 +45,6 @@ class TaskSession:
     task_id: str | None
     stage: str
     current_step: str | None
-    completed_steps: list[str] = field(default_factory=list)
-    remaining_steps: list[str] = field(default_factory=list)
     can_finalize: bool = False
     last_verification: VerificationRecord | None = None
     needs_human: bool = False
@@ -58,8 +56,6 @@ class TaskSession:
             task_id=str(payload["task_id"]) if payload.get("task_id") is not None else None,
             stage=str(payload["stage"]),
             current_step=str(payload["current_step"]) if payload.get("current_step") is not None else None,
-            completed_steps=[str(item) for item in payload.get("completed_steps", [])],
-            remaining_steps=[str(item) for item in payload.get("remaining_steps", [])],
             can_finalize=bool(payload.get("can_finalize", False)),
             last_verification=VerificationRecord.from_mapping(payload.get("last_verification")),
             needs_human=bool(payload.get("needs_human", False)),
@@ -71,18 +67,63 @@ class TaskSession:
             "task_id": self.task_id,
             "stage": self.stage,
             "current_step": self.current_step,
-            "completed_steps": list(self.completed_steps),
-            "remaining_steps": list(self.remaining_steps),
             "can_finalize": self.can_finalize,
             "last_verification": self.last_verification.to_mapping() if self.last_verification else None,
             "needs_human": self.needs_human,
         }
+
+    def start(self, task_id: str) -> "TaskSession":
+        """Start or resume a task session."""
+        next_stage = "CLARIFYING" if self.stage == "IDLE" else self.stage
+        return self.with_updates(task_id=task_id, stage=next_stage)
 
     def with_updates(self, **changes: Any) -> "TaskSession":
         """Return a copy with selected updates."""
         payload = self.to_mapping()
         payload.update(changes)
         return TaskSession.from_mapping(payload)
+
+    def advance_to(
+        self,
+        stage: str,
+        current_step: str | None = None,
+        can_finalize: bool = False,
+    ) -> "TaskSession":
+        """Advance the session to another stage."""
+        next_can_finalize = can_finalize if stage in {"READY_TO_SUMMARIZE", "DONE"} else False
+        next_needs_human = self.needs_human
+        if self.stage in {"NEEDS_FAILURE_ANALYSIS", "NEEDS_HUMAN"} and stage != "NEEDS_HUMAN":
+            next_needs_human = False
+        if stage == "NEEDS_HUMAN":
+            next_needs_human = True
+        return TaskSession(
+            task_id=self.task_id,
+            stage=stage,
+            current_step=current_step,
+            can_finalize=next_can_finalize,
+            last_verification=self.last_verification,
+            needs_human=next_needs_human,
+        )
+
+    def mark_ready_to_summarize(self) -> "TaskSession":
+        """Mark the session ready for final summarization."""
+        return self.advance_to("READY_TO_SUMMARIZE", current_step=None, can_finalize=True)
+
+    def mark_done(self) -> "TaskSession":
+        """Mark the session done."""
+        return self.advance_to("DONE", current_step=None, can_finalize=True)
+
+    def record_verification(self, record: VerificationRecord) -> "TaskSession":
+        """Record the latest verification result."""
+        return self.with_updates(last_verification=record)
+
+    def enter_failure_analysis(self) -> "TaskSession":
+        """Escalate the session into failure analysis."""
+        return self.advance_to("NEEDS_FAILURE_ANALYSIS", current_step=self.current_step, can_finalize=False)
+
+    def enter_needs_human(self) -> "TaskSession":
+        """Escalate the session for human review."""
+        return self.advance_to("NEEDS_HUMAN", current_step=self.current_step, can_finalize=False)
 
     @property
     def has_active_task(self) -> bool:

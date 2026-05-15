@@ -46,8 +46,8 @@ def test_advance_stage_allows_legal_transition_and_blocks_illegal_transition() -
         raise AssertionError("Expected illegal transition to fail")
 
 
-def test_complete_step_clears_legacy_dynamic_scope_for_next_execution_step() -> None:
-    """Test that complete step clears legacy dynamic scope for next execution step."""
+def test_complete_step_updates_current_step_for_next_execution_step() -> None:
+    """Test that complete step updates current step for next execution step."""
     root_dir = make_temp_repo()
     (root_dir / ".agent" / "plan.yaml").write_text(
         "task_id: password-reset\n"
@@ -65,8 +65,6 @@ def test_complete_step_clears_legacy_dynamic_scope_for_next_execution_step() -> 
         task_id="password-reset",
         stage="RED_TEST",
         current_step="red-001",
-        completed_steps=[],
-        remaining_steps=["red-001", "green-001"],
     )
 
     result = complete_step(
@@ -76,8 +74,6 @@ def test_complete_step_clears_legacy_dynamic_scope_for_next_execution_step() -> 
     )
 
     state = result["state"]
-    assert state["completed_steps"] == []
-    assert state["remaining_steps"] == []
     assert state["current_step"] == "green-001"
     assert state["stage"] == "RED_TEST"
     assert plan_steps(root_dir)[0]["status"] == "done"
@@ -116,7 +112,7 @@ def test_planning_cannot_exit_without_updated_plan_yaml() -> None:
 def test_ready_to_summarize_is_blocked_without_successful_verification() -> None:
     """Test that ready to summarize is blocked without successful verification."""
     root_dir = make_temp_repo()
-    write_state(root_dir, task_id="password-reset", stage="VERIFY", remaining_steps=[])
+    write_state(root_dir, task_id="password-reset", stage="VERIFY")
 
     try:
         ready_to_summarize(root_dir)
@@ -189,7 +185,6 @@ def test_mark_done_is_blocked_when_plan_has_nonterminal_steps() -> None:
         task_id="password-reset",
         stage="READY_TO_SUMMARIZE",
         can_finalize=True,
-        remaining_steps=[],
         last_verification={
             "command": "pytest",
             "exit_code": 0,
@@ -214,7 +209,6 @@ def test_needs_failure_analysis_cannot_exit_without_artifact() -> None:
         task_id="password-reset",
         stage="NEEDS_FAILURE_ANALYSIS",
         current_step="green-001",
-        remaining_steps=["green-001"],
     )
 
     try:
@@ -235,7 +229,6 @@ def test_review_artifact_must_be_updated_after_entering_review() -> None:
         task_id="password-reset",
         stage="GREEN_IMPL",
         current_step="green-001",
-        remaining_steps=["green-001"],
     )
 
     advance_stage(root_dir, "REVIEW")
@@ -289,8 +282,6 @@ def test_green_impl_cannot_advance_directly_to_verify() -> None:
         task_id="password-reset",
         stage="GREEN_IMPL",
         current_step="green-001",
-        completed_steps=["red-001"],
-        remaining_steps=["green-001"],
     )
 
     try:
@@ -371,7 +362,6 @@ def test_cli_representative_flow_from_start_to_done() -> None:
             **load_state(root_dir),
             "stage": "VERIFY",
             "current_step": None,
-            "remaining_steps": [],
             "last_verification": {
                 "command": "pytest",
                 "exit_code": 0,

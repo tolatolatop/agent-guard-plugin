@@ -11,7 +11,7 @@ from .models import FailureRecord, GuardDecision, TaskSession, VerificationRecor
 from .rules import RuleContext, evaluate_rule
 from ..events import append_event
 from ..infrastructure.repositories import FailuresRepository, JobsRepository, StateRepository
-from ..workflow_spec import failure_policy, finalization_policy, path_policy
+from ..workflow_spec import failure_policy, finalization_policy, path_policy, stage_required_artifact_rules
 
 
 def normalize_path(target_path: str) -> str:
@@ -88,6 +88,52 @@ class WorkflowPolicyService:
         return GuardDecision("block", f"Path {normalized} is not writable during {session.stage}.")
 
 
+class StageExitPolicyService:
+    """Policy service for required-artifact exit gating."""
+
+    def __init__(self, root_dir: Path):
+        self.root_dir = root_dir
+
+    def _artifact_mtime_ns(self, artifact_path: str) -> int | None:
+        candidate = self.root_dir / artifact_path
+        if not candidate.exists():
+            return None
+        return int(candidate.stat().st_mtime_ns)
+
+    def exit_failures(self, stage: str) -> list[str]:
+        """Return required-artifact exit failures for one stage."""
+        from ..state import ensure_stage_artifact_snapshot, load_stage_artifact_snapshot
+
+        required_rules = stage_required_artifact_rules(stage)
+        if not required_rules:
+            return []
+
+        ensure_stage_artifact_snapshot(self.root_dir, stage)
+        snapshot = load_stage_artifact_snapshot(self.root_dir)
+        entered_at = snapshot.get("entered_at") or "the current stage"
+        recorded = snapshot.get("artifacts", {})
+        failures: list[str] = []
+        for rule in required_rules:
+            artifact_path = rule["path"]
+            current_mtime = self._artifact_mtime_ns(artifact_path)
+            previous_mtime = None
+            details = recorded.get(artifact_path)
+            if isinstance(details, dict):
+                previous_mtime = details.get("mtime_ns")
+            if current_mtime is None:
+                failures.append(f"{artifact_path} must exist and be updated after entering {stage} at {entered_at}.")
+                continue
+            if previous_mtime is not None and int(current_mtime) <= int(previous_mtime):
+                failures.append(f"{artifact_path} must be updated after entering {stage} at {entered_at}.")
+                continue
+            matches = rule.get("matches")
+            if matches:
+                contents = (self.root_dir / artifact_path).read_text(encoding="utf-8")
+                if re.search(matches, contents, re.MULTILINE) is None:
+                    failures.append(rule.get("message") or f"{artifact_path} does not match the required format.")
+        return failures
+
+
 class FailurePolicyService:
     """Policy service for command recording and failure-loop detection."""
 
@@ -147,10 +193,10 @@ class FailurePolicyService:
         expected_red_failure = session.stage == self.EXPECTED_FAILURE_STAGE and exit_code != 0
         next_session = session
         if exit_code != 0 and not expected_red_failure:
-            next_session = next_session.with_updates(stage=self.ANALYSIS_STAGE)
+            next_session = next_session.enter_failure_analysis()
         if session.stage == "VERIFY":
-            next_session = next_session.with_updates(
-                last_verification=VerificationRecord(
+            next_session = next_session.record_verification(
+                VerificationRecord(
                     command=command,
                     exit_code=exit_code,
                     log_path=log_path,

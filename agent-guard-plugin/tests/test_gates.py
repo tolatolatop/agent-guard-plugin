@@ -7,7 +7,7 @@ from .helpers import make_temp_repo, write_state
 def test_finalization_is_blocked_when_verification_is_missing() -> None:
     """Test that finalization is blocked when verification is missing."""
     root_dir = make_temp_repo()
-    write_state(root_dir, remaining_steps=[], can_finalize=True)
+    write_state(root_dir, can_finalize=True)
 
     result = can_finalize(root_dir)
     assert result["decision"] == "block"
@@ -19,7 +19,6 @@ def test_finalization_is_blocked_when_plan_is_missing() -> None:
     root_dir = make_temp_repo()
     write_state(
         root_dir,
-        remaining_steps=[],
         can_finalize=True,
         last_verification={
             "command": "pytest",
@@ -50,7 +49,6 @@ def test_finalization_is_blocked_when_plan_has_nonterminal_steps() -> None:
     )
     write_state(
         root_dir,
-        remaining_steps=[],
         can_finalize=True,
         last_verification={
             "command": "pytest",
@@ -83,7 +81,6 @@ def test_finalization_allows_plan_when_all_steps_are_done_or_failed() -> None:
     )
     write_state(
         root_dir,
-        remaining_steps=[],
         can_finalize=True,
         last_verification={
             "command": "pytest",

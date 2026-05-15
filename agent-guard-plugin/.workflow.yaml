@@ -46,14 +46,12 @@ globals:
   finalization:
     # Built-in rule names evaluated by the rule registry in code.
     require:
-      - remaining_steps_empty
       - no_running_jobs
       - successful_last_verification
       - can_finalize_flag
       - all_plan_steps_terminal
     # User-facing messages emitted when a required rule fails.
     messages:
-      remaining_steps_empty: remaining_steps must be empty
       no_running_jobs: running jobs still exist
       successful_last_verification: last_verification.exit_code must be 0
       can_finalize_flag: state.can_finalize is not true

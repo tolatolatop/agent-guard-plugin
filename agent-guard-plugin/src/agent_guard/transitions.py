@@ -5,12 +5,13 @@ from pathlib import Path
 from typing import Any
 
 from .domain.models import TaskSession
+from .domain.policies import StageExitPolicyService
 from .domain.rules import RuleContext, evaluate_rule
 from .events import append_event
 from .gates import can_finalize
 from .jobs import load_jobs
 from .plan import plan_step_entities, update_plan_step_status
-from .state import AGENT_DIR, load_state, required_artifact_exit_failures, save_state
+from .state import AGENT_DIR, load_task_session, save_task_session
 from .workflow_spec import (
     complete_step_allowed_from_stages,
     stage_entry_conditions,
@@ -68,7 +69,7 @@ def _guard_transition(
     """Internal helper for guard transition."""
     from_stage = str(state.get("stage"))
     _require_direct_transition(from_stage, to_stage)
-    artifact_failures = required_artifact_exit_failures(root_dir, from_stage)
+    artifact_failures = StageExitPolicyService(root_dir).exit_failures(from_stage)
     if artifact_failures:
         raise RuntimeError(f"Leaving {from_stage} requires {'; '.join(artifact_failures)}")
 
@@ -87,34 +88,12 @@ def _guard_transition(
             raise RuntimeError(display)
 
 
-def _next_state_common(
-    state: dict[str, Any],
-    to_stage: str,
-    current_step: str | None,
-    can_finalize_value: bool,
-) -> dict[str, Any]:
-    """Internal helper for next state common."""
-    next_state = dict(state)
-    next_state["stage"] = to_stage
-    next_state["current_step"] = current_step
-    next_state["can_finalize"] = can_finalize_value
-    # needs_human is sticky only inside escalation stages; any normal workflow
-    # stage clears it so the task can continue under agent control again.
-    if state.get("stage") in {"NEEDS_FAILURE_ANALYSIS", "NEEDS_HUMAN"} and to_stage != "NEEDS_HUMAN":
-        next_state["needs_human"] = False
-    if to_stage == "NEEDS_HUMAN":
-        next_state["needs_human"] = True
-    elif to_stage != "READY_TO_SUMMARIZE":
-        next_state["can_finalize"] = False
-    return next_state
-
-
 def _append_transition_event(
     root_dir: Path,
     command_name: str,
     from_stage: str,
     to_stage: str,
-    state: dict[str, Any],
+    session: TaskSession,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Internal helper for append transition event."""
@@ -123,7 +102,7 @@ def _append_transition_event(
         "command": command_name,
         "from_stage": from_stage,
         "to_stage": to_stage,
-        "current_step": state.get("current_step"),
+        "current_step": session.current_step,
     }
     if extra:
         payload.update(extra)
@@ -146,23 +125,22 @@ def advance_stage(
     step_id: str | None = None,
 ) -> dict[str, Any]:
     """Advance stage."""
-    state = load_state(root_dir)
-    _guard_transition(root_dir, state, to_stage, "advance-stage", step_id)
+    session = load_task_session(root_dir)
+    _guard_transition(root_dir, session.to_mapping(), to_stage, "advance-stage", step_id)
 
-    resolved_step = step_id or state.get("current_step")
-    from_stage = str(state.get("stage"))
-    next_state = _next_state_common(
-        state,
+    resolved_step = step_id or session.current_step
+    from_stage = session.stage
+    next_session = session.advance_to(
         to_stage,
-        str(resolved_step) if resolved_step else None,
-        can_finalize_value=False,
+        current_step=str(resolved_step) if resolved_step else None,
+        can_finalize=False,
     )
-    save_state(root_dir, next_state)
-    event = _append_transition_event(root_dir, "advance-stage", from_stage, to_stage, next_state, {"step": resolved_step})
+    save_task_session(root_dir, next_session)
+    event = _append_transition_event(root_dir, "advance-stage", from_stage, to_stage, next_session, {"step": resolved_step})
     return {
         "goal": stage_intent(to_stage)["goal"],
         "step_goal": _plan_step_goal(root_dir, str(resolved_step) if resolved_step else None),
-        "state": next_state,
+        "state": next_session.to_mapping(),
         "event": event,
     }
 
@@ -173,61 +151,52 @@ def complete_step(
     next_step_id: str | None = None,
 ) -> dict[str, Any]:
     """Complete step."""
-    state = load_state(root_dir)
-    current_stage = str(state.get("stage"))
+    session = load_task_session(root_dir)
+    current_stage = session.stage
     if current_stage not in set(complete_step_allowed_from_stages()):
         raise RuntimeError(f"complete-step is not allowed from stage {current_stage}.")
     update_plan_step_status(root_dir, step_id, "done")
 
-    next_state = _next_state_common(
-        state,
+    next_session = session.advance_to(
         current_stage,
-        next_step_id,
-        can_finalize_value=False,
+        current_step=next_step_id,
+        can_finalize=False,
     )
-    next_state["completed_steps"] = []
-    next_state["remaining_steps"] = []
-
-    save_state(root_dir, next_state)
+    save_task_session(root_dir, next_session)
     event = _append_transition_event(
         root_dir,
         "complete-step",
         current_stage,
         current_stage,
-        next_state,
+        next_session,
         {"completed_step": step_id, "next_step": next_step_id},
     )
     return {
         "goal": stage_intent(current_stage)["goal"],
         "completed_step_goal": _plan_step_goal(root_dir, step_id),
         "next_step_goal": _plan_step_goal(root_dir, next_step_id),
-        "state": next_state,
+        "state": next_session.to_mapping(),
         "event": event,
     }
 
 
 def ready_to_summarize(root_dir: Path) -> dict[str, Any]:
     """Move workflow state so it is ready to summarize."""
-    state = load_state(root_dir)
-    from_stage = str(state.get("stage"))
-    _guard_transition(root_dir, state, "READY_TO_SUMMARIZE", "ready-to-summarize", None)
-    next_state = _next_state_common(
-        state,
-        "READY_TO_SUMMARIZE",
-        None,
-        can_finalize_value=True,
-    )
-    save_state(root_dir, next_state)
-    event = _append_transition_event(root_dir, "ready-to-summarize", from_stage, "READY_TO_SUMMARIZE", next_state)
-    return {"state": next_state, "event": event}
+    session = load_task_session(root_dir)
+    from_stage = session.stage
+    _guard_transition(root_dir, session.to_mapping(), "READY_TO_SUMMARIZE", "ready-to-summarize", None)
+    next_session = session.mark_ready_to_summarize()
+    save_task_session(root_dir, next_session)
+    event = _append_transition_event(root_dir, "ready-to-summarize", from_stage, "READY_TO_SUMMARIZE", next_session)
+    return {"state": next_session.to_mapping(), "event": event}
 
 
 def mark_done(root_dir: Path) -> dict[str, Any]:
     """Mark done."""
-    state = load_state(root_dir)
-    from_stage = str(state.get("stage"))
-    _guard_transition(root_dir, state, "DONE", "mark-done", None)
-    next_state = _next_state_common(state, "DONE", None, can_finalize_value=True)
-    save_state(root_dir, next_state)
-    event = _append_transition_event(root_dir, "mark-done", from_stage, "DONE", next_state)
-    return {"state": next_state, "event": event}
+    session = load_task_session(root_dir)
+    from_stage = session.stage
+    _guard_transition(root_dir, session.to_mapping(), "DONE", "mark-done", None)
+    next_session = session.mark_done()
+    save_task_session(root_dir, next_session)
+    event = _append_transition_event(root_dir, "mark-done", from_stage, "DONE", next_session)
+    return {"state": next_session.to_mapping(), "event": event}

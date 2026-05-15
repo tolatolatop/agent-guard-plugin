@@ -4,7 +4,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-import re
 from typing import Any, Callable
 
 from .domain.models import TaskSession
@@ -16,8 +15,6 @@ DEFAULT_STATE: dict[str, Any] = {
     "task_id": None,
     "stage": "IDLE",
     "current_step": None,
-    "completed_steps": [],
-    "remaining_steps": [],
     "can_finalize": False,
     "last_verification": None,
     "needs_human": False,
@@ -119,39 +116,6 @@ def ensure_stage_artifact_snapshot(root_dir: Path, stage: str) -> dict[str, Any]
     return record_stage_artifact_snapshot(root_dir, stage)
 
 
-def required_artifact_exit_failures(root_dir: Path, stage: str) -> list[str]:
-    """Return required-artifact exit failures for the current stage."""
-    from .workflow_spec import stage_required_artifact_rules
-
-    required_rules = stage_required_artifact_rules(stage)
-    if not required_rules:
-        return []
-
-    snapshot = ensure_stage_artifact_snapshot(root_dir, stage)
-    entered_at = snapshot.get("entered_at") or "the current stage"
-    recorded = snapshot.get("artifacts", {})
-    failures: list[str] = []
-    for rule in required_rules:
-        artifact_path = rule["path"]
-        current_mtime = _artifact_mtime_ns(root_dir, artifact_path)
-        previous_mtime = None
-        details = recorded.get(artifact_path)
-        if isinstance(details, dict):
-            previous_mtime = details.get("mtime_ns")
-        if current_mtime is None:
-            failures.append(f"{artifact_path} must exist and be updated after entering {stage} at {entered_at}.")
-            continue
-        if previous_mtime is not None and int(current_mtime) <= int(previous_mtime):
-            failures.append(f"{artifact_path} must be updated after entering {stage} at {entered_at}.")
-            continue
-        matches = rule.get("matches")
-        if matches:
-            contents = (root_dir / artifact_path).read_text(encoding="utf-8")
-            if re.search(matches, contents, re.MULTILINE) is None:
-                failures.append(rule.get("message") or f"{artifact_path} does not match the required format.")
-    return failures
-
-
 def _write_json_if_missing(file_path: Path, value: dict[str, Any]) -> None:
     """Internal helper for write json if missing."""
     if not file_path.exists():
@@ -191,8 +155,6 @@ def validate_state(state: dict[str, Any]) -> dict[str, Any]:
         "task_id",
         "stage",
         "current_step",
-        "completed_steps",
-        "remaining_steps",
         "can_finalize",
         "last_verification",
         "needs_human",
@@ -200,6 +162,8 @@ def validate_state(state: dict[str, Any]) -> dict[str, Any]:
     for key in required_keys:
         if key not in state:
             raise RuntimeError(f"state.json is missing required key: {key}")
+    state.pop("completed_steps", None)
+    state.pop("remaining_steps", None)
     state.pop("allowed_paths", None)
     state.pop("forbidden_paths", None)
     return state

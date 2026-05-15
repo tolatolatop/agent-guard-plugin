@@ -14,7 +14,6 @@ def test_session_start_includes_meta_skill_and_workflow_context() -> None:
         task_id="password-reset",
         stage="RED_TEST",
         current_step="red-001",
-        remaining_steps=["red-001", "green-001"],
         can_finalize=False,
     )
 

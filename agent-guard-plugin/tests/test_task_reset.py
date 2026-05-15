@@ -29,8 +29,6 @@ def test_reset_task_archives_current_records_and_initializes_new_task() -> None:
         task_id="old-task",
         stage="DONE",
         current_step="verify-001",
-        completed_steps=["red-001", "green-001"],
-        remaining_steps=[],
         can_finalize=True,
         last_verification={
             "command": "pytest",
@@ -53,8 +51,6 @@ def test_reset_task_archives_current_records_and_initializes_new_task() -> None:
     state = load_state(root_dir)
     assert state["task_id"] == "new-task"
     assert state["stage"] == "CLARIFYING"
-    assert state["completed_steps"] == []
-    assert state["remaining_steps"] == []
     assert state["can_finalize"] is False
 
     archive_root = root_dir / AGENT_DIR / "archive"
