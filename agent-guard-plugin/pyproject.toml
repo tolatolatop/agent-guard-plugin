@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-guard-plugin"
-version = "0.2.0"
+version = "0.2.1"
 description = "Minimal runtime guard plugin for coding agents"
 readme = "docs/runtime-install.md"
 requires-python = ">=3.11"

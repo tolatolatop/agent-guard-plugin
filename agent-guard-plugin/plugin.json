@@ -1,6 +1,6 @@
 {
   "name": "agent-guard-plugin",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "entrypoint": "bin/agent-guard",
   "hooks": {
     "session-start": "hooks/session-start.sh",
