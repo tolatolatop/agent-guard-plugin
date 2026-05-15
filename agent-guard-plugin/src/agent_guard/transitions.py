@@ -9,12 +9,13 @@ from .domain.rules import RuleContext, evaluate_rule
 from .events import append_event
 from .gates import can_finalize
 from .jobs import load_jobs
-from .plan import nonterminal_plan_steps, update_plan_step_status
+from .plan import plan_step_entities, update_plan_step_status
 from .state import AGENT_DIR, load_state, required_artifact_exit_failures, save_state
 from .workflow_spec import (
     complete_step_allowed_from_stages,
     stage_entry_conditions,
     stage_exit_conditions,
+    stage_intent,
     stage_transitions,
 )
 
@@ -129,6 +130,16 @@ def _append_transition_event(
     return append_event(root_dir, payload)
 
 
+def _plan_step_goal(root_dir: Path, step_id: str | None) -> str | None:
+    """Return one plan step goal when the step exists."""
+    if not step_id:
+        return None
+    for step in plan_step_entities(root_dir):
+        if step.id == step_id:
+            return step.goal
+    return None
+
+
 def advance_stage(
     root_dir: Path,
     to_stage: str,
@@ -148,13 +159,17 @@ def advance_stage(
     )
     save_state(root_dir, next_state)
     event = _append_transition_event(root_dir, "advance-stage", from_stage, to_stage, next_state, {"step": resolved_step})
-    return {"state": next_state, "event": event}
+    return {
+        "goal": stage_intent(to_stage)["goal"],
+        "step_goal": _plan_step_goal(root_dir, str(resolved_step) if resolved_step else None),
+        "state": next_state,
+        "event": event,
+    }
 
 
 def complete_step(
     root_dir: Path,
     step_id: str,
-    next_stage: str,
     next_step_id: str | None = None,
 ) -> dict[str, Any]:
     """Complete step."""
@@ -162,18 +177,14 @@ def complete_step(
     current_stage = str(state.get("stage"))
     if current_stage not in set(complete_step_allowed_from_stages()):
         raise RuntimeError(f"complete-step is not allowed from stage {current_stage}.")
-    _guard_transition(root_dir, state, next_stage, "complete-step", None)
-    # complete-step is intentionally narrow now: it marks the named plan step
-    # done and leaves stage progression to the explicit next_stage argument.
     update_plan_step_status(root_dir, step_id, "done")
 
     next_state = _next_state_common(
         state,
-        next_stage,
-        None,
-        can_finalize_value=next_stage == "READY_TO_SUMMARIZE",
+        current_stage,
+        next_step_id,
+        can_finalize_value=False,
     )
-    next_state["current_step"] = None
     next_state["completed_steps"] = []
     next_state["remaining_steps"] = []
 
@@ -182,11 +193,17 @@ def complete_step(
         root_dir,
         "complete-step",
         current_stage,
-        next_stage,
+        current_stage,
         next_state,
         {"completed_step": step_id, "next_step": next_step_id},
     )
-    return {"state": next_state, "event": event}
+    return {
+        "goal": stage_intent(current_stage)["goal"],
+        "completed_step_goal": _plan_step_goal(root_dir, step_id),
+        "next_step_goal": _plan_step_goal(root_dir, next_step_id),
+        "state": next_state,
+        "event": event,
+    }
 
 
 def ready_to_summarize(root_dir: Path) -> dict[str, Any]:

@@ -49,8 +49,8 @@ Commands:
                                     Record command execution details.
   advance-stage --to STAGE [--step STEP_ID]
                                     Move the workflow to a new stage.
-  complete-step <step-id> --next-stage STAGE [--next-step STEP_ID]
-                                    Mark the current step complete and advance workflow state.
+  complete-step <step-id> [--next-step STEP_ID]
+                                    Mark the current step complete without advancing workflow stage.
   ready-to-summarize                Mark the workflow as ready for final summarization.
   mark-done                         Mark the workflow as done.
   check-failure-loop                Check whether repeated failures should block progress.
@@ -91,8 +91,8 @@ COMMAND_HELP: dict[str, str] = {
         "Move the workflow to a new stage."
     ),
     "complete-step": (
-        "Usage: agent-guard complete-step <step-id> --next-stage STAGE [--next-step STEP_ID]\n\n"
-        "Mark the current step complete and advance workflow state."
+        "Usage: agent-guard complete-step <step-id> [--next-step STEP_ID]\n\n"
+        "Mark the current step complete without advancing workflow stage."
     ),
     "ready-to-summarize": "Usage: agent-guard ready-to-summarize\n\nMark the workflow as ready for final summarization.",
     "mark-done": "Usage: agent-guard mark-done\n\nMark the workflow as done.",
@@ -229,12 +229,11 @@ def run_command(argv: list[str], cwd: Path) -> int:
         elif command == "complete-step":
             step_id = ensure_path_arg(rest, "step-id")
             flags = parse_flags(rest[1:])
-            if "next-stage" not in flags:
+            if "next-stage" in flags:
                 print_json(
                     {
                         "error": (
-                            "Usage: agent-guard complete-step <step-id> --next-stage <stage> "
-                            "[--next-step <step-id>]"
+                            "Usage: agent-guard complete-step <step-id> [--next-step <step-id>]"
                         )
                     },
                     1,
@@ -242,7 +241,6 @@ def run_command(argv: list[str], cwd: Path) -> int:
             result = complete_step(
                 cwd,
                 step_id,
-                str(flags["next-stage"]),
                 next_step_id=str(flags["next-step"]) if "next-step" in flags else None,
             )
             print_json({"ok": True, **result})

@@ -72,14 +72,14 @@ def test_complete_step_clears_legacy_dynamic_scope_for_next_execution_step() -> 
     result = complete_step(
         root_dir,
         "red-001",
-        "GREEN_IMPL",
         next_step_id="green-001",
     )
 
     state = result["state"]
     assert state["completed_steps"] == []
     assert state["remaining_steps"] == []
-    assert state["current_step"] is None
+    assert state["current_step"] == "green-001"
+    assert state["stage"] == "RED_TEST"
     assert plan_steps(root_dir)[0]["status"] == "done"
 
 
@@ -320,17 +320,17 @@ def test_cli_representative_flow_from_start_to_done() -> None:
         [
             "complete-step",
             "red-001",
-            "--next-stage",
-            "GREEN_IMPL",
             "--next-step",
             "green-001",
         ],
     )[0] == 0
+    assert invoke_cli(root_dir, ["advance-stage", "--to", "GREEN_IMPL", "--step", "green-001"])[0] == 0
 
     code, _ = invoke_cli(root_dir, ["advance-stage", "--to", "REVIEW"])
     assert code == 0
     (root_dir / ".agent" / "artifacts" / "review.md").write_text("# Review\n", encoding="utf-8")
-    assert invoke_cli(root_dir, ["complete-step", "green-001", "--next-stage", "VERIFY"])[0] == 0
+    assert invoke_cli(root_dir, ["complete-step", "green-001"])[0] == 0
+    assert invoke_cli(root_dir, ["advance-stage", "--to", "VERIFY"])[0] == 0
 
     write_state(
         root_dir,

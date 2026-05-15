@@ -1,0 +1,48 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "AGENT_GUARD_SKILLS_DIR=/home/agent/task-gurad/agent-guard-plugin/.agent-guard/skills uv run --project /home/agent/task-gurad/agent-guard-plugin agent-guard-bridge session-start"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "AGENT_GUARD_SKILLS_DIR=/home/agent/task-gurad/agent-guard-plugin/.agent-guard/skills uv run --project /home/agent/task-gurad/agent-guard-plugin agent-guard-bridge pre-dispatch"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "AGENT_GUARD_SKILLS_DIR=/home/agent/task-gurad/agent-guard-plugin/.agent-guard/skills uv run --project /home/agent/task-gurad/agent-guard-plugin agent-guard-bridge post-command"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "AGENT_GUARD_SKILLS_DIR=/home/agent/task-gurad/agent-guard-plugin/.agent-guard/skills uv run --project /home/agent/task-gurad/agent-guard-plugin agent-guard-bridge stop"
+          }
+        ]
+      }
+    ]
+  }
+}
