@@ -24,6 +24,7 @@ Core navigation rules:
 
 - Never skip required stage transitions.
 - Never assume completion from intent alone; rely on artifacts and verification.
+- Use the current stage's `plan` mode to decide whether planning is denied, created, followed, advanced, or being closed out.
 - Prefer the smallest legal next step over broad changes.
 - Treat hard CLI gates as authoritative even if the model believes a shortcut is safe.
 - If the next legal step requires creating or updating an artifact, explicitly state the allowed modification scope or directory before writing it.

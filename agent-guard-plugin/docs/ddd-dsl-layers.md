@@ -72,7 +72,6 @@ Examples:
 
 - current `stage`
 - current `step`
-- `remaining_steps`
 - `last_verification`
 - `needs_human`
 - stage entry timestamps
@@ -99,15 +98,17 @@ This is the static workflow policy document.
 
 It should express:
 
-- stage intent
-- stage permissions
+- stage goal
+- stage plan mode
+- stage allow and deny rules
 - stage transitions
-- stage evidence
+- stage enter and exit gates
+- stage expected and required artifacts
 - global path policy
 - global failure policy
 - global finalization policy
 
-This is where the latest grouped DSL belongs.
+This is where the latest author-facing workflow DSL belongs.
 
 ### Layer B: Session State
 
@@ -168,11 +169,12 @@ The DSL should hold things that are:
 Good DSL candidates:
 
 - stage goal
+- stage plan mode
 - stage write allow and deny patterns
 - legal next stages
-- entry conditions
+- entry and exit conditions
 - required artifacts
-- failure repeat threshold
+- failure threshold
 - fingerprint roots
 - finalization rules
 
@@ -199,7 +201,7 @@ This distinction matters most in software development, because coding agents oft
 
 - can this path be written
 - can this stage transition happen
-- can this step be marked complete
+- does this stage plan mode allow step completion
 - can this task claim completion
 - does this artifact satisfy exit conditions
 
@@ -217,12 +219,12 @@ if the corresponding hard gate does not exist.
 
 Soft prompt:
 
-- `RED_TEST.intent.goal` tells the agent to create a failing test first.
+- `RED_TEST.goal` tells the agent to create a failing test first.
 
 Hard gates:
 
-- `RED_TEST.permissions.write` blocks `src/**`
-- `RED_TEST.transitions.to` prevents illegal stage jumps
+- `RED_TEST.deny.write` blocks `src/**`
+- `RED_TEST.next` prevents illegal stage jumps
 - failure policy tolerates the expected red failure only in implementation code, not in prompt text
 
 State flow:
@@ -234,7 +236,7 @@ State flow:
 
 Soft prompt:
 
-- `REVIEW.intent.goal` says review the diff and capture evidence.
+- `REVIEW.goal` says review the diff and capture evidence.
 
 Hard gates:
 
@@ -251,7 +253,7 @@ State flow:
 
 Soft prompt:
 
-- `VERIFY.intent.goal` encourages running verification commands and recording evidence.
+- `VERIFY.goal` encourages running verification commands and recording evidence.
 
 Hard gates:
 
@@ -261,7 +263,6 @@ Hard gates:
 State flow:
 
 - `last_verification`
-- `remaining_steps`
 - running jobs
 - `can_finalize`
 
@@ -269,7 +270,7 @@ State flow:
 
 Soft prompt:
 
-- `DESIGNING.intent.goal` and `PLANNING.intent.goal` guide early task shaping.
+- `DESIGNING.goal` and `PLANNING.goal` guide early task shaping.
 
 Hard gates:
 
@@ -282,16 +283,16 @@ State flow:
 
 ## Recommended DSL Responsibilities
 
-The grouped stage DSL should be interpreted like this.
+The stage DSL should be interpreted like this.
 
-To make this explicit in code, the workflow normalizer should expose a companion role view that marks each grouped field as:
+To make this explicit in code, the workflow normalizer should expose a companion role view that marks each field as:
 
 - `soft_prompt`
 - `hard_gate`
 - `projection`
 - `mixed`
 
-### `intent`
+### `goal`
 
 Belongs to the soft-prompt layer.
 
@@ -306,24 +307,23 @@ It may later include:
 
 But it should not contain machine-enforced policy.
 
-### `permissions`
+### `allow` and `deny`
 
 Mixed layer:
 
-- `permissions.write` is a hard gate
-- `permissions.commands` is a hard gate
-- `permissions.handoff` is a hard gate
-- `permissions.actions` is mostly soft prompt today
+- `allow.write` and `deny.write` are hard gates
+- `allow.stop` and `allow.human` are hard gates
+- `allow.actions` and `deny.actions` are mostly soft prompt today
 
 This is an important design point.
 Not every field under `permissions` is equally enforceable yet.
 
 Recommended direction:
 
-- keep `actions.allow` and `actions.deny` as guidance
+- keep `allow.actions` and `deny.actions` as guidance
 - avoid pretending they are enforcement unless the runtime actually checks them
 
-### `transitions`
+### `next`, `enter`, and `exit`
 
 Hard gate.
 
@@ -331,15 +331,11 @@ This should remain strictly machine-evaluable:
 
 - legal destinations
 - entry conditions
+- exit conditions
 
-### `evidence`
+### `expect`
 
-Mixed layer with a clear split:
-
-- `required` is hard gate
-- `expected` is soft prompt
-
-That split is clean and should remain.
+Soft prompt only. Hard artifact gates belong in `exit`.
 
 ## Write Control As A First-Class Slice
 
@@ -349,21 +345,20 @@ Recommended final form:
 
 ```yaml
 globals:
-  paths:
-    protected:
-      - .agent/state.json
-    sensitive:
-      - .github/**
-      - infra/**
+  protected:
+    - .agent/state.json
+  sensitive:
+    - .github/**
+    - infra/**
 
 stages:
   RED_TEST:
-    permissions:
+    allow:
       write:
-        allow:
-          - tests/**
-        deny:
-          - src/**
+        - tests/**
+    deny:
+      write:
+        - src/**
 ```
 
 Why this works well:
@@ -407,7 +402,7 @@ The current implementation is closer than before, but a few mixed areas remain.
 - `forbidden_actions`
 - `write_policy`
 
-Conceptually these should be read through the grouped DSL view, even if a compatibility layer remains internally.
+Conceptually these should be read through the stage DSL view, even if a compatibility layer remains internally.
 
 ### `permissions.actions` are not enforced
 
@@ -424,11 +419,10 @@ Each one should map to a concrete service or CLI gate if it is meant to be bindi
 
 If DSL-ization continues, the most coherent order is:
 
-1. Make `workflow_spec.py` expose the grouped DSL view directly, even if it still reads the current flat YAML.
-2. Move `workflow.py` prompt assembly to that grouped view so prompt projection stops depending on old field names.
-3. Clearly label soft-prompt-only fields versus hard-gate fields in the workflow spec normalizer.
-4. Decide whether `permissions.actions` should remain descriptive forever or gain partial enforcement later.
-5. Keep dynamic execution evidence in state repositories, not in the workflow document.
+1. Keep `workflow_spec.py` canonicalization small and explicit so prompt projections stop depending on old field names.
+2. Clearly label soft-prompt-only fields versus hard-gate fields in the workflow spec normalizer.
+3. Decide whether `allow.actions` and `deny.actions` should remain descriptive forever or gain partial enforcement later.
+4. Keep dynamic execution evidence in state repositories, not in the workflow document.
 
 ## Summary
 

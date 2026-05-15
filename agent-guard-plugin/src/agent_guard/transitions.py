@@ -21,6 +21,7 @@ from .workflow_spec import (
     complete_step_allowed_from_stages,
     stage_entry_conditions,
     stage_exit_conditions,
+    stage_exit_rule_conditions,
     stage_intent,
     stage_transitions,
 )
@@ -87,6 +88,13 @@ def _guard_transition(
 
     session = TaskSession.from_mapping(state)
     context = RuleContext(root_dir, session, command_name=command_name)
+    for condition in stage_exit_rule_conditions(from_stage):
+        display = condition["display"]
+        rule = condition.get("rule")
+        if rule is None:
+            continue
+        if not evaluate_rule(rule, context, condition.get("value")):
+            raise RuntimeError(display)
     for condition in stage_entry_conditions(to_stage, from_stage):
         display = condition["display"]
         rule = condition.get("rule")

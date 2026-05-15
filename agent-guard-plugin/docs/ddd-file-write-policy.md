@@ -19,8 +19,8 @@ No duplicate allow and deny systems in state.
 
 File write control belongs to two places only:
 
-- `globals.paths`
-- `stages.<stage>.permissions.write`
+- `globals.protected` and `globals.sensitive`
+- `stages.<stage>.allow.write` and `stages.<stage>.deny.write`
 
 It does not belong in:
 
@@ -36,8 +36,8 @@ Use these terms:
 - `Protected Path`: never writable by the agent
 - `Sensitive Path`: blocked by default and only writable when a stage explicitly allows it
 - `Write Permission`: the allow and deny rules for one stage
-- `Writable Roots`: patterns listed in `permissions.write.allow`
-- `Denied Roots`: patterns listed in `permissions.write.deny`
+- `Writable Roots`: patterns listed in `allow.write`
+- `Denied Roots`: patterns listed in `deny.write`
 - `Write Decision`: allow or block with a concrete reason
 
 Avoid these terms:
@@ -56,27 +56,26 @@ The write policy surface should be:
 
 ```yaml
 globals:
-  paths:
-    protected:
-      - .agent/state.json
-    sensitive:
-      - .github/**
-      - infra/**
-      - migrations/**
-      - package-lock.json
-      - pnpm-lock.yaml
-      - yarn.lock
-      - poetry.lock
-      - Cargo.lock
+  protected:
+    - .agent/state.json
+  sensitive:
+    - .github/**
+    - infra/**
+    - migrations/**
+    - package-lock.json
+    - pnpm-lock.yaml
+    - yarn.lock
+    - poetry.lock
+    - Cargo.lock
 
 stages:
   RED_TEST:
-    permissions:
+    allow:
       write:
-        allow:
-          - tests/**
-        deny:
-          - src/**
+        - tests/**
+    deny:
+      write:
+        - src/**
 ```
 
 This is the full user-facing write model.
@@ -85,14 +84,14 @@ This is the full user-facing write model.
 
 ### One global concern
 
-`globals.paths` captures cross-stage protections:
+`globals.protected` and `globals.sensitive` capture cross-stage protections:
 
 - files the agent should never edit directly
 - paths that need deliberate elevation
 
 ### One stage-local concern
 
-`permissions.write` captures what the current stage may edit.
+`allow.write` and `deny.write` capture what the current stage may edit.
 
 This keeps write control where users expect it:
 
@@ -103,11 +102,11 @@ This keeps write control where users expect it:
 
 Write decisions should be evaluated in this order:
 
-1. If the target path matches `globals.paths.protected`, block.
-2. If the target path matches `permissions.write.deny`, block.
-3. If the target path matches `globals.paths.sensitive` and is not in `permissions.write.allow`, block.
-4. If `permissions.write.allow` is empty or missing, block project writes.
-5. If the target path matches `permissions.write.allow`, allow.
+1. If the target path matches `globals.protected`, block.
+2. If the target path matches `deny.write`, block.
+3. If the target path matches `globals.sensitive` and is not in `allow.write`, block.
+4. If `allow.write` is empty or missing, block project writes.
+5. If the target path matches `allow.write`, allow.
 6. Otherwise, block.
 
 This is intentionally fail-closed.
@@ -118,29 +117,30 @@ This is intentionally fail-closed.
 
 ```yaml
 PLANNING:
-  permissions:
+  plan: create
+  allow:
     write:
-      allow:
-        - .agent/**
-        - ./PLAN.md
-      deny: []
+      - .agent/artifacts/**
+  deny:
+    write: []
 ```
 
 Meaning:
 
 - planning may update workflow artifacts
+- planning may update `.agent/plan.yaml` because `plan: create` implies it
 - planning may not edit product code
 
 ### Red Test
 
 ```yaml
 RED_TEST:
-  permissions:
+  allow:
     write:
-      allow:
-        - tests/**
-      deny:
-        - src/**
+      - tests/**
+  deny:
+    write:
+      - src/**
 ```
 
 Meaning:
@@ -152,28 +152,28 @@ Meaning:
 
 ```yaml
 GREEN_IMPL:
-  permissions:
+  allow:
     write:
-      allow:
-        - src/**
-        - tests/**
-      deny: []
+      - '**'
+  deny:
+    write:
+      - .agent/**
 ```
 
 Meaning:
 
-- code and tests are writable
-- sensitive paths remain blocked unless explicitly allowed
+- all non-`.agent` paths are writable
+- `.agent/**` remains blocked for agent-authored edits
 
 ### Review
 
 ```yaml
 REVIEW:
-  permissions:
+  allow:
     write:
-      allow:
-        - .agent/**
-      deny: []
+      - .agent/artifacts/**
+  deny:
+    write: []
 ```
 
 Meaning:
@@ -207,8 +207,8 @@ The write boundary is stage policy, not plan-step-local policy.
 
 This domain service should:
 
-- load `globals.paths`
-- load the current stage's `permissions.write`
+- load `globals.protected` and `globals.sensitive`
+- load the current stage's `allow.write` and `deny.write`
 - evaluate a repo-relative path
 - return a `GuardDecision`
 
@@ -224,10 +224,10 @@ The current repository still uses:
 
 The target mapping is:
 
-- `path_policy.protected_paths` -> `globals.paths.protected`
-- `path_policy.sensitive_paths` -> `globals.paths.sensitive`
-- `write_policy.writable_paths` -> `permissions.write.allow`
-- `write_policy.denied_paths` -> `permissions.write.deny`
+- `path_policy.protected_paths` -> `globals.protected`
+- `path_policy.sensitive_paths` -> `globals.sensitive`
+- `write_policy.writable_paths` -> `allow.write`
+- `write_policy.denied_paths` -> `deny.write`
 
 This is a structural rename, not a semantic change.
 
@@ -251,7 +251,7 @@ That makes write control one of the most portable guard mechanisms in the system
 
 Migration should remain simple:
 
-1. Treat write permissions conceptually as `permissions.write`.
+1. Treat write permissions conceptually as `allow.write` and `deny.write`.
 2. Keep a parser shim from the current flat fields if necessary.
 3. Remove any remaining runtime references to state-level path scopes.
 4. Update docs and prompts to talk about stage permissions, not write modes.
@@ -278,5 +278,5 @@ The file write model should be:
 
 In the latest DDD DSL, that means:
 
-- `globals.paths`
-- `stages.<stage>.permissions.write`
+- `globals.protected` and `globals.sensitive`
+- `stages.<stage>.allow.write` and `stages.<stage>.deny.write`

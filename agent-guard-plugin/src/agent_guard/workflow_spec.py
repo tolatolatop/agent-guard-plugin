@@ -212,6 +212,9 @@ def _normalize_stage_from_grouped(stage_name: str, stage_data: dict[str, Any]) -
         "entry_conditions": {
             "any": _require_list(transitions.get("enter_when", []), f".workflow.yaml grouped stage {stage_name} transitions.enter_when"),
         },
+        "exit_conditions": {
+            "any": [],
+        },
         "artifacts_expected": expected_artifacts,
         "artifacts_required": required_artifacts,
         "write_policy": {
@@ -263,12 +266,14 @@ def _normalize_stage_from_canonical(stage_name: str, stage_data: dict[str, Any])
         _string_list(deny.get("write", []), f".workflow.yaml canonical stage {stage_name} deny.write"),
     )
 
+    raw_exit_items = _require_list(stage_data.get("exit", []), f".workflow.yaml canonical stage {stage_name} exit")
     expected_artifacts, required_artifacts = _apply_plan_artifact_defaults(
         plan_mode,
         _string_list(stage_data.get("expect", []), f".workflow.yaml canonical stage {stage_name} expect"),
         [
             _normalize_required_artifact_entry(item, f".workflow.yaml canonical stage {stage_name} exit")
-            for item in _require_list(stage_data.get("exit", []), f".workflow.yaml canonical stage {stage_name} exit")
+            for item in raw_exit_items
+            if isinstance(item, str) or (isinstance(item, dict) and "path" in item)
         ],
     )
 
@@ -281,6 +286,13 @@ def _normalize_stage_from_canonical(stage_name: str, stage_data: dict[str, Any])
             "any": [
                 _normalize_entry_condition_from_canonical(stage_name, item)
                 for item in _require_list(stage_data.get("enter", []), f".workflow.yaml canonical stage {stage_name} enter")
+            ],
+        },
+        "exit_conditions": {
+            "any": [
+                _normalize_entry_condition_from_canonical(stage_name, item)
+                for item in raw_exit_items
+                if isinstance(item, dict) and "rule" in item
             ],
         },
         "artifacts_expected": expected_artifacts,
@@ -578,6 +590,9 @@ def _validate_stage_rules(stage_name: str, stage_data: dict[str, Any]) -> None:
     conditions_config = stage_data.get("entry_conditions", {})
     if conditions_config and not isinstance(conditions_config, dict):
         raise RuntimeError(f".workflow.yaml stage {stage_name} entry_conditions must be a mapping.")
+    exit_conditions_config = stage_data.get("exit_conditions", {})
+    if exit_conditions_config and not isinstance(exit_conditions_config, dict):
+        raise RuntimeError(f".workflow.yaml stage {stage_name} exit_conditions must be a mapping.")
     allowed = allowed_rule_names()
     for item in conditions_config.get("any", []) if isinstance(conditions_config, dict) else []:
         if not isinstance(item, dict):
@@ -587,6 +602,28 @@ def _validate_stage_rules(stage_name: str, stage_data: dict[str, Any]) -> None:
             continue
         if str(rule) not in allowed:
             raise RuntimeError(f"Unknown entry condition rule for stage {stage_name}: {rule}")
+        if str(rule) in {"command_ran", "command_succeeded"}:
+            try:
+                re.compile(str(item.get("value", "")))
+            except re.error as exc:
+                raise RuntimeError(
+                    f".workflow.yaml stage {stage_name} entry_conditions.any command rule regex is invalid: {exc}"
+                ) from exc
+    for item in exit_conditions_config.get("any", []) if isinstance(exit_conditions_config, dict) else []:
+        if not isinstance(item, dict):
+            raise RuntimeError(f".workflow.yaml stage {stage_name} exit_conditions.any item must be a mapping.")
+        rule = item.get("rule")
+        if rule is None:
+            continue
+        if str(rule) not in allowed:
+            raise RuntimeError(f"Unknown exit condition rule for stage {stage_name}: {rule}")
+        if str(rule) in {"command_ran", "command_succeeded"}:
+            try:
+                re.compile(str(item.get("value", "")))
+            except re.error as exc:
+                raise RuntimeError(
+                    f".workflow.yaml stage {stage_name} exit_conditions.any command rule regex is invalid: {exc}"
+                ) from exc
     write_policy = stage_data.get("write_policy", {})
     if write_policy and not isinstance(write_policy, dict):
         raise RuntimeError(f".workflow.yaml stage {stage_name} write_policy must be a mapping.")
@@ -988,6 +1025,22 @@ def stage_entry_conditions_from_spec(spec: dict[str, Any], stage: str, from_stag
     return normalized
 
 
+def stage_exit_rule_conditions(stage: str) -> list[dict[str, str]]:
+    """Rule-based exit conditions for one stage."""
+    rules = stage_spec(stage)
+    conditions_config = rules.get("exit_conditions", {})
+    if conditions_config and not isinstance(conditions_config, dict):
+        raise RuntimeError(f".workflow.yaml stage {stage} exit_conditions must be a mapping.")
+
+    normalized: list[dict[str, str]] = []
+    any_conditions = conditions_config.get("any", []) if isinstance(conditions_config, dict) else []
+    if any_conditions and not isinstance(any_conditions, list):
+        raise RuntimeError(f".workflow.yaml stage {stage} exit_conditions.any must be a list.")
+    for item in any_conditions:
+        normalized.append(_normalize_entry_condition(stage, item, "exit_conditions.any"))
+    return normalized
+
+
 def stage_forbid_needs_human_display(stage: str) -> str | None:
     # This stage-level flag is used by the Stop hook to block final responses
     # until the task advances out of stages that should stay agent-driven.
@@ -1011,9 +1064,10 @@ def stage_exit_conditions(stage: str) -> dict[str, list[str]]:
     # Leaving a stage depends on its own required artifacts plus the
     # destination stage's entry conditions.
     artifact_conditions = [f"{path} must exist" for path in stage_required_artifacts(stage)]
+    exit_rule_conditions = [condition["display"] for condition in stage_exit_rule_conditions(stage)]
     for target_stage in stage_transitions().get(stage, []):
         entry_conditions = [condition["display"] for condition in stage_entry_conditions(target_stage, stage)]
-        rendered[str(target_stage)] = artifact_conditions + entry_conditions
+        rendered[str(target_stage)] = artifact_conditions + exit_rule_conditions + entry_conditions
     return rendered
 
 

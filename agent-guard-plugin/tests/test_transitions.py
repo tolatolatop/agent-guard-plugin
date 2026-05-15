@@ -5,6 +5,7 @@ from contextlib import redirect_stdout
 from io import StringIO
 
 from agent_guard.cli import run_command
+from agent_guard.events import append_event
 from agent_guard.plan import plan_steps
 from agent_guard.state import load_state
 from agent_guard.transitions import advance_stage, complete_step, mark_done, ready_to_summarize
@@ -109,6 +110,19 @@ def test_planning_cannot_exit_without_updated_plan_yaml() -> None:
         raise AssertionError("Expected PLANNING exit to be blocked without plan.yaml")
 
 
+def test_red_test_cannot_exit_without_running_pytest_in_stage() -> None:
+    """Test that leaving RED_TEST requires a matching command event in the current stage."""
+    root_dir = make_temp_repo()
+    write_state(root_dir, task_id="password-reset", stage="RED_TEST", current_step="red-001")
+
+    try:
+        advance_stage(root_dir, "GREEN_IMPL", step_id="green-001")
+    except RuntimeError as exc:
+        assert "must run pytest during RED_TEST" in str(exc)
+    else:
+        raise AssertionError("Expected RED_TEST exit to require pytest")
+
+
 def test_ready_to_summarize_is_blocked_without_successful_verification() -> None:
     """Test that ready to summarize is blocked without successful verification."""
     root_dir = make_temp_repo()
@@ -120,6 +134,28 @@ def test_ready_to_summarize_is_blocked_without_successful_verification() -> None
         assert "final-verification.log" in str(exc)
     else:
         raise AssertionError("Expected ready-to-summarize to fail")
+
+
+def test_ready_to_summarize_requires_successful_pytest_command_during_verify() -> None:
+    """Test that ready-to-summarize requires a successful pytest command in the current VERIFY stage."""
+    root_dir = make_temp_repo()
+    write_state(root_dir, task_id="password-reset", stage="VERIFY")
+    (root_dir / ".agent" / "artifacts" / "final-verification.log").write_text("ok\n", encoding="utf-8")
+    (root_dir / ".agent" / "plan.yaml").write_text(
+        "task_id: password-reset\n"
+        "steps:\n"
+        "  - name: verify-001\n"
+        "    description: run verification\n"
+        "    status: done\n",
+        encoding="utf-8",
+    )
+
+    try:
+        ready_to_summarize(root_dir)
+    except RuntimeError as exc:
+        assert "must run pytest during VERIFY" in str(exc)
+    else:
+        raise AssertionError("Expected ready-to-summarize to require pytest in VERIFY")
 
 
 def test_ready_to_summarize_is_blocked_when_plan_has_nonterminal_steps() -> None:
@@ -148,6 +184,16 @@ def test_ready_to_summarize_is_blocked_when_plan_has_nonterminal_steps() -> None
         },
     )
     (root_dir / ".agent" / "artifacts" / "final-verification.log").write_text("ok\n", encoding="utf-8")
+    append_event(
+        root_dir,
+        {
+            "hook": "AfterCommand",
+            "command": "pytest",
+            "exit_code": 0,
+            "stage": "VERIFY",
+            "log_path": ".agent/artifacts/final-verification.log",
+        },
+    )
 
     try:
         ready_to_summarize(root_dir)
@@ -350,6 +396,16 @@ def test_verify_can_advance_directly_to_red_test_and_green_impl() -> None:
     root_dir = make_temp_repo()
     write_state(root_dir, task_id="password-reset", stage="VERIFY", current_step="verify-001")
     (root_dir / ".agent" / "artifacts" / "final-verification.log").write_text("ok\n", encoding="utf-8")
+    append_event(
+        root_dir,
+        {
+            "hook": "AfterCommand",
+            "command": "pytest",
+            "exit_code": 0,
+            "stage": "VERIFY",
+            "log_path": ".agent/artifacts/final-verification.log",
+        },
+    )
 
     result = advance_stage(root_dir, "RED_TEST")
     assert result["state"]["stage"] == "RED_TEST"
@@ -359,6 +415,16 @@ def test_verify_can_advance_directly_to_red_test_and_green_impl() -> None:
     verification_log.write_text("ok\n", encoding="utf-8")
     log_mtime = verification_log.stat().st_mtime_ns
     os.utime(verification_log, ns=(log_mtime + 1_000_000, log_mtime + 1_000_000))
+    append_event(
+        root_dir,
+        {
+            "hook": "AfterCommand",
+            "command": "pytest",
+            "exit_code": 0,
+            "stage": "VERIFY",
+            "log_path": ".agent/artifacts/final-verification.log",
+        },
+    )
     result = advance_stage(root_dir, "GREEN_IMPL")
     assert result["state"]["stage"] == "GREEN_IMPL"
 
@@ -406,6 +472,10 @@ def test_cli_representative_flow_from_start_to_done() -> None:
             "green-001",
         ],
     )[0] == 0
+    assert invoke_cli(
+        root_dir,
+        ["record-command", "--cmd", "pytest", "--exit-code", "1", "--log", ".agent/artifacts/red-test.log"],
+    )[0] == 0
     assert invoke_cli(root_dir, ["advance-stage", "--to", "GREEN_IMPL", "--step", "green-001"])[0] == 0
 
     code, _ = invoke_cli(root_dir, ["advance-stage", "--to", "REVIEW"])
@@ -414,21 +484,12 @@ def test_cli_representative_flow_from_start_to_done() -> None:
     assert invoke_cli(root_dir, ["complete-step", "green-001"])[0] == 0
     assert invoke_cli(root_dir, ["advance-stage", "--to", "VERIFY"])[0] == 0
 
-    write_state(
-        root_dir,
-        **{
-            **load_state(root_dir),
-            "stage": "VERIFY",
-            "current_step": None,
-            "last_verification": {
-                "command": "pytest",
-                "exit_code": 0,
-                "log_path": ".agent/artifacts/final-verification.log",
-                "recorded_at": "2026-05-12T10:00:00Z",
-            },
-        },
-    )
+    write_state(root_dir, **{**load_state(root_dir), "stage": "VERIFY", "current_step": None})
     (root_dir / ".agent" / "artifacts" / "final-verification.log").write_text("ok\n", encoding="utf-8")
+    assert invoke_cli(
+        root_dir,
+        ["record-command", "--cmd", "pytest", "--exit-code", "0", "--log", ".agent/artifacts/final-verification.log"],
+    )[0] == 0
     assert invoke_cli(root_dir, ["ready-to-summarize"])[0] == 0
     (root_dir / ".agent" / "artifacts" / "summary.md").write_text(
         "Implemented password reset flow and verified with pytest.\n",

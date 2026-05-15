@@ -6,14 +6,15 @@ Turn `agent-guard` into a workflow-driven engine whose execution semantics come 
 
 For a more explicit split between soft prompts, hard gates, state flow, and write control, see `docs/ddd-dsl-layers.md`.
 
-For a concrete grouped DSL example that is semantically aligned with the current standard workflow, see `docs/grouped-workflow.example.yaml`.
+For a concrete workflow example aligned with the current standard workflow, see `docs/grouped-workflow.example.yaml`.
 
 The workflow DSL should describe:
 
-- stage intent
-- stage permissions
+- stage goal
+- stage plan mode
+- stage allow and deny rules
+- stage enter and exit gates
 - stage transitions
-- stage evidence
 - global path, failure, and finalization policy
 
 Runtime adapters should translate events into application commands, but they should not own workflow semantics.
@@ -92,132 +93,120 @@ Use these terms consistently:
 The target workflow shape is:
 
 ```yaml
-version: 1
+version: 2
 
 workflow:
   id: standard
   title: Standard Agent Guard Workflow
-  description: Minimal workflow-driven guard for long-running coding tasks.
+  entry: CLARIFYING
 
 globals:
-  paths:
-    protected:
-      - .agent/state.json
-    sensitive:
-      - .github/**
-      - infra/**
-      - migrations/**
-      - package-lock.json
-      - pnpm-lock.yaml
-      - yarn.lock
-      - poetry.lock
-      - Cargo.lock
+  protected:
+    - .agent/state.json
+  sensitive:
+    - .github/**
+    - infra/**
+    - migrations/**
+    - package-lock.json
+    - pnpm-lock.yaml
+    - yarn.lock
+    - poetry.lock
+    - Cargo.lock
 
   failures:
-    repeat_threshold: 2
-    fingerprint_roots:
+    threshold: 2
+    fingerprint:
       - src
       - tests
 
-  finalization:
+  finalize:
     require:
-      - remaining_steps_empty
       - no_running_jobs
-      - successful_last_verification
       - can_finalize_flag
       - all_plan_steps_terminal
-    messages:
-      remaining_steps_empty: remaining_steps must be empty
-      no_running_jobs: running jobs still exist
-      successful_last_verification: last_verification.exit_code must be 0
-      can_finalize_flag: state.can_finalize is not true
-      all_plan_steps_terminal: all plan steps must be done or failed
-
-  wizard:
-    start_stages:
-      - CLARIFYING
-      - PLANNING
-      - RED_TEST
-      - GREEN_IMPL
+  session_start:
+    navigator_skill: using-workflow
 
 stages:
   RED_TEST:
-    intent:
-      goal: Create a failing test that proves the missing behavior.
-
-    permissions:
+    goal: Create a failing test that proves the missing behavior.
+    plan: advance
+    allow:
       write:
-        allow:
-          - tests/**
-        deny:
-          - src/**
+        - tests/**
       actions:
-        allow:
-          - write tests
-          - run targeted tests
-          - save failing logs
-        deny:
-          - write production code
-          - claim implementation is complete
-      commands:
-        complete_step: allow
-      handoff:
-        human_stop: deny
-        deny_message: Current stage does not allow human intervention; continue advancing the task.
-
-    transitions:
-      to:
-        - GREEN_IMPL
-        - NEEDS_FAILURE_ANALYSIS
-      enter_when: []
-
-    evidence:
-      expected:
-        - .agent/artifacts/red-test.log
-      required: []
+        - write tests
+        - run targeted tests
+        - save failing logs
+      stop: false
+      human: false
+    deny:
+      write:
+        - src/**
+      actions:
+        - write production code
+        - claim implementation is complete
+    enter: []
+    exit: []
+    expect:
+      - .agent/artifacts/red-test.log
+    next:
+      - GREEN_IMPL
+      - NEEDS_FAILURE_ANALYSIS
 ```
 
 ## Stage Structure
 
-Every stage should use the same four groups.
+Every stage should use the same small set of top-level fields.
 
-### `intent`
+### `goal`
 
 Contains the stage goal only.
 
 Example:
 
 ```yaml
-intent:
-  goal: Implement the smallest code change that makes the targeted test pass.
+goal: Implement the smallest code change that makes the targeted test pass.
 ```
 
 This is descriptive. It tells the agent what the stage is for.
 
-### `permissions`
+### `plan`
 
-Contains everything the stage allows or denies.
+Contains the stage's relationship to `.agent/plan.yaml` and planned execution.
+
+Valid modes are:
+
+- `deny`
+- `create`
+- `follow`
+- `advance`
+- `complete`
+
+`plan: create` allows `.agent/plan.yaml` writes and injects the default plan artifact gates.
+
+`plan: advance` enables `complete-step`.
+
+### `allow` and `deny`
+
+Contain everything the stage allows or denies.
 
 ```yaml
-permissions:
+allow:
   write:
-    allow:
-      - src/**
-      - tests/**
-    deny: []
+    - src/**
+    - tests/**
   actions:
-    allow:
-      - write minimal production code
-      - update tests if required
-      - run targeted verification
-    deny:
-      - broad refactors
-      - unrelated formatting
-  commands:
-    complete_step: allow
-  handoff:
-    human_stop: deny
-    deny_message: Current stage does not allow human intervention; continue advancing the task.
+    - write minimal production code
+    - update tests if required
+    - run targeted verification
+  stop: false
+  human: false
+deny:
+  write: []
+  actions:
+    - broad refactors
+    - unrelated formatting
 ```
 
 This replaces field sprawl such as:
@@ -225,47 +214,39 @@ This replaces field sprawl such as:
 - `write_policy`
 - `allowed_actions`
 - `forbidden_actions`
-- `allows_complete_step`
-- `forbid_needs_human`
 
-### `transitions`
+### `enter`, `exit`, and `next`
 
-Contains the state graph and transition-entry rules.
+Contain the state graph and machine-evaluable gates.
 
 ```yaml
-transitions:
-  to:
-    - REVIEW
-    - NEEDS_FAILURE_ANALYSIS
-  enter_when:
-    - rule: active_task
-      display: active task exists
+enter: []
+exit:
+  - .agent/artifacts/review.md
+  - rule: can_finalize_passes
+next:
+  - REVIEW
+  - NEEDS_FAILURE_ANALYSIS
 ```
 
-This replaces:
+`enter` and `exit` items support:
 
-- `allowed_next_stages`
-- `entry_conditions`
+- a string path shorthand
+- a `{ path: ... }` object
+- a `{ rule: ... }` object
 
-`enter_when` stays declarative. It names built-in evaluator rules, but does not execute arbitrary scripts.
-
-### `evidence`
-
-Contains stage artifacts.
+`expect` remains soft guidance for likely artifacts:
 
 ```yaml
-evidence:
-  expected:
-    - .agent/artifacts/final-verification.log
-  required:
-    - .agent/artifacts/review.md
+expect:
+  - .agent/artifacts/final-verification.log
 ```
 
 Rules:
 
-- `required` participates in guards and display.
-- `expected` is optional display-only metadata.
-- Display should dedupe `required` and `expected`.
+- `exit` participates in guards and display.
+- `expect` is optional display-only metadata.
+- Display should dedupe `exit` and `expect`.
 
 This replaces:
 
@@ -316,8 +297,7 @@ The runtime adapter only translates payload shape and response format.
 - `task_id`
 - `stage`
 - `current_step`
-- `completed_steps`
-- `remaining_steps`
+- `workflow_id` when multi-workflow selection exists
 - `can_finalize`
 - `last_verification`
 - `needs_human`
@@ -328,11 +308,8 @@ It should not own workflow configuration.
 
 `PlanStep` should stay focused on task planning:
 
-- `id`
-- `stage`
-- `goal`
-- `commands`
-- `success_condition`
+- `name`
+- `description`
 - `status`
 
 It should not duplicate stage-level write permissions.
@@ -354,9 +331,7 @@ The workflow remains declarative.
 
 Allowed rule names come from a built-in registry such as:
 
-- `active_task`
 - `required_command`
-- `successful_last_verification`
 - `no_running_jobs`
 - `all_plan_steps_terminal`
 - `can_finalize_passes`
@@ -368,30 +343,29 @@ This preserves safety and testability while avoiding arbitrary script execution 
 
 ## Compatibility Mapping
 
-The current repository still uses a flatter `.workflow.yaml`.
-The target DSL should map mechanically from the current shape.
+The current repository keeps a canonical internal model and a compatibility projection.
+The author-facing workflow file already uses the new stage-centered DSL.
 
 Mapping:
 
-- `goal` -> `intent.goal`
-- `write_policy.writable_paths` -> `permissions.write.allow`
-- `write_policy.denied_paths` -> `permissions.write.deny`
-- `allowed_actions` -> `permissions.actions.allow`
-- `forbidden_actions` -> `permissions.actions.deny`
-- `allows_complete_step` -> `permissions.commands.complete_step`
-- `forbid_needs_human` -> `permissions.handoff.human_stop: deny`
-- `allowed_next_stages` -> `transitions.to`
-- `entry_conditions.any` -> `transitions.enter_when`
-- `artifacts_expected` -> `evidence.expected`
-- `artifacts_required` -> `evidence.required`
+- `goal` -> stage `goal`
+- `plan_mode` -> stage `plan`
+- `write_policy.writable_paths` -> `allow.write`
+- `write_policy.denied_paths` -> `deny.write`
+- `allowed_actions` -> `allow.actions`
+- `forbidden_actions` -> `deny.actions`
+- `entry_conditions` -> `enter`
+- `artifacts_expected` -> `expect`
+- `artifacts_required` -> `exit`
+- `allowed_next_stages` -> `next`
 
 Top-level mapping:
 
 - `metadata` -> `workflow`
-- `path_policy` -> `globals.paths`
+- `path_policy` -> `globals.protected` and `globals.sensitive`
 - `failure_policy` -> `globals.failures`
-- `finalization_policy` -> `globals.finalization`
-- `wizard_defaults` -> `globals.wizard`
+- `finalization_policy` -> `globals.finalize`
+- `session_start_defaults` -> `globals.session_start`
 
 ## Migration Guidance
 
@@ -408,29 +382,33 @@ Keep runtime behavior the same, but update docs and internal adapters to think i
 
 ### Step 2
 
-Update `.workflow.yaml` parsing so the grouped DSL becomes the actual source format, and keep a compatibility shim only if necessary.
+Keep compatibility projections only where runtime integrations still expect legacy field names.
 
 ## Test Expectations
 
 Tests for the DSL should cover:
 
 - invalid top-level sections fail closed
-- invalid stage grouping fails closed
+- invalid stage shapes fail closed
 - unknown transition rule names fail closed
-- `permissions.write.allow` and `permissions.write.deny` drive write guards
-- `permissions.commands.complete_step` drives `complete-step`
-- `transitions.to` drives the generated Mermaid graph
-- `evidence.required` drives exit gating
-- `globals.finalization.require` drives `can-finalize`
+- `allow.write` and `deny.write` drive write guards
+- `plan: advance` drives `complete-step`
+- `next` drives the generated Mermaid graph
+- `exit` drives exit gating
+- `globals.finalize.require` drives `can-finalize`
 
 ## Summary
 
-The target DDD DSL is a stage-grouped policy language:
+The target DDD DSL is a small stage-centered policy language:
 
-- `intent`
-- `permissions`
-- `transitions`
-- `evidence`
+- `goal`
+- `plan`
+- `allow`
+- `deny`
+- `enter`
+- `exit`
+- `expect`
+- `next`
 
 plus a small `globals` section for cross-stage rules.
 

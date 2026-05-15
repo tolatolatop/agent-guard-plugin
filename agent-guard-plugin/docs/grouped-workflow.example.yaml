@@ -171,7 +171,10 @@ stages:
         - write production code
         - claim implementation is complete
     enter: []
-    exit: []
+    exit:
+      - rule: command_ran
+        value: "(^|\\s)pytest(\\s|$)"
+        display: must run pytest during RED_TEST
     expect:
       - .agent/artifacts/red-test.log
     next:
@@ -246,6 +249,12 @@ stages:
     enter: []
     exit:
       - .agent/artifacts/final-verification.log
+      - rule: command_ran
+        value: "(^|\\s)pytest(\\s|$)"
+        display: must run pytest during VERIFY
+      - rule: command_succeeded
+        value: "(^|\\s)pytest(\\s|$)"
+        display: pytest must succeed during VERIFY
     expect: []
     next:
       - READY_TO_SUMMARIZE
@@ -273,8 +282,6 @@ stages:
       - rule: required_command
         value: ready-to-summarize
         display: use ready-to-summarize
-      - rule: successful_last_verification
-        display: last_verification.exit_code must be 0
       - rule: no_running_jobs
         display: no running jobs
       - rule: all_plan_steps_terminal

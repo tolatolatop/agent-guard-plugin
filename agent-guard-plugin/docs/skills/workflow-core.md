@@ -5,14 +5,17 @@ description: Canonical workflow stages, legal transitions, and command rules for
 
 # Core Workflow
 
-The latest DDD DSL groups stage rules into:
+The current workflow DSL is stage-centered and uses:
 
-- `intent`
-- `permissions`
-- `transitions`
-- `evidence`
-
-The current runtime still reads a flatter `.workflow.yaml`, but agents should reason about stage behavior using the grouped model above.
+- `goal`
+- `plan`
+- `allow`
+- `deny`
+- `enter`
+- `exit`
+- `expect`
+- `next`
+- `final`
 
 State machine:
 
@@ -71,7 +74,7 @@ DONE
 Use only these workflow commands during normal stage progression:
 
 - `agent-guard start-task <task-id>`
-  Starts a new task and moves `IDLE` into `CLARIFYING`.
+  Starts a new task and moves `IDLE` into the workflow entry stage.
 - `agent-guard status`
   Shows the current task, stage, step, and plan summary.
 - `agent-guard session-start`
@@ -81,7 +84,7 @@ Use only these workflow commands during normal stage progression:
 - `agent-guard advance-stage --to <stage> [--step <step-id>]`
   Moves to another stage without marking a plan step complete.
 - `agent-guard complete-step <step-id> [--next-step <step-id>]`
-  Marks the current workflow step complete without advancing to the next stage.
+  Marks the current workflow step complete without advancing to the next stage. This is only legal when the current stage uses `plan: advance`.
 - `agent-guard ready-to-summarize`
   Moves `VERIFY` into `READY_TO_SUMMARIZE` when verification is complete.
 - `agent-guard mark-done`
@@ -99,15 +102,19 @@ Use them like this:
 ## Transition Rules
 
 - `PLANNING -> RED_TEST` or `PLANNING -> GREEN_IMPL` requires `.agent/plan.yaml`.
+- `DESIGNING -> PLANNING` requires `.agent/artifacts/DESIGN.md`.
 - `GREEN_IMPL` must pass through `REVIEW` before entering `VERIFY`.
 - `REVIEW -> VERIFY` requires `.agent/artifacts/review.md`.
+- `VERIFY -> READY_TO_SUMMARIZE` requires `.agent/artifacts/final-verification.log`.
 - `VERIFY -> READY_TO_SUMMARIZE` requires the explicit `ready-to-summarize` command.
 - `VERIFY` may return to `RED_TEST`, `GREEN_IMPL`, or `NEEDS_FAILURE_ANALYSIS`.
 - `NEEDS_FAILURE_ANALYSIS` cannot exit until `.agent/artifacts/failure-analysis.md` exists.
+- `READY_TO_SUMMARIZE -> DONE` requires `.agent/artifacts/summary.md`.
 - `READY_TO_SUMMARIZE -> DONE` is only legal through `mark-done`.
 
 ## Workflow Discipline
 
 - Respect the current stage permissions and required evidence.
+- Treat `plan: create` as the only mode that may update `.agent/plan.yaml`.
 - Do not skip intermediate stages in the state machine.
 - Do not leave a stage without producing its required artifacts.

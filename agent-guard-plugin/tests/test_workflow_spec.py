@@ -27,6 +27,7 @@ from agent_guard.workflow_spec import (
     stage_exit_conditions,
     stage_forbid_needs_human_display,
     transition_graph_mermaid,
+    validate_workflow_spec,
     stage_write_policy,
     workflow_policy_view,
     workflow_policy_roles,
@@ -79,11 +80,21 @@ def test_verify_exit_conditions_include_final_verification_log() -> None:
 
     assert conditions["READY_TO_SUMMARIZE"] == [
         ".agent/artifacts/final-verification.log must exist",
+        "must run pytest during VERIFY",
+        "pytest must succeed during VERIFY",
         "use ready-to-summarize",
-        "last_verification.exit_code must be 0",
         "no running jobs",
         "all plan steps must be done or failed",
         "can_finalize enabled only through ready-to-summarize",
+    ]
+
+
+def test_red_test_exit_conditions_include_pytest_command_requirement() -> None:
+    """Test that leaving RED_TEST requires running pytest in the current stage."""
+    conditions = stage_exit_conditions("RED_TEST")
+
+    assert conditions["GREEN_IMPL"] == [
+        "must run pytest during RED_TEST",
     ]
 
 
@@ -354,6 +365,72 @@ def test_normalize_workflow_spec_applies_plan_create_defaults_in_canonical_dsl()
     assert normalized["stages"]["PLANNING"]["write_policy"]["writable_paths"] == [".agent/plan.yaml"]
     assert normalized["stages"]["PLANNING"]["artifacts_expected"] == [".agent/plan.yaml"]
     assert normalized["stages"]["PLANNING"]["artifacts_required"] == [{"path": ".agent/plan.yaml"}]
+    assert normalized["stages"]["PLANNING"]["exit_conditions"]["any"] == []
+
+
+def test_normalize_workflow_spec_preserves_rule_based_exit_conditions() -> None:
+    """Test that canonical exit rules are preserved in the flat internal shape."""
+    canonical = {
+        "version": 2,
+        "workflow": {"id": "command-exit", "title": "Command Exit", "entry": "VERIFY"},
+        "globals": {"protected": [], "sensitive": [], "failures": {}, "finalize": {"require": []}, "session_start": {}},
+        "stages": {
+            "VERIFY": {
+                "goal": "verify",
+                "plan": "advance",
+                "allow": {"write": [], "actions": [], "stop": False, "human": False},
+                "deny": {"write": [], "actions": []},
+                "enter": [],
+                "exit": [
+                    {
+                        "rule": "command_succeeded",
+                        "value": "(^|\\s)pytest(\\s|$)",
+                        "display": "pytest must succeed during VERIFY",
+                    }
+                ],
+                "expect": [],
+                "next": [],
+            }
+        },
+    }
+
+    normalized = normalize_workflow_spec(canonical)
+
+    assert normalized["stages"]["VERIFY"]["exit_conditions"]["any"] == [
+        {
+            "rule": "command_succeeded",
+            "value": "(^|\\s)pytest(\\s|$)",
+            "display": "pytest must succeed during VERIFY",
+        }
+    ]
+
+
+def test_invalid_command_rule_regex_fails_workflow_validation() -> None:
+    """Test that command rule regexes are validated when loading the canonical DSL."""
+    spec = {
+        "version": 2,
+        "workflow": {"id": "bad-command-regex", "title": "Bad", "entry": "VERIFY"},
+        "globals": {"protected": [], "sensitive": [], "failures": {}, "finalize": {"require": []}, "session_start": {}},
+        "stages": {
+            "VERIFY": {
+                "goal": "verify",
+                "plan": "advance",
+                "allow": {"write": [], "actions": [], "stop": False, "human": False},
+                "deny": {"write": [], "actions": []},
+                "enter": [],
+                "exit": [{"rule": "command_succeeded", "value": "(", "display": "bad regex"}],
+                "expect": [],
+                "next": [],
+            }
+        },
+    }
+
+    try:
+        validate_workflow_spec(normalize_workflow_spec(spec))
+    except RuntimeError as exc:
+        assert "command rule regex is invalid" in str(exc)
+    else:
+        raise AssertionError("Expected invalid command regex to fail validation")
 
 
 def test_grouped_workflow_example_file_normalizes_and_validates() -> None:

@@ -116,11 +116,14 @@ Artifact retention:
 - `events.jsonl` is the full lightweight command/event index.
 - successful commands usually stay in `events.jsonl` only
 - `artifacts/` is reserved for retained evidence such as:
+  - `DESIGN.md`
+  - `PLAN.md`
   - `red-test.log`
   - `final-verification.log`
   - `command-failure.log`
   - `failure-analysis.md`
   - `review.md`
+  - `summary.md`
 
 `session-start` now returns two layers of prompt-ready guidance:
 
@@ -147,4 +150,4 @@ Reset is intentionally gated. It only succeeds when the current task is already 
 - `stage == DONE`, or
 - `stage == READY_TO_SUMMARIZE` and `can_finalize == true`
 
-When reset succeeds, the plugin archives the current task under `.agent/archive/<timestamp>-<task-id>/` and then clears live jobs, failures, events, plan, and artifacts before initializing the next task in `CLARIFYING`.
+When reset succeeds, the plugin archives the current task under `.agent/archive/<timestamp>-<task-id>/` and then clears live jobs, failures, events, plan, and artifacts before initializing the next task in the workflow entry stage.
