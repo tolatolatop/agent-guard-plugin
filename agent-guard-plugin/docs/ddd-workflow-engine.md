@@ -258,7 +258,7 @@ evidence:
   expected:
     - .agent/artifacts/final-verification.log
   required:
-    - .agent/artifacts/review.json
+    - .agent/artifacts/review.md
 ```
 
 Rules:

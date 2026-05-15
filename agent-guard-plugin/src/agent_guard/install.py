@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import shutil
 from pathlib import Path
 from typing import Any, TextIO
 
 from .interactive import confirm_action
+from .workflow_spec import install_defaults as workflow_install_defaults
 
 SUPPORTED_RUNTIMES = ("claude-code", "codex", "opencode")
 SUPPORTED_SCOPES = ("project", "user")
@@ -16,11 +18,12 @@ SHORT_FLAG_ALIASES = {
     "-r": "runtime",
     "-s": "scope",
 }
+MULTI_VALUE_FLAGS = {"match", "exclude-match"}
 
 
-def parse_flags(args: list[str]) -> dict[str, str | bool]:
+def parse_flags(args: list[str]) -> dict[str, Any]:
     """Parse flags."""
-    flags: dict[str, str | bool] = {}
+    flags: dict[str, Any] = {}
     index = 0
     while index < len(args):
         current = args[index]
@@ -31,7 +34,10 @@ def parse_flags(args: list[str]) -> dict[str, str | bool]:
                 flags[key] = True
                 index += 1
                 continue
-            flags[key] = next_value
+            if key in MULTI_VALUE_FLAGS:
+                flags.setdefault(key, []).append(next_value)
+            else:
+                flags[key] = next_value
             index += 2
             continue
         if not current.startswith("--"):
@@ -43,7 +49,10 @@ def parse_flags(args: list[str]) -> dict[str, str | bool]:
             flags[key] = True
             index += 1
             continue
-        flags[key] = next_value
+        if key in MULTI_VALUE_FLAGS:
+            flags.setdefault(key, []).append(next_value)
+        else:
+            flags[key] = next_value
         index += 2
     return flags
 
@@ -121,24 +130,114 @@ def skill_slug_from_source(source_file: Path) -> str:
     return source_file.stem
 
 
-def install_skills_bundle(target_dir: Path, plugin_root: Path) -> list[str]:
+def _skill_match_haystack(source_file: Path) -> str:
+    """Build the searchable text for skill selection."""
+    return "\n".join(
+        [
+            skill_slug_from_source(source_file),
+            source_file.name,
+        ]
+    )
+
+
+def _compile_matchers(patterns: list[str], label: str) -> list[re.Pattern[str]]:
+    compiled: list[re.Pattern[str]] = []
+    for pattern in patterns:
+        try:
+            compiled.append(re.compile(pattern, re.IGNORECASE | re.MULTILINE))
+        except re.error as exc:
+            raise RuntimeError(f"Invalid {label} regex {pattern!r}: {exc}") from exc
+    return compiled
+
+
+def selected_skill_sources(plugin_root: Path, include_matches: list[str] | None = None, exclude_matches: list[str] | None = None) -> list[Path]:
+    """Select skill sources by positive and negative regex matches."""
+    source_files = sorted(source_skills_dir(plugin_root).glob("*.md"))
+    include_patterns = _compile_matchers(include_matches or [], "--match")
+    exclude_patterns = _compile_matchers(exclude_matches or [], "--exclude-match")
+
+    selected: list[Path] = []
+    for source_file in source_files:
+        haystack = _skill_match_haystack(source_file)
+        if include_patterns and not any(pattern.search(haystack) for pattern in include_patterns):
+            continue
+        if exclude_patterns and any(pattern.search(haystack) for pattern in exclude_patterns):
+            continue
+        selected.append(source_file)
+    return selected
+
+
+def resolve_skill_filters(
+    include_matches: list[str] | None = None,
+    exclude_matches: list[str] | None = None,
+) -> tuple[list[str], list[str], str]:
+    """Resolve install skill filters from CLI flags or workflow defaults."""
+    cli_include = list(include_matches or [])
+    cli_exclude = list(exclude_matches or [])
+    if cli_include or cli_exclude:
+        return cli_include, cli_exclude, "cli"
+
+    defaults = workflow_install_defaults()
+    return list(defaults.get("skill_match", [])), list(defaults.get("skill_exclude_match", [])), "workflow"
+
+
+def install_selection_warning(source: str, include_matches: list[str], exclude_matches: list[str]) -> str:
+    """Build a warning when workflow-provided selection matches nothing."""
+    details: list[str] = []
+    if include_matches:
+        details.append(f"match={include_matches!r}")
+    if exclude_matches:
+        details.append(f"exclude_match={exclude_matches!r}")
+    rendered = ", ".join(details) if details else "no filters"
+    return (
+        "Workflow skill selection matched no installable skills; "
+        f"ignoring {rendered} from {source} defaults and falling back to full install."
+    )
+
+
+def selected_skill_sources_with_fallback(
+    plugin_root: Path,
+    include_matches: list[str] | None = None,
+    exclude_matches: list[str] | None = None,
+) -> tuple[list[Path], list[str]]:
+    """Select skills, warning and falling back to full install for empty workflow defaults."""
+    resolved_include, resolved_exclude, source = resolve_skill_filters(include_matches, exclude_matches)
+    selected = selected_skill_sources(plugin_root, resolved_include, resolved_exclude)
+    if selected or source != "workflow" or (not resolved_include and not resolved_exclude):
+        return selected, []
+    return sorted(source_skills_dir(plugin_root).glob("*.md")), [install_selection_warning(source, resolved_include, resolved_exclude)]
+
+
+def install_skills_bundle(
+    target_dir: Path,
+    plugin_root: Path,
+    include_matches: list[str] | None = None,
+    exclude_matches: list[str] | None = None,
+) -> tuple[list[str], list[str]]:
     """Install skills bundle."""
     target_dir.mkdir(parents=True, exist_ok=True)
     written_files: list[str] = []
-    for source_file in sorted(source_skills_dir(plugin_root).glob("*.md")):
+    selected_sources, warnings = selected_skill_sources_with_fallback(plugin_root, include_matches, exclude_matches)
+    for source_file in selected_sources:
         target_file = target_dir / source_file.name
         shutil.copy2(source_file, target_file)
         written_files.append(str(target_file))
     if not written_files:
         raise RuntimeError("No workflow skills were installed.")
-    return written_files
+    return written_files, warnings
 
 
-def install_claude_skills_bundle(target_dir: Path, plugin_root: Path) -> list[str]:
+def install_claude_skills_bundle(
+    target_dir: Path,
+    plugin_root: Path,
+    include_matches: list[str] | None = None,
+    exclude_matches: list[str] | None = None,
+) -> tuple[list[str], list[str]]:
     """Install claude skills bundle."""
     target_dir.mkdir(parents=True, exist_ok=True)
     written_files: list[str] = []
-    for source_file in sorted(source_skills_dir(plugin_root).glob("*.md")):
+    selected_sources, warnings = selected_skill_sources_with_fallback(plugin_root, include_matches, exclude_matches)
+    for source_file in selected_sources:
         legacy_target = target_dir / source_file.name
         if legacy_target.exists():
             legacy_target.unlink()
@@ -148,14 +247,20 @@ def install_claude_skills_bundle(target_dir: Path, plugin_root: Path) -> list[st
         written_files.append(str(target_file))
     if not written_files:
         raise RuntimeError("No Claude workflow skills were installed.")
-    return written_files
+    return written_files, warnings
 
 
-def install_opencode_skills_bundle(target_dir: Path, plugin_root: Path) -> list[str]:
+def install_opencode_skills_bundle(
+    target_dir: Path,
+    plugin_root: Path,
+    include_matches: list[str] | None = None,
+    exclude_matches: list[str] | None = None,
+) -> tuple[list[str], list[str]]:
     """Install opencode skills bundle."""
     target_dir.mkdir(parents=True, exist_ok=True)
     written_files: list[str] = []
-    for source_file in sorted(source_skills_dir(plugin_root).glob("*.md")):
+    selected_sources, warnings = selected_skill_sources_with_fallback(plugin_root, include_matches, exclude_matches)
+    for source_file in selected_sources:
         legacy_target = target_dir / source_file.name
         if legacy_target.exists():
             legacy_target.unlink()
@@ -165,7 +270,7 @@ def install_opencode_skills_bundle(target_dir: Path, plugin_root: Path) -> list[
         written_files.append(str(target_file))
     if not written_files:
         raise RuntimeError("No OpenCode workflow skills were installed.")
-    return written_files
+    return written_files, warnings
 
 
 def uv_bridge_command(plugin_root: Path, action: str, skills_dir: Path) -> str:
@@ -260,13 +365,20 @@ def merge_claude_hooks(existing_hooks: dict[str, Any], new_hooks: dict[str, Any]
     return merged
 
 
-def install_claude_code(cwd: Path, home_dir: Path, scope: str, plugin_root: Path) -> dict[str, Any]:
+def install_claude_code(
+    cwd: Path,
+    home_dir: Path,
+    scope: str,
+    plugin_root: Path,
+    include_matches: list[str] | None = None,
+    exclude_matches: list[str] | None = None,
+) -> dict[str, Any]:
     """Install claude code."""
     config_path = claude_config_file(scope, cwd, home_dir)
     config = read_json_if_exists(config_path, {})
     marker = "agent-guard-bridge"
     skills_dir = claude_skills_install_dir(scope, cwd, home_dir)
-    skill_files = install_claude_skills_bundle(skills_dir, plugin_root)
+    skill_files, selection_warnings = install_claude_skills_bundle(skills_dir, plugin_root, include_matches, exclude_matches)
     config["hooks"] = merge_claude_hooks(config.get("hooks", {}), build_claude_hooks(plugin_root, skills_dir), marker)
     write_json(config_path, config)
     return {
@@ -274,6 +386,7 @@ def install_claude_code(cwd: Path, home_dir: Path, scope: str, plugin_root: Path
         "scope": scope,
         "files_written": [str(config_path), *skill_files],
         "notes": [
+            *selection_warnings,
             "Installed Claude Code hooks into a settings JSON file.",
             "Claude Code passes hook payloads over stdin and can block PreToolUse or Stop hooks with exit code 2.",
             "Workflow skills were installed into Claude's native .claude/skills/<skill>/SKILL.md layout and injected via AGENT_GUARD_SKILLS_DIR.",
@@ -313,17 +426,25 @@ def build_codex_hooks(plugin_root: Path, skills_dir: Path) -> dict[str, Any]:
     }
 
 
-def install_codex(cwd: Path, home_dir: Path, scope: str, plugin_root: Path) -> dict[str, Any]:
+def install_codex(
+    cwd: Path,
+    home_dir: Path,
+    scope: str,
+    plugin_root: Path,
+    include_matches: list[str] | None = None,
+    exclude_matches: list[str] | None = None,
+) -> dict[str, Any]:
     """Install codex."""
     hooks_path = codex_hooks_file(scope, cwd, home_dir)
     skills_dir = shared_skills_install_dir(scope, cwd, home_dir)
-    skill_files = install_skills_bundle(skills_dir, plugin_root)
+    skill_files, selection_warnings = install_skills_bundle(skills_dir, plugin_root, include_matches, exclude_matches)
     write_json(hooks_path, build_codex_hooks(plugin_root, skills_dir))
     return {
         "runtime": "codex",
         "scope": scope,
         "files_written": [str(hooks_path), *skill_files],
         "notes": [
+            *selection_warnings,
             "Installed Codex hooks.json.",
             "Codex hook compatibility follows Claude-style lifecycle hooks, but tool-hook coverage may vary by version.",
             "Some Codex installations may also require enabling hooks in user config.",
@@ -378,18 +499,26 @@ export const AgentGuardPlugin = async () => {{
 """
 
 
-def install_opencode(cwd: Path, home_dir: Path, scope: str, plugin_root: Path) -> dict[str, Any]:
+def install_opencode(
+    cwd: Path,
+    home_dir: Path,
+    scope: str,
+    plugin_root: Path,
+    include_matches: list[str] | None = None,
+    exclude_matches: list[str] | None = None,
+) -> dict[str, Any]:
     """Install opencode."""
     plugin_path = opencode_plugin_file(scope, cwd, home_dir)
     plugin_path.parent.mkdir(parents=True, exist_ok=True)
     skills_dir = opencode_skills_install_dir(scope, cwd, home_dir)
-    skill_files = install_opencode_skills_bundle(skills_dir, plugin_root)
+    skill_files, selection_warnings = install_opencode_skills_bundle(skills_dir, plugin_root, include_matches, exclude_matches)
     plugin_path.write_text(build_opencode_plugin_source(plugin_root, skills_dir), encoding="utf-8")
     return {
         "runtime": "opencode",
         "scope": scope,
         "files_written": [str(plugin_path), *skill_files],
         "notes": [
+            *selection_warnings,
             "Installed an OpenCode JS loader that forwards plugin events to the Python bridge.",
             "All policy logic remains in Python; the JS file only marshals plugin events.",
             "OpenCode final-response gating remains best-effort because its plugin lifecycle differs from Claude Code and Codex.",
@@ -409,11 +538,13 @@ def install_runtime(argv: list[str], cwd: Path, home_dir: Path | None, plugin_ro
         raise RuntimeError(f"Unsupported --scope. Expected one of: {', '.join(SUPPORTED_SCOPES)}")
 
     resolved_home = home_dir or Path(os.path.expanduser("~"))
+    include_matches = [str(item) for item in flags.get("match", [])] if isinstance(flags.get("match"), list) else []
+    exclude_matches = [str(item) for item in flags.get("exclude-match", [])] if isinstance(flags.get("exclude-match"), list) else []
     if runtime == "claude-code":
-        return install_claude_code(cwd, resolved_home, str(scope), plugin_root)
+        return install_claude_code(cwd, resolved_home, str(scope), plugin_root, include_matches, exclude_matches)
     if runtime == "codex":
-        return install_codex(cwd, resolved_home, str(scope), plugin_root)
-    return install_opencode(cwd, resolved_home, str(scope), plugin_root)
+        return install_codex(cwd, resolved_home, str(scope), plugin_root, include_matches, exclude_matches)
+    return install_opencode(cwd, resolved_home, str(scope), plugin_root, include_matches, exclude_matches)
 
 
 def _hook_matches_marker(hook: Any, marker: str) -> bool:

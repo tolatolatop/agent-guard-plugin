@@ -11,6 +11,8 @@ from agent_guard.install import (
     install_runtime,
     packaged_skills_dir,
     parse_flags,
+    selected_skill_sources,
+    selected_skill_sources_with_fallback,
     source_skills_dir,
     uninstall_runtime,
 )
@@ -128,6 +130,92 @@ def test_parse_flags_supports_short_runtime_and_scope_aliases() -> None:
 
     assert flags["runtime"] == "claude-code"
     assert flags["scope"] == "project"
+
+
+def test_parse_flags_accumulates_repeated_match_flags() -> None:
+    """Test that repeated skill selection flags accumulate."""
+    flags = parse_flags(["--match", "workflow", "--match", "final", "--exclude-match", "failure"])
+
+    assert flags["match"] == ["workflow", "final"]
+    assert flags["exclude-match"] == ["failure"]
+
+
+def test_selected_skill_sources_support_positive_match_selection() -> None:
+    """Test that positive match selection keeps only matching skills."""
+    selected = selected_skill_sources(PLUGIN_ROOT, include_matches=["finalization|workflow-core"])
+
+    assert [path.stem for path in selected] == ["finalization-checklist", "workflow-core"]
+
+
+def test_selected_skill_sources_support_negative_match_selection() -> None:
+    """Test that negative match selection excludes matching skills."""
+    selected = selected_skill_sources(PLUGIN_ROOT, exclude_matches=["failure|finalization"])
+
+    assert "failure-analysis" not in {path.stem for path in selected}
+    assert "finalization-checklist" not in {path.stem for path in selected}
+    assert "using-workflow" in {path.stem for path in selected}
+
+
+def test_install_runtime_supports_selective_skill_installation() -> None:
+    """Test that install_runtime can install only a selected subset of skills."""
+    root, home = make_dirs()
+    result = install_runtime(
+        ["--runtime", "claude-code", "--scope", "project", "--match", "workflow-core|using-workflow", "--exclude-match", "using-workflow"],
+        root,
+        home,
+        PLUGIN_ROOT,
+    )
+
+    assert (root / ".claude" / "skills" / "workflow-core" / "SKILL.md").exists()
+    assert not (root / ".claude" / "skills" / "using-workflow" / "SKILL.md").exists()
+    assert any(path.endswith("/workflow-core/SKILL.md") for path in result["files_written"])
+
+
+def test_install_runtime_fails_when_skill_filters_select_nothing() -> None:
+    """Test that install_runtime fails closed when filters select no skills."""
+    root, home = make_dirs()
+
+    with pytest.raises(RuntimeError, match="No Claude workflow skills were installed"):
+        install_runtime(
+            ["--runtime", "claude-code", "--scope", "project", "--match", "definitely-no-such-skill"],
+            root,
+            home,
+            PLUGIN_ROOT,
+        )
+
+
+def test_selected_skill_sources_with_workflow_defaults_fall_back_to_full_install(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that empty workflow-driven selection only warns and falls back to full install."""
+    monkeypatch.setattr(
+        "agent_guard.install.workflow_install_defaults",
+        lambda: {"skill_match": ["definitely-no-such-skill"], "skill_exclude_match": []},
+    )
+
+    selected, warnings = selected_skill_sources_with_fallback(PLUGIN_ROOT)
+
+    assert "using-workflow" in {path.stem for path in selected}
+    assert warnings == [
+        "Workflow skill selection matched no installable skills; ignoring match=['definitely-no-such-skill'] from workflow defaults and falling back to full install."
+    ]
+
+
+def test_install_runtime_uses_workflow_defaults_when_cli_filters_are_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that workflow install defaults apply when install is called without explicit filters."""
+    monkeypatch.setattr(
+        "agent_guard.install.workflow_install_defaults",
+        lambda: {"skill_match": ["workflow-core"], "skill_exclude_match": []},
+    )
+    root, home = make_dirs()
+
+    result = install_runtime(["--runtime", "claude-code", "--scope", "project"], root, home, PLUGIN_ROOT)
+
+    assert (root / ".claude" / "skills" / "workflow-core" / "SKILL.md").exists()
+    assert not (root / ".claude" / "skills" / "using-workflow" / "SKILL.md").exists()
+    assert result["notes"][0] == "Installed Claude Code hooks into a settings JSON file."
 
 
 def test_install_writes_codex_hooks_json() -> None:

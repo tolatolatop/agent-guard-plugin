@@ -40,6 +40,21 @@ uv run install-agent-guard --runtime claude-code --scope project
 uv run install-agent-guard --runtime opencode --scope project
 ```
 
+Selective skill installation:
+
+- `--match REGEX` keeps only skills whose slug or filename matches the regex.
+- `--exclude-match REGEX` removes any matched skills after positive selection.
+- Both flags are repeatable, so you can build selection from multiple include and exclude groups.
+- If no CLI filters are passed, `agent-guard` may read default install filters from `.workflow.yaml` under `globals.install.skills`.
+- If workflow-provided filters match nothing, installation continues with the full skill bundle and adds a warning note instead of failing.
+
+Examples:
+
+```bash
+uv run install-agent-guard --runtime claude-code --scope project --match 'workflow|plan' --match review
+uv run install-agent-guard --runtime codex --scope project --match workflow --exclude-match finalization --exclude-match failure
+```
+
 Expected repo-local outputs:
 
 - Claude Code: `.claude/settings.local.json` and `.claude/skills/<skill>/SKILL.md`
@@ -91,7 +106,7 @@ Interactive wizard:
 The wizard bootstraps a new task interactively:
 
 - ensures `.agent/` exists
-- collects `task_id`, goal, stage, current step, and path scopes
+- collects `task_id`, goal, stage, current step, and workflow context
 - writes `state.json`
 - can generate a starter `.agent/plan.yaml`
 
@@ -104,7 +119,7 @@ Artifact retention:
   - `final-verification.log`
   - `command-failure.log`
   - `failure-analysis.md`
-  - `review.json`
+  - `review.md`
 
 `session-start` now returns two layers of prompt-ready guidance:
 

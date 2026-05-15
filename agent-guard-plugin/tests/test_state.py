@@ -79,5 +79,5 @@ def test_stage_artifact_snapshot_tracks_stage_entry() -> None:
 
     assert snapshot["stage"] == "REVIEW"
     assert snapshot["entered_at"] is not None
-    assert ".agent/artifacts/review.json" in snapshot["artifacts"]
-    assert snapshot["artifacts"][".agent/artifacts/review.json"]["mtime_ns"] is None
+    assert ".agent/artifacts/review.md" in snapshot["artifacts"]
+    assert snapshot["artifacts"][".agent/artifacts/review.md"]["mtime_ns"] is None

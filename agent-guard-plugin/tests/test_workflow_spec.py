@@ -4,6 +4,7 @@ from pathlib import Path
 from agent_guard.workflow_spec import (
     failure_policy,
     finalization_policy,
+    install_defaults,
     normalize_workflow_spec,
     path_policy,
     stage_required_artifact_rules,
@@ -45,13 +46,22 @@ def test_review_exit_conditions_include_required_review_artifact() -> None:
     conditions = stage_exit_conditions("REVIEW")
 
     assert conditions["VERIFY"] == [
-        ".agent/artifacts/review.json must exist",
+        ".agent/artifacts/review.md must exist",
     ]
 
 
 def test_green_impl_entry_conditions_are_empty() -> None:
     """Test that green impl entry conditions are empty."""
     assert stage_entry_conditions("GREEN_IMPL", "RED_TEST") == []
+
+
+def test_planning_exit_conditions_include_required_plan_artifact() -> None:
+    """Test that leaving planning requires an updated plan.yaml artifact."""
+    conditions = stage_exit_conditions("PLANNING")
+
+    assert conditions["RED_TEST"] == [
+        ".agent/plan.yaml must exist",
+    ]
 
 
 def test_stage_forbid_needs_human_display_is_exposed() -> None:
@@ -68,6 +78,8 @@ def test_policy_sections_are_loaded_from_workflow_spec() -> None:
     assert failure_policy()["repeat_threshold"] == 2
     assert "successful_last_verification" in finalization_policy()["required_rules"]
     assert wizard_defaults()["start_stages"] == ["CLARIFYING", "PLANNING", "RED_TEST", "GREEN_IMPL"]
+    assert install_defaults()["skill_match"] == []
+    assert install_defaults()["skill_exclude_match"] == []
     assert stage_write_policy("RED_TEST")["writable_paths"] == ["tests/**"]
 
 
@@ -123,6 +135,7 @@ def test_workflow_policy_view_exposes_grouped_globals_and_stages() -> None:
     assert ".github/**" in workflow["globals"]["paths"]["sensitive"]
     assert workflow["globals"]["failures"]["repeat_threshold"] == 2
     assert "successful_last_verification" in workflow["globals"]["finalization"]["require"]
+    assert workflow["globals"]["install"]["skills"]["match"] == []
     assert "RED_TEST" in workflow["stages"]
 
 
@@ -146,6 +159,7 @@ def test_workflow_policy_roles_mark_global_gate_types() -> None:
     assert roles["globals"]["paths"] == "hard_gate"
     assert roles["globals"]["finalization"] == "hard_gate"
     assert roles["globals"]["wizard"] == "soft_prompt"
+    assert roles["globals"]["install"] == "soft_prompt"
 
 
 def test_normalize_workflow_spec_accepts_grouped_dsl_shape() -> None:
@@ -174,6 +188,12 @@ def test_normalize_workflow_spec_accepts_grouped_dsl_shape() -> None:
             },
             "wizard": {
                 "start_stages": ["RED_TEST"],
+            },
+            "install": {
+                "skills": {
+                    "match": ["workflow"],
+                    "exclude_match": ["failure"],
+                }
             },
         },
         "stages": {
@@ -218,6 +238,8 @@ def test_normalize_workflow_spec_accepts_grouped_dsl_shape() -> None:
     assert normalized["failure_policy"]["fingerprint_roots"] == ["src", "tests"]
     assert normalized["finalization_policy"]["required_rules"] == ["successful_last_verification"]
     assert normalized["wizard_defaults"]["start_stages"] == ["RED_TEST"]
+    assert normalized["install_defaults"]["skill_match"] == ["workflow"]
+    assert normalized["install_defaults"]["skill_exclude_match"] == ["failure"]
     assert normalized["stages"]["RED_TEST"]["goal"] == "Create a failing test."
     assert normalized["stages"]["RED_TEST"]["write_policy"]["writable_paths"] == ["tests/**"]
     assert normalized["stages"]["RED_TEST"]["allows_complete_step"] is True
@@ -234,5 +256,5 @@ def test_grouped_workflow_example_file_normalizes_and_validates() -> None:
     normalized = normalize_workflow_spec(payload)
 
     assert normalized["metadata"]["id"] == "standard-ddd-example"
-    assert normalized["stages"]["REVIEW"]["artifacts_required"] == [{"path": ".agent/artifacts/review.json"}]
+    assert normalized["stages"]["REVIEW"]["artifacts_required"] == [{"path": ".agent/artifacts/review.md"}]
     assert normalized["stages"]["READY_TO_SUMMARIZE"]["allowed_next_stages"] == ["DONE"]

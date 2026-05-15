@@ -87,6 +87,7 @@ def test_advance_stage_drops_legacy_dynamic_scope_when_plan_step_is_missing() ->
     """Test that advance stage drops legacy dynamic scope when plan step is missing."""
     root_dir = make_temp_repo()
     write_state(root_dir, task_id="password-reset", stage="PLANNING")
+    (root_dir / ".agent" / "plan.yaml").write_text("task_id: password-reset\nsteps: []\n", encoding="utf-8")
 
     result = advance_stage(
         root_dir,
@@ -97,6 +98,19 @@ def test_advance_stage_drops_legacy_dynamic_scope_when_plan_step_is_missing() ->
     state = result["state"]
     assert state["stage"] == "RED_TEST"
     assert state["current_step"] == "red-001"
+
+
+def test_planning_cannot_exit_without_updated_plan_yaml() -> None:
+    """Test that leaving PLANNING requires plan.yaml to be created or updated in the stage."""
+    root_dir = make_temp_repo()
+    write_state(root_dir, task_id="password-reset", stage="PLANNING")
+
+    try:
+        advance_stage(root_dir, "RED_TEST", step_id="red-001")
+    except RuntimeError as exc:
+        assert ".agent/plan.yaml" in str(exc)
+    else:
+        raise AssertionError("Expected PLANNING exit to be blocked without plan.yaml")
 
 
 def test_ready_to_summarize_is_blocked_without_successful_verification() -> None:
@@ -181,7 +195,7 @@ def test_needs_failure_analysis_cannot_exit_without_artifact() -> None:
 def test_review_artifact_must_be_updated_after_entering_review() -> None:
     """Test that a stale review artifact from before REVIEW does not satisfy exit gating."""
     root_dir = make_temp_repo()
-    review_artifact = root_dir / ".agent" / "artifacts" / "review.json"
+    review_artifact = root_dir / ".agent" / "artifacts" / "review.md"
     review_artifact.write_text('{"status":"old"}\n', encoding="utf-8")
     write_state(
         root_dir,
@@ -196,7 +210,7 @@ def test_review_artifact_must_be_updated_after_entering_review() -> None:
     try:
         advance_stage(root_dir, "VERIFY", step_id="green-001")
     except RuntimeError as exc:
-        assert "review.json" in str(exc)
+        assert "review.md" in str(exc)
         assert "updated after entering REVIEW" in str(exc)
     else:
         raise AssertionError("Expected stale review artifact to fail")
@@ -283,6 +297,20 @@ def test_cli_representative_flow_from_start_to_done() -> None:
     )
     assert invoke_cli(root_dir, ["start-task", "password-reset"])[0] == 0
     assert invoke_cli(root_dir, ["advance-stage", "--to", "PLANNING"])[0] == 0
+    (root_dir / ".agent" / "plan.yaml").write_text(
+        "task_id: password-reset\n"
+        "steps:\n"
+        "  - name: red-001\n"
+        "    description: write red test\n"
+        "    status: in_progress\n"
+        "  - name: green-001\n"
+        "    description: implement fix\n"
+        "    status: pending\n",
+        encoding="utf-8",
+    )
+    plan_path = root_dir / ".agent" / "plan.yaml"
+    plan_mtime = plan_path.stat().st_mtime_ns
+    os.utime(plan_path, ns=(plan_mtime + 1_000_000, plan_mtime + 1_000_000))
     assert invoke_cli(
         root_dir,
         ["advance-stage", "--to", "RED_TEST", "--step", "red-001"],
@@ -301,7 +329,7 @@ def test_cli_representative_flow_from_start_to_done() -> None:
 
     code, _ = invoke_cli(root_dir, ["advance-stage", "--to", "REVIEW"])
     assert code == 0
-    (root_dir / ".agent" / "artifacts" / "review.json").write_text("{}\n", encoding="utf-8")
+    (root_dir / ".agent" / "artifacts" / "review.md").write_text("# Review\n", encoding="utf-8")
     assert invoke_cli(root_dir, ["complete-step", "green-001", "--next-stage", "VERIFY"])[0] == 0
 
     write_state(

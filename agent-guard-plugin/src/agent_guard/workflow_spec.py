@@ -143,6 +143,8 @@ def normalize_workflow_spec(spec: dict[str, Any]) -> dict[str, Any]:
     failures = _require_mapping(globals_config.get("failures", {}), ".workflow.yaml globals.failures")
     finalization = _require_mapping(globals_config.get("finalization", {}), ".workflow.yaml globals.finalization")
     wizard = _require_mapping(globals_config.get("wizard", {}), ".workflow.yaml globals.wizard")
+    install = _require_mapping(globals_config.get("install", {}), ".workflow.yaml globals.install")
+    install_skills = _require_mapping(install.get("skills", {}), ".workflow.yaml globals.install.skills")
     grouped_stages = _require_mapping(spec.get("stages", {}), ".workflow.yaml stages")
 
     return {
@@ -172,6 +174,13 @@ def normalize_workflow_spec(spec: dict[str, Any]) -> dict[str, Any]:
         "wizard_defaults": {
             "start_stages": _string_list(wizard.get("start_stages", []), ".workflow.yaml globals.wizard.start_stages"),
         },
+        "install_defaults": {
+            "skill_match": _string_list(install_skills.get("match", []), ".workflow.yaml globals.install.skills.match"),
+            "skill_exclude_match": _string_list(
+                install_skills.get("exclude_match", []),
+                ".workflow.yaml globals.install.skills.exclude_match",
+            ),
+        },
         "stages": {
             stage_name: _normalize_stage_from_grouped(stage_name, _require_mapping(stage_data, f".workflow.yaml stage {stage_name}"))
             for stage_name, stage_data in grouped_stages.items()
@@ -182,7 +191,7 @@ def normalize_workflow_spec(spec: dict[str, Any]) -> dict[str, Any]:
 def validate_workflow_spec(spec: dict[str, Any]) -> None:
     """Validate core workflow policy sections and rule names."""
     _require_mapping(spec.get("stages", {}), ".workflow.yaml stages")
-    for section_name in ("path_policy", "failure_policy", "finalization_policy", "wizard_defaults"):
+    for section_name in ("path_policy", "failure_policy", "finalization_policy", "wizard_defaults", "install_defaults"):
         _require_mapping(spec.get(section_name, {}), f".workflow.yaml {section_name}")
     for stage_name, stage_data in workflow_stages_from_spec(spec).items():
         _validate_stage_rules(stage_name, _require_mapping(stage_data, f".workflow.yaml stage {stage_name}"))
@@ -381,6 +390,12 @@ def workflow_policy_view() -> dict[str, Any]:
                 "messages": finalization_policy()["rule_messages"],
             },
             "wizard": wizard_defaults(),
+            "install": {
+                "skills": {
+                    "match": install_defaults()["skill_match"],
+                    "exclude_match": install_defaults()["skill_exclude_match"],
+                }
+            },
         },
         "stages": {
             stage_name: stage_policy_view(stage_name)
@@ -398,6 +413,7 @@ def workflow_policy_roles() -> dict[str, Any]:
             "failures": "hard_gate",
             "finalization": "hard_gate",
             "wizard": "soft_prompt",
+            "install": "soft_prompt",
         },
         "stages": {
             stage_name: stage_policy_roles(stage_name)
@@ -553,6 +569,17 @@ def wizard_defaults() -> dict[str, Any]:
     config = _require_mapping(load_workflow_spec().get("wizard_defaults", {}), ".workflow.yaml wizard_defaults")
     return {
         "start_stages": [str(item) for item in _require_list(config.get("start_stages", []), ".workflow.yaml wizard_defaults.start_stages")],
+    }
+
+
+def install_defaults() -> dict[str, list[str]]:
+    """Normalized install defaults."""
+    config = _require_mapping(load_workflow_spec().get("install_defaults", {}), ".workflow.yaml install_defaults")
+    return {
+        "skill_match": [str(item) for item in _require_list(config.get("skill_match", []), ".workflow.yaml install_defaults.skill_match")],
+        "skill_exclude_match": [
+            str(item) for item in _require_list(config.get("skill_exclude_match", []), ".workflow.yaml install_defaults.skill_exclude_match")
+        ],
     }
 
 

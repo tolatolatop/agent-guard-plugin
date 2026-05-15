@@ -20,7 +20,7 @@ What `plan.yaml` is for:
 
 What `plan.yaml` is not for:
 
-- path scope
+- file write policy
 - stage transitions
 - required commands
 - review gates
@@ -60,7 +60,7 @@ When reading an existing plan:
 3. Confirm the step name exists at most once.
 4. Read `description` to understand the intended outcome.
 5. Read `status` to understand human-visible progress.
-6. Do not infer path scope or transition legality from the plan.
+6. Do not infer write policy or transition legality from the plan.
 
 ## Writing checklist
 

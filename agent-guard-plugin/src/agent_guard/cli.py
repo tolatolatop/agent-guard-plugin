@@ -71,6 +71,7 @@ Examples:
   agent-guard can-write tests/test_auth.py
   agent-guard record-command --cmd "pytest tests/test_auth.py" --exit-code 1 --log .agent/artifacts/red-test.log
   agent-guard install --runtime codex --scope project
+  agent-guard install --runtime claude-code --scope project --match workflow --exclude-match finalization
 """
 
 COMMAND_HELP: dict[str, str] = {
@@ -100,11 +101,15 @@ COMMAND_HELP: dict[str, str] = {
     "can-finalize": "Usage: agent-guard can-finalize\n\nCheck whether finalization is allowed.",
     "next-step": "Usage: agent-guard next-step\n\nShow the next step derived from state and plan.",
     "install": (
-        "Usage: agent-guard install [--runtime RUNTIME] [--scope SCOPE]\n\n"
+        "Usage: agent-guard install [--runtime RUNTIME] [--scope SCOPE] [--match REGEX ...] [--exclude-match REGEX ...]\n\n"
         "Install runtime integrations.\n\n"
+        "When --match/--exclude-match are omitted, install defaults may be read from .workflow.yaml.\n\n"
         "Options:\n"
         "  -r, --runtime RUNTIME   Supported: claude-code, codex, opencode\n"
-        "  -s, --scope SCOPE       Supported: project, user"
+        "  -s, --scope SCOPE       Supported: project, user\n"
+        "      --match REGEX       Include only skills whose slug or filename match. Repeatable.\n"
+        "      --exclude-match REGEX\n"
+        "                         Exclude skills whose slug or filename match. Repeatable."
     ),
     "uninstall": (
         "Usage: agent-guard uninstall [--runtime RUNTIME] [--scope SCOPE]\n\n"

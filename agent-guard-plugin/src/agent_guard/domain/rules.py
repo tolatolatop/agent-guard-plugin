@@ -43,7 +43,7 @@ def _all_plan_steps_terminal(context: RuleContext, value: Any | None) -> bool:
 
 
 def _review_artifact_present(context: RuleContext, value: Any | None) -> bool:
-    target = str(value or ".agent/artifacts/review.json")
+    target = str(value or ".agent/artifacts/review.md")
     return (context.root_dir / target).exists()
 
 
@@ -98,4 +98,3 @@ def evaluate_rule(name: str, context: RuleContext, value: Any | None = None) -> 
     if evaluator is None:
         raise RuntimeError(f"Unknown workflow rule: {name}")
     return evaluator(context, value)
-

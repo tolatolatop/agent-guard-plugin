@@ -79,7 +79,7 @@ Transition rules:
 - Use `advance-stage` for stage-only moves such as `CLARIFYING -> PLANNING` or when re-entering execution with the same step context.
 - `PLANNING -> RED_TEST` or `PLANNING -> GREEN_IMPL` uses static stage write permissions; it does not accept runtime scope overrides.
 - `GREEN_IMPL` must pass through `REVIEW` before entering `VERIFY`; direct `GREEN_IMPL -> VERIFY` is not allowed.
-- `REVIEW -> VERIFY` requires `.agent/artifacts/review.json`.
+- `REVIEW -> VERIFY` requires `.agent/artifacts/review.md`.
 - `VERIFY -> READY_TO_SUMMARIZE` requires successful `last_verification`, no running jobs, and the explicit `ready-to-summarize` command.
 - `VERIFY` may return directly to `RED_TEST` or `GREEN_IMPL` when more test or implementation work is needed.
 - `READY_TO_SUMMARIZE -> DONE` is only legal through `mark-done`, which internally requires `agent-guard can-finalize` to pass.

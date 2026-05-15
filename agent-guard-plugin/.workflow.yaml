@@ -67,6 +67,13 @@ globals:
       - RED_TEST
       - GREEN_IMPL
 
+  install:
+    skills:
+      # Optional default skill selection used by `agent-guard install`
+      # when no explicit CLI --match / --exclude-match flags are given.
+      match: []
+      exclude_match: []
+
 stages:
   IDLE:
     intent:
@@ -163,7 +170,7 @@ stages:
 
   PLANNING:
     intent:
-      goal: Break work into explicit steps with success conditions and path scope.
+      goal: Break work into explicit steps with clear success conditions and required evidence.
     permissions:
       write:
         allow:
@@ -192,7 +199,8 @@ stages:
         - .agent/plan.yaml
         - .agent/artifacts/PLAN.md
         - ./PLAN.md
-      required: []
+      required:
+        - .agent/plan.yaml
 
   RED_TEST:
     intent:
@@ -286,7 +294,7 @@ stages:
       enter_when: []
     evidence:
       required:
-        - .agent/artifacts/review.json
+        - .agent/artifacts/review.md
 
   VERIFY:
     intent:
