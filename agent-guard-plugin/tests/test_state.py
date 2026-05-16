@@ -4,6 +4,8 @@ import os
 from agent_guard.domain.policies import StageExitPolicyService
 from agent_guard.jobs import load_jobs
 from agent_guard.state import (
+    AGENT_GITIGNORE_CONTENT,
+    agent_gitignore_path,
     current_managed_state_dir,
     DEFAULT_JOBS,
     DEFAULT_STATE,
@@ -59,6 +61,27 @@ def test_init_creates_agent_artifacts_directory() -> None:
     extra_root.mkdir()
     ensure_agent_files(extra_root)
     assert (extra_root / ".agent" / "artifacts").is_dir()
+
+
+def test_init_creates_agent_gitignore_file() -> None:
+    """Test that init creates .agent/.gitignore for workspace-local state."""
+    root_dir = make_temp_repo()
+
+    gitignore_file = agent_gitignore_path(root_dir)
+
+    assert gitignore_file.exists()
+    assert gitignore_file.read_text(encoding="utf-8") == AGENT_GITIGNORE_CONTENT
+
+
+def test_ensure_agent_files_bootstraps_gitignore_for_fresh_workspace() -> None:
+    """Fresh workspaces should receive the standard .agent gitignore file."""
+    root_dir = make_temp_repo()
+    extra_root = root_dir / "fresh-gitignore"
+    extra_root.mkdir()
+
+    ensure_agent_files(extra_root)
+
+    assert agent_gitignore_path(extra_root).read_text(encoding="utf-8") == AGENT_GITIGNORE_CONTENT
 
 
 def test_state_saves_and_reloads_updates() -> None:

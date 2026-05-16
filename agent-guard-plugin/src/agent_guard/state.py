@@ -25,6 +25,7 @@ from agent_guard_file_lock import (
 
 AGENT_DIR = ".agent"
 ARTIFACTS_DIR = f"{AGENT_DIR}/artifacts"
+AGENT_GITIGNORE_CONTENT = "*\n!.gitignore\n"
 
 DEFAULT_STATE: dict[str, Any] = {
     "state_id": None,
@@ -107,6 +108,11 @@ def stage_artifacts_path(root_dir: Path) -> Path:
     return agent_dir(root_dir) / "stage-artifacts.json"
 
 
+def agent_gitignore_path(root_dir: Path) -> Path:
+    """Return the workspace-local .agent gitignore file."""
+    return agent_dir(root_dir) / ".gitignore"
+
+
 def _artifact_mtime_ns(root_dir: Path, artifact_path: str) -> int | None:
     candidate = (
         managed_document_backing_path(root_dir, artifact_path)
@@ -183,6 +189,9 @@ def ensure_agent_files(root_dir: Path) -> None:
     # .agent state, artifacts, and event files exist.
     """Ensure agent files."""
     artifacts_dir(root_dir).mkdir(parents=True, exist_ok=True)
+    gitignore_file = agent_gitignore_path(root_dir)
+    if not gitignore_file.exists():
+        gitignore_file.write_text(AGENT_GITIGNORE_CONTENT, encoding="utf-8")
     _write_json_if_missing(state_path(root_dir), DEFAULT_STATE)
     _write_json_if_missing(jobs_path(root_dir), DEFAULT_JOBS)
     _write_json_if_missing(failures_path(root_dir), DEFAULT_FAILURES)
