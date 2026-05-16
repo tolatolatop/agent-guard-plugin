@@ -49,11 +49,14 @@ class TaskSession:
     can_finalize: bool = False
     last_verification: VerificationRecord | None = None
     needs_human: bool = False
+    state_id: str | None = None
+    fuse: str = "disabled"
 
     @classmethod
     def from_mapping(cls, payload: dict[str, Any]) -> "TaskSession":
         """Build a task session from stored state."""
         return cls(
+            state_id=str(payload["state_id"]) if payload.get("state_id") is not None else None,
             task_id=str(payload["task_id"]) if payload.get("task_id") is not None else None,
             workflow_id=str(payload["workflow_id"]) if payload.get("workflow_id") is not None else None,
             stage=str(payload["stage"]),
@@ -61,11 +64,13 @@ class TaskSession:
             can_finalize=bool(payload.get("can_finalize", False)),
             last_verification=VerificationRecord.from_mapping(payload.get("last_verification")),
             needs_human=bool(payload.get("needs_human", False)),
+            fuse=str(payload.get("fuse") or "disabled"),
         )
 
     def to_mapping(self) -> dict[str, Any]:
         """Render to the persisted state format."""
         return {
+            "state_id": self.state_id,
             "task_id": self.task_id,
             "workflow_id": self.workflow_id,
             "stage": self.stage,
@@ -73,6 +78,7 @@ class TaskSession:
             "can_finalize": self.can_finalize,
             "last_verification": self.last_verification.to_mapping() if self.last_verification else None,
             "needs_human": self.needs_human,
+            "fuse": self.fuse,
         }
 
     def start(self, task_id: str, entry_stage: str = "CLARIFYING", workflow_id: str | None = None) -> "TaskSession":
@@ -111,6 +117,7 @@ class TaskSession:
         if stage == "NEEDS_HUMAN":
             next_needs_human = True
         return TaskSession(
+            state_id=self.state_id,
             task_id=self.task_id,
             workflow_id=self.workflow_id,
             stage=stage,
@@ -118,6 +125,7 @@ class TaskSession:
             can_finalize=next_can_finalize,
             last_verification=self.last_verification,
             needs_human=next_needs_human,
+            fuse=self.fuse,
         )
 
     def mark_ready_to_summarize(self, stage: str = "READY_TO_SUMMARIZE") -> "TaskSession":

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from agent_guard_file_lock import read_protected_text, resolve_protected_path, write_protected_text
 
 from ..domain.models import FailureRecord, Job, PlanStep, TaskSession
 from ..state import (
@@ -44,10 +45,11 @@ class PlanRepository:
 
     def load_raw(self) -> dict[str, Any] | None:
         """Load raw YAML plan data."""
-        if not self.file_path.exists():
+        actual_path = resolve_protected_path(self.root_dir, ".agent/plan.yaml")
+        if not actual_path.exists():
             return None
         try:
-            data = yaml.safe_load(self.file_path.read_text(encoding="utf-8")) or {}
+            data = yaml.safe_load(read_protected_text(self.root_dir, ".agent/plan.yaml")) or {}
         except yaml.YAMLError as exc:
             raise RuntimeError(f"plan.yaml is invalid YAML: {exc}") from exc
         if not isinstance(data, dict):
@@ -72,8 +74,12 @@ class PlanRepository:
             "task_id": task_id,
             "steps": [step.to_mapping() for step in steps],
         }
-        self.file_path.parent.mkdir(parents=True, exist_ok=True)
-        self.file_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+        write_protected_text(
+            self.root_dir,
+            ".agent/plan.yaml",
+            yaml.safe_dump(payload, sort_keys=False),
+            enforce_lock=False,
+        )
         return payload
 
     def update_step_status(self, step_id: str, status: str) -> dict[str, Any]:
@@ -91,7 +97,12 @@ class PlanRepository:
             break
         if not updated:
             raise RuntimeError(f"plan.yaml step {step_id} was not found.")
-        self.file_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+        write_protected_text(
+            self.root_dir,
+            ".agent/plan.yaml",
+            yaml.safe_dump(data, sort_keys=False),
+            enforce_lock=False,
+        )
         return data
 
 

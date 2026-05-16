@@ -30,7 +30,7 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agent_guard"]
+packages = ["src/agent_guard", "src/agent_guard_file_lock"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "workflows" = "agent_guard/_bundled_workflows"

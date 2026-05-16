@@ -3,7 +3,25 @@ from __future__ import annotations
 
 from typing import TextIO
 
-from InquirerPy import inquirer
+try:
+    from InquirerPy import inquirer
+except ImportError:  # pragma: no cover - optional at runtime
+    class _MissingInquirer:
+        """Placeholder object so tests can monkeypatch prompt methods."""
+
+        def select(self, **_: object) -> object:
+            raise RuntimeError("InquirerPy is not installed.")
+
+        def text(self, **_: object) -> object:
+            raise RuntimeError("InquirerPy is not installed.")
+
+        def confirm(self, **_: object) -> object:
+            raise RuntimeError("InquirerPy is not installed.")
+
+        def filepath(self, **_: object) -> object:
+            raise RuntimeError("InquirerPy is not installed.")
+
+    inquirer = _MissingInquirer()
 
 
 def _is_tty(stream: TextIO) -> bool:
@@ -14,7 +32,7 @@ def _is_tty(stream: TextIO) -> bool:
 
 def use_prompt_toolkit(input_stream: TextIO, output: TextIO) -> bool:
     """Use prompt toolkit."""
-    return _is_tty(input_stream) and _is_tty(output)
+    return type(inquirer).__name__ != "_MissingInquirer" and _is_tty(input_stream) and _is_tty(output)
 
 
 def confirm_action(message: str, input_stream: TextIO, output: TextIO) -> bool:
