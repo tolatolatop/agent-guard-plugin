@@ -585,6 +585,69 @@ def test_start_task_binds_named_repo_workflow() -> None:
     assert payload["state"]["stage"] == "QUESTIONING"
 
 
+def test_start_task_rejects_replacing_active_task_without_reset() -> None:
+    """Test that start-task cannot replace an active task identity."""
+    root_dir = make_temp_repo()
+    write_state(root_dir, task_id="old-task", stage="GREEN_IMPL", current_step="green-001")
+
+    code, payload = invoke_cli(root_dir, ["start-task", "new-task"])
+
+    assert code == 1
+    assert "reset-task" in payload["error"]
+    assert load_state(root_dir)["task_id"] == "old-task"
+
+
+def test_start_task_rejects_rebinding_active_workflow_without_reset() -> None:
+    """Test that start-task cannot change workflow binding while a task is active."""
+    root_dir = make_temp_repo()
+    (root_dir / "research.workflow.yaml").write_text(
+        "version: 2\n"
+        "workflow:\n"
+        "  id: research\n"
+        "  title: Research Workflow\n"
+        "  entry: QUESTIONING\n"
+        "globals:\n"
+        "  protected: []\n"
+        "  sensitive: []\n"
+        "  failures: {}\n"
+        "  finalize:\n"
+        "    require: []\n"
+        "  wizard:\n"
+        "    start_stages:\n"
+        "      - QUESTIONING\n"
+        "  session_start:\n"
+        "    navigator_skill: using-workflow\n"
+        "  install:\n"
+        "    skills:\n"
+        "      match: []\n"
+        "      exclude_match: []\n"
+        "stages:\n"
+        "  QUESTIONING:\n"
+        "    goal: Frame the research question.\n"
+        "    plan: create\n"
+        "    allow:\n"
+        "      write: []\n"
+        "      actions: []\n"
+        "      stop: true\n"
+        "      human: true\n"
+        "    deny:\n"
+        "      write: []\n"
+        "      actions: []\n"
+        "    enter: []\n"
+        "    exit: []\n"
+        "    expect: []\n"
+        "    next: []\n",
+        encoding="utf-8",
+    )
+    write_state(root_dir, task_id="market-scan", workflow_id="research", stage="QUESTIONING", current_step="question-001")
+
+    code, payload = invoke_cli(root_dir, ["start-task", "market-scan", "--workflow", "coding"])
+
+    assert code == 1
+    assert "different workflow" in payload["error"]
+    assert load_state(root_dir)["workflow_id"] == "research"
+
+
 def test_failure_analysis_artifact_must_be_updated_in_current_stage() -> None:
     """Test that a stale failure-analysis artifact must be refreshed after entering analysis stage."""
     root_dir = make_temp_repo()

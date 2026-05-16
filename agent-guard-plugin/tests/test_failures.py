@@ -50,6 +50,37 @@ def test_verify_command_records_final_verification_result() -> None:
     assert state["last_verification"]["exit_code"] == 0
 
 
+def test_failed_green_impl_command_keeps_event_stage_as_execution_stage() -> None:
+    """Failed commands should be attributed to the stage where they ran, not the escalated stage."""
+    root_dir = make_temp_repo()
+    write_state(root_dir, stage="GREEN_IMPL")
+
+    log_path = ".agent/artifacts/green-test.log"
+    (root_dir / log_path).write_text("expected failure\n", encoding="utf-8")
+
+    result = record_command_result(root_dir, "pytest", 1, log_path)
+
+    assert result["state"]["stage"] == "NEEDS_FAILURE_ANALYSIS"
+    assert result["event"]["stage"] == "GREEN_IMPL"
+
+
+def test_failed_verify_command_records_verification_and_keeps_event_stage() -> None:
+    """Verification commands should keep their original stage in the event log even when they escalate."""
+    root_dir = make_temp_repo()
+    write_state(root_dir, stage="VERIFY")
+
+    log_path = ".agent/artifacts/final-verification.log"
+    (root_dir / log_path).write_text("boom\n", encoding="utf-8")
+
+    result = record_command_result(root_dir, "pytest", 1, log_path)
+    state = load_state(root_dir)
+
+    assert result["state"]["stage"] == "NEEDS_FAILURE_ANALYSIS"
+    assert result["event"]["stage"] == "VERIFY"
+    assert state["last_verification"]["command"] == "pytest"
+    assert state["last_verification"]["exit_code"] == 1
+
+
 def test_success_command_without_log_only_records_event() -> None:
     """Test that success command without log only records event."""
     root_dir = make_temp_repo()

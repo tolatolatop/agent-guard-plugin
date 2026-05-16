@@ -113,7 +113,7 @@ class StageExitPolicyService:
         """Return required-artifact exit failures for one stage."""
         from ..state import ensure_stage_artifact_snapshot, load_stage_artifact_snapshot
 
-        session = self.state_repo.load() if hasattr(self, "state_repo") else StateRepository(self.root_dir).load()
+        session = self.state_repo.load()
         required_rules = stage_required_artifact_rules(stage, self.root_dir, session.workflow_id)
         if not required_rules:
             return []
@@ -174,6 +174,7 @@ class FailurePolicyService:
     def record_command_execution(self, command: str, exit_code: int, log_path: str | None) -> dict[str, Any]:
         """Record command evidence and update session state."""
         session = self.state_repo.load()
+        execution_stage = session.stage
         absolute_log = (self.root_dir / log_path) if log_path else None
         fingerprint = self.latest_code_fingerprint()
         last_failure = self.failures_repo.load()
@@ -222,7 +223,7 @@ class FailurePolicyService:
                 "hook": "AfterCommand",
                 "command": command,
                 "exit_code": exit_code,
-                "stage": next_session.stage,
+                "stage": execution_stage,
                 **({"log_path": log_path} if log_path else {}),
             },
         )

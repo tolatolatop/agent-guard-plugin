@@ -2,14 +2,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
-
 from .domain.models import TaskSession
 from .domain.policies import StageExitPolicyService
 from .domain.rules import RuleContext, evaluate_rule
 from .events import append_event
 from .gates import can_finalize
-from .jobs import load_jobs
 from .plan import plan_step_entities, update_plan_step_status
 from .state import AGENT_DIR, load_task_session, save_task_session
 from .workflow_spec import (
@@ -50,17 +47,6 @@ def automatic_transitions() -> list[str]:
         f"reset-task: archives a completed task and starts a new one in {canonical_entry_stage()}",
     ]
 
-
-def _has_active_task(state: dict[str, Any]) -> bool:
-    """Internal helper for has active task."""
-    return bool(state.get("task_id"))
-
-def _has_running_jobs(root_dir: Path) -> bool:
-    """Internal helper for has running jobs."""
-    jobs = load_jobs(root_dir)
-    return any(job.get("status") == "running" for job in jobs.get("jobs", []))
-
-
 def _require_direct_transition(from_stage: str, to_stage: str, workflow_id: str | None = None) -> None:
     """Internal helper for require direct transition."""
     transitions = stage_transitions(workflow_id=workflow_id)
@@ -75,20 +61,19 @@ def _require_direct_transition(from_stage: str, to_stage: str, workflow_id: str 
 
 def _guard_transition(
     root_dir: Path,
-    state: dict[str, Any],
+    session: TaskSession,
     to_stage: str,
     command_name: str,
     step_id: str | None,
 ) -> None:
     """Internal helper for guard transition."""
-    from_stage = str(state.get("stage"))
-    workflow_id = str(state.get("workflow_id")) if isinstance(state.get("workflow_id"), str) else None
+    from_stage = session.stage
+    workflow_id = session.workflow_id
     _require_direct_transition(from_stage, to_stage, workflow_id)
     artifact_failures = StageExitPolicyService(root_dir).exit_failures(from_stage)
     if artifact_failures:
         raise RuntimeError(f"Leaving {from_stage} requires {'; '.join(artifact_failures)}")
 
-    session = TaskSession.from_mapping(state)
     context = RuleContext(root_dir, session, command_name=command_name)
     for condition in stage_exit_rule_conditions(from_stage, root_dir, workflow_id):
         display = condition["display"]
@@ -148,7 +133,7 @@ def advance_stage(
 ) -> dict[str, Any]:
     """Advance stage."""
     session = load_task_session(root_dir)
-    _guard_transition(root_dir, session.to_mapping(), to_stage, "advance-stage", step_id)
+    _guard_transition(root_dir, session, to_stage, "advance-stage", step_id)
 
     resolved_step = step_id or session.current_step
     from_stage = session.stage
@@ -207,7 +192,7 @@ def ready_to_summarize(root_dir: Path) -> dict[str, Any]:
     session = load_task_session(root_dir)
     from_stage = session.stage
     target_stage = canonical_completion_ready_stage(root_dir, session.workflow_id)
-    _guard_transition(root_dir, session.to_mapping(), target_stage, "ready-to-summarize", None)
+    _guard_transition(root_dir, session, target_stage, "ready-to-summarize", None)
     next_session = session.mark_ready_to_summarize(target_stage)
     save_task_session(root_dir, next_session)
     event = _append_transition_event(root_dir, "ready-to-summarize", from_stage, target_stage, next_session)
@@ -219,7 +204,7 @@ def mark_done(root_dir: Path) -> dict[str, Any]:
     session = load_task_session(root_dir)
     from_stage = session.stage
     target_stage = canonical_completion_stage(root_dir, session.workflow_id)
-    _guard_transition(root_dir, session.to_mapping(), target_stage, "mark-done", None)
+    _guard_transition(root_dir, session, target_stage, "mark-done", None)
     next_session = session.mark_done(target_stage)
     save_task_session(root_dir, next_session)
     event = _append_transition_event(root_dir, "mark-done", from_stage, target_stage, next_session)

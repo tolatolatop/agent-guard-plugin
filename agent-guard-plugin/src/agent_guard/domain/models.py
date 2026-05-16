@@ -77,9 +77,19 @@ class TaskSession:
 
     def start(self, task_id: str, entry_stage: str = "CLARIFYING", workflow_id: str | None = None) -> "TaskSession":
         """Start or resume a task session."""
-        next_stage = entry_stage if self.stage == "IDLE" else self.stage
-        next_workflow = workflow_id if self.stage == "IDLE" else self.workflow_id
-        return self.with_updates(task_id=task_id, workflow_id=next_workflow, stage=next_stage)
+        if self.stage != "IDLE":
+            if self.task_id and self.task_id != task_id:
+                raise RuntimeError(
+                    f"Active task {self.task_id} is already in progress. "
+                    "Use reset-task to archive it before starting a different task."
+                )
+            if workflow_id and self.workflow_id and workflow_id != self.workflow_id:
+                raise RuntimeError(
+                    f"Active task {self.task_id or task_id} is already bound to workflow {self.workflow_id}. "
+                    "Use reset-task before rebinding the task to a different workflow."
+                )
+            return self
+        return self.with_updates(task_id=task_id, workflow_id=workflow_id, stage=entry_stage)
 
     def with_updates(self, **changes: Any) -> "TaskSession":
         """Return a copy with selected updates."""

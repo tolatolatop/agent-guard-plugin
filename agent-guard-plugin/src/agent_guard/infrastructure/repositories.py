@@ -11,13 +11,12 @@ from ..domain.models import FailureRecord, Job, PlanStep, TaskSession
 from ..state import (
     DEFAULT_FAILURES,
     DEFAULT_JOBS,
-    DEFAULT_STATE,
     events_path,
     failures_path,
     jobs_path,
+    load_task_session,
     read_json,
-    save_state,
-    state_path,
+    save_task_session,
 )
 
 
@@ -29,15 +28,11 @@ class StateRepository:
 
     def load(self) -> TaskSession:
         """Load the task session aggregate."""
-        file_path = state_path(self.root_dir)
-        if not file_path.exists():
-            return TaskSession.from_mapping(DEFAULT_STATE)
-        return TaskSession.from_mapping(read_json(file_path, "state.json"))
+        return load_task_session(self.root_dir)
 
     def save(self, session: TaskSession) -> TaskSession:
         """Persist the task session aggregate."""
-        save_state(self.root_dir, session.to_mapping())
-        return session
+        return save_task_session(self.root_dir, session)
 
 
 class PlanRepository:

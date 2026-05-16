@@ -33,6 +33,26 @@ def test_idle_start_task_uses_canonical_entry_stage() -> None:
     assert result["state"]["task_id"] == "password-reset"
 
 
+def test_active_start_task_does_not_recompute_entry_stage() -> None:
+    """Active tasks should be handled by the aggregate without consulting workflow entry stage."""
+    root_dir = make_temp_repo()
+    session = TaskSession(task_id="market-scan", workflow_id="research", stage="QUESTIONING", current_step="question-001")
+    repo = Mock()
+    repo.load.return_value = session
+    repo.save.side_effect = lambda updated: updated
+
+    with (
+        patch("agent_guard.application.use_cases.ensure_agent_files"),
+        patch("agent_guard.application.use_cases.StateRepository", return_value=repo),
+        patch("agent_guard.application.use_cases.canonical_entry_stage") as canonical_entry_stage,
+    ):
+        with pytest.raises(RuntimeError) as exc:
+            start_task(root_dir, "market-scan", workflow_id="coding")
+
+    canonical_entry_stage.assert_not_called()
+    assert "different workflow" in str(exc.value)
+
+
 def test_clarifying_stop_allows_without_finalize_check() -> None:
     """CLARIFYING: stop should be allowed immediately."""
     root_dir = make_temp_repo()
@@ -186,7 +206,7 @@ def test_ready_to_summarize_mark_done_targets_completion_stage() -> None:
     ):
         result = mark_done(root_dir)
 
-    guard.assert_called_once_with(root_dir, session.to_mapping(), "DONE", "mark-done", None)
+    guard.assert_called_once_with(root_dir, session, "DONE", "mark-done", None)
     assert save_session.call_args.args[1].stage == "DONE"
     assert result["state"]["stage"] == "DONE"
 
@@ -194,7 +214,7 @@ def test_ready_to_summarize_mark_done_targets_completion_stage() -> None:
 def test_needs_failure_analysis_exit_guard_checks_artifacts() -> None:
     """NEEDS_FAILURE_ANALYSIS: transition guard should enforce exit artifacts."""
     root_dir = make_temp_repo()
-    state = {"task_id": "password-reset", "stage": "NEEDS_FAILURE_ANALYSIS", "current_step": "green-001", "can_finalize": False}
+    session = TaskSession(task_id="password-reset", workflow_id=None, stage="NEEDS_FAILURE_ANALYSIS", current_step="green-001")
 
     with (
         patch("agent_guard.transitions.STAGE_TRANSITIONS", {"NEEDS_FAILURE_ANALYSIS": ["VERIFY"], "VERIFY": []}),
@@ -203,7 +223,7 @@ def test_needs_failure_analysis_exit_guard_checks_artifacts() -> None:
     ):
         policy_service.return_value.exit_failures.return_value = ["failure-analysis.md must be updated"]
         with pytest.raises(RuntimeError) as exc:
-            _guard_transition(root_dir, state, "VERIFY", "advance-stage", "green-001")
+            _guard_transition(root_dir, session, "VERIFY", "advance-stage", "green-001")
 
     assert "failure-analysis.md must be updated" in str(exc.value)
     policy_service.return_value.exit_failures.assert_called_once_with("NEEDS_FAILURE_ANALYSIS")

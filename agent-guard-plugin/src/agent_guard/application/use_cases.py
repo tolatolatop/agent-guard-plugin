@@ -25,10 +25,11 @@ def start_task(root_dir: Path, task_id: str, workflow_id: str | None = None) -> 
     repo = StateRepository(root_dir)
     session = repo.load()
     resolved_workflow = workflow_id or session.workflow_id
+    entry_stage = session.stage if session.stage != "IDLE" else canonical_entry_stage(root_dir, resolved_workflow)
     updated = repo.save(
         session.start(
             task_id,
-            entry_stage=canonical_entry_stage(root_dir, resolved_workflow),
+            entry_stage=entry_stage,
             workflow_id=resolved_workflow,
         )
     )
