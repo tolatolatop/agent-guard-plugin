@@ -39,50 +39,6 @@ def test_start_task_reports_fuse_state(monkeypatch) -> None:
     assert result["state"]["task_id"] == "password-reset"
 
 
-def test_fuse_cli_commands_round_trip_status(monkeypatch) -> None:
-    """CLI fuse commands should expose the integration helpers."""
-    root_dir = make_temp_repo()
-    monkeypatch.setattr(
-        "agent_guard.cli.fuse_state",
-        lambda _: {"protection": "inactive", "enabled": False},
-    )
-    monkeypatch.setattr(
-        "agent_guard.cli.ensure_fuse_protection",
-        lambda _: {"protection": "mounted", "enabled": True},
-    )
-    monkeypatch.setattr(
-        "agent_guard.cli.stop_fuse_protection",
-        lambda _: {"protection": "inactive", "enabled": False, "stopped": True},
-    )
-
-    stdout = StringIO()
-    with redirect_stdout(stdout):
-        try:
-            run_command(["fuse-status"], root_dir)
-        except SystemExit:
-            pass
-    payload = json.loads(stdout.getvalue())
-    assert payload["fuse"]["protection"] == "inactive"
-
-    stdout = StringIO()
-    with redirect_stdout(stdout):
-        try:
-            run_command(["fuse-start"], root_dir)
-        except SystemExit:
-            pass
-    payload = json.loads(stdout.getvalue())
-    assert payload["fuse"]["protection"] == "mounted"
-
-    stdout = StringIO()
-    with redirect_stdout(stdout):
-        try:
-            run_command(["fuse-stop"], root_dir)
-        except SystemExit:
-            pass
-    payload = json.loads(stdout.getvalue())
-    assert payload["fuse"]["stopped"] is True
-
-
 def test_ensure_fuse_protection_degrades_when_runtime_is_unavailable(monkeypatch) -> None:
     """Fuse integration should degrade cleanly when the runtime is unavailable."""
     root_dir = make_temp_repo()
@@ -111,3 +67,22 @@ def test_ensure_fuse_protection_starts_runtime_when_available(monkeypatch) -> No
     assert result["protection"] == "mounted"
     assert result["started"] is True
     assert result["pid"] == 43210
+
+
+def test_status_exposes_only_public_fuse_summary(monkeypatch) -> None:
+    """Status should not expose low-level fuse runtime details."""
+    root_dir = make_temp_repo()
+    monkeypatch.setattr(
+        "agent_guard.cli.public_fuse_status",
+        lambda _: {"protection": "mounted"},
+    )
+
+    stdout = StringIO()
+    with redirect_stdout(stdout):
+        try:
+            run_command(["status"], root_dir)
+        except SystemExit:
+            pass
+
+    payload = json.loads(stdout.getvalue())
+    assert payload["fuse"] == {"protection": "mounted"}

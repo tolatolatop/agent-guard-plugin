@@ -29,6 +29,19 @@ def fuse_state(root_dir: Path) -> dict[str, Any]:
     }
 
 
+def public_fuse_status(root_dir: Path) -> dict[str, Any]:
+    """Return the public-facing FUSE summary for agent-guard surfaces."""
+    current = ensure_fuse_protection(root_dir)
+    summary = {
+        "protection": current["protection"],
+    }
+    if "reason" in current:
+        summary["reason"] = current["reason"]
+    if "started" in current:
+        summary["started"] = current["started"]
+    return summary
+
+
 def ensure_fuse_protection(root_dir: Path) -> dict[str, Any]:
     """Start the workspace FUSE runtime when available and not already mounted."""
     current = fuse_state(root_dir)
