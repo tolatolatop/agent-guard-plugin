@@ -9,6 +9,7 @@ description = "Minimal runtime guard plugin for coding agents"
 readme = "docs/runtime-install.md"
 requires-python = ">=3.11"
 dependencies = [
+  "InquirerPy>=0.3",
   "prompt-toolkit>=3.0",
   "pyyaml>=6.0",
 ]

@@ -1,13 +1,9 @@
 """Interactive terminal prompts used by setup and uninstall flows."""
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TextIO
 
-from prompt_toolkit import prompt
-from prompt_toolkit.completion import WordCompleter
-from prompt_toolkit.completion import PathCompleter
-from prompt_toolkit.shortcuts import confirm
+from InquirerPy import inquirer
 
 
 def _is_tty(stream: TextIO) -> bool:
@@ -24,7 +20,7 @@ def use_prompt_toolkit(input_stream: TextIO, output: TextIO) -> bool:
 def confirm_action(message: str, input_stream: TextIO, output: TextIO) -> bool:
     """Confirm action."""
     if use_prompt_toolkit(input_stream, output):
-        return bool(confirm(message=message))
+        return bool(inquirer.confirm(message=message, default=False).execute())
 
     output.write(f"{message} [y/N]: ")
     output.flush()
@@ -40,7 +36,8 @@ def prompt_text(
 ) -> str:
     """Prompt for text."""
     if use_prompt_toolkit(input_stream, output):
-        return prompt(f"{message}: ", default=default).strip()
+        answer = inquirer.text(message=message, default=default).execute()
+        return str(answer).strip()
 
     suffix = f" [{default}]" if default else ""
     output.write(f"{message}{suffix}: ")
@@ -58,11 +55,9 @@ def prompt_choice(
 ) -> str:
     """Prompt for choice."""
     if use_prompt_toolkit(input_stream, output):
-        completer = WordCompleter(choices, ignore_case=True, sentence=True)
-        while True:
-            answer = prompt(f"{message}: ", default=default, completer=completer).strip() or default
-            if answer in choices:
-                return answer
+        answer = inquirer.select(message=message, choices=choices, default=default).execute()
+        if answer in choices:
+            return str(answer)
 
     options = "/".join(choices)
     while True:
@@ -81,6 +76,7 @@ def prompt_path(
 ) -> str:
     """Prompt for path."""
     if use_prompt_toolkit(input_stream, output):
-        return prompt(f"{message}: ", default=default, completer=PathCompleter(expanduser=True)).strip()
+        answer = inquirer.filepath(message=message, default=default).execute()
+        return str(answer).strip()
 
     return prompt_text(message, input_stream, output, default=default)
