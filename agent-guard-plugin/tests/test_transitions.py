@@ -539,7 +539,8 @@ def test_cli_failed_verify_requires_failure_analysis_then_allows_reentry() -> No
 def test_start_task_binds_named_repo_workflow() -> None:
     """Test that start-task may bind a named repo-local workflow file."""
     root_dir = make_temp_repo()
-    (root_dir / "research.workflow.yaml").write_text(
+    (root_dir / "workflows").mkdir()
+    (root_dir / "workflows" / "research.workflow.yaml").write_text(
         "version: 2\n"
         "workflow:\n"
         "  id: research\n"
@@ -585,6 +586,17 @@ def test_start_task_binds_named_repo_workflow() -> None:
     assert payload["state"]["stage"] == "QUESTIONING"
 
 
+def test_start_task_binds_checked_in_docs_workflow() -> None:
+    """Test that start-task may bind the checked-in docs workflow file."""
+    root_dir = make_temp_repo()
+
+    code, payload = invoke_cli(root_dir, ["start-task", "api-guide", "--workflow", "docs"])
+
+    assert code == 0
+    assert payload["state"]["workflow_id"] == "docs"
+    assert payload["state"]["stage"] == "INTAKE"
+
+
 def test_start_task_rejects_replacing_active_task_without_reset() -> None:
     """Test that start-task cannot replace an active task identity."""
     root_dir = make_temp_repo()
@@ -600,7 +612,8 @@ def test_start_task_rejects_replacing_active_task_without_reset() -> None:
 def test_start_task_rejects_rebinding_active_workflow_without_reset() -> None:
     """Test that start-task cannot change workflow binding while a task is active."""
     root_dir = make_temp_repo()
-    (root_dir / "research.workflow.yaml").write_text(
+    (root_dir / "workflows").mkdir()
+    (root_dir / "workflows" / "research.workflow.yaml").write_text(
         "version: 2\n"
         "workflow:\n"
         "  id: research\n"

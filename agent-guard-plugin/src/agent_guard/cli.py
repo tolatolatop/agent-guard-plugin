@@ -112,7 +112,7 @@ COMMAND_HELP: dict[str, str] = {
         "Install runtime integrations.\n\n"
         "When --runtime or --scope are omitted, install will prompt only for the missing values.\n\n"
         "Use --wizard to enter the setup wizard immediately after install completes.\n\n"
-        "When --match/--exclude-match are omitted, install defaults may be read from .workflow.yaml.\n\n"
+        "When --match/--exclude-match are omitted, install defaults may be read from workflows/default.workflow.yaml.\n\n"
         "Options:\n"
         "  -r, --runtime RUNTIME   Supported: claude-code, codex, opencode\n"
         "  -s, --scope SCOPE       Supported: project, user\n"

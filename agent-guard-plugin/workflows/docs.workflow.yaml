@@ -1,0 +1,293 @@
+version: 2
+
+workflow:
+  id: docs
+  title: Documentation Workflow
+  description: Workflow for documentation tasks, drafting, review, and publication-ready handoff.
+  entry: INTAKE
+
+global_gates:
+  - Do not write outside stage permissions.
+  - Do not retry identical failing commands without code changes or failure analysis.
+  - Do not claim completion unless can-finalize passes.
+  - Do not modify .agent/state.json directly; use agent-guard workflow commands to change task state.
+
+globals:
+  protected:
+    - .agent/state.json
+
+  sensitive:
+    - .github/**
+    - infra/**
+    - migrations/**
+    - package-lock.json
+    - pnpm-lock.yaml
+    - yarn.lock
+    - poetry.lock
+    - Cargo.lock
+
+  failures:
+    repeat_threshold: 2
+    fingerprint_roots:
+      - docs
+      - guides
+      - handbook
+
+  finalize:
+    require:
+      - rule: no_running_jobs
+      - rule: can_finalize_flag
+      - rule: all_plan_steps_terminal
+    messages:
+      no_running_jobs: running jobs still exist
+      can_finalize_flag: state.can_finalize is not true
+      all_plan_steps_terminal: all plan steps must be done or failed
+
+  wizard:
+    start_stages:
+      - INTAKE
+      - OUTLINE
+      - DRAFT
+
+  session_start:
+    navigator_skill: using-workflow
+
+  install:
+    skills:
+      match: []
+      exclude_match: []
+
+stages:
+  IDLE:
+    goal: Load task state and determine the next documentation step.
+    plan: deny
+    allow:
+      write:
+        - .agent/**
+      actions:
+        - read .agent state
+        - inspect repository in read-only mode
+        - start-task when task_id is unset
+      stop: true
+      human: true
+    deny:
+      write: []
+      actions:
+        - modify repository files before a task is started
+        - claim work is complete
+    enter: []
+    exit: []
+    expect: []
+    next:
+      - INTAKE
+
+  INTAKE:
+    goal: Clarify the audience, document purpose, constraints, and source material.
+    plan: deny
+    allow:
+      write:
+        - .agent/**
+      actions:
+        - inspect existing docs
+        - clarify audience and scope
+        - capture unknowns
+      stop: true
+      human: true
+    deny:
+      write: []
+      actions:
+        - broad drafting before scope is settled
+    enter: []
+    exit: []
+    expect: []
+    next:
+      - OUTLINE
+      - DRAFT
+
+  OUTLINE:
+    goal: Create the document outline and the concrete writing plan.
+    plan: create
+    allow:
+      write: []
+      actions:
+        - write or refine plan.yaml
+        - define structure and sections
+      stop: true
+      human: true
+    deny:
+      write: []
+      actions:
+        - broad drafting without an outline
+    enter: []
+    exit: []
+    expect: []
+    next:
+      - DRAFT
+
+  DRAFT:
+    goal: Write or revise the document content within the approved scope.
+    plan: advance
+    allow:
+      write:
+        - docs/**
+        - "*.md"
+        - .agent/artifacts/draft.md
+      actions:
+        - draft or revise content
+        - add examples
+        - improve structure and clarity
+      stop: false
+      human: false
+    deny:
+      write:
+        - src/**
+        - tests/**
+      actions:
+        - modify implementation code
+        - claim the document is final without review
+    enter: []
+    exit:
+      - .agent/artifacts/draft.md
+    expect: []
+    next:
+      - REVIEW
+      - NEEDS_FAILURE_ANALYSIS
+
+  REVIEW:
+    goal: Review the document for correctness, clarity, and coverage.
+    plan: advance
+    allow:
+      write:
+        - docs/**
+        - "*.md"
+        - .agent/artifacts/review.md
+      actions:
+        - review wording and structure
+        - capture review feedback
+        - apply narrow fixes from review findings
+      stop: false
+      human: true
+    deny:
+      write:
+        - src/**
+        - tests/**
+      actions:
+        - unrelated rewrites
+    enter: []
+    exit:
+      - .agent/artifacts/review.md
+    expect: []
+    next:
+      - VALIDATE
+      - DRAFT
+      - NEEDS_FAILURE_ANALYSIS
+
+  VALIDATE:
+    goal: Validate the final document against formatting, completeness, and publishing checks.
+    plan: advance
+    allow:
+      write:
+        - .agent/artifacts/final-verification.log
+      actions:
+        - run documentation checks
+        - record final verification results
+      stop: false
+      human: true
+    deny:
+      write:
+        - src/**
+        - tests/**
+      actions:
+        - start new drafting work without returning to DRAFT
+    enter: []
+    exit:
+      - .agent/artifacts/final-verification.log
+    expect: []
+    next:
+      - READY_TO_PUBLISH
+      - DRAFT
+      - REVIEW
+      - NEEDS_FAILURE_ANALYSIS
+
+  READY_TO_PUBLISH:
+    goal: Final checks are satisfied and the document is ready to close or publish.
+    plan: complete
+    allow:
+      write:
+        - .agent/artifacts/summary.md
+      actions:
+        - finalize summary
+        - prepare publishing handoff
+      stop: true
+      human: true
+    deny:
+      write:
+        - src/**
+        - tests/**
+      actions:
+        - continue drafting
+    enter:
+      - rule: required_command
+        value: ready-to-summarize
+        display: use ready-to-summarize
+    exit:
+      - .agent/artifacts/summary.md
+    expect: []
+    next:
+      - DONE
+
+  NEEDS_FAILURE_ANALYSIS:
+    goal: Analyze blocked review or validation failures before resuming document work.
+    plan: follow
+    allow:
+      write:
+        - .agent/artifacts/failure-analysis.md
+        - .agent/plan.yaml
+      actions:
+        - write failure analysis
+        - revise the plan
+      stop: true
+      human: true
+    deny:
+      write:
+        - src/**
+        - tests/**
+      actions:
+        - retry blindly
+        - claim the task is complete
+    enter: []
+    exit:
+      - path: .agent/artifacts/failure-analysis.md
+        matches: "^## Failure Summary"
+        message: failure-analysis.md must start with the Failure Summary section.
+    expect: []
+    next:
+      - DRAFT
+      - REVIEW
+      - VALIDATE
+
+  DONE:
+    goal: Documentation task is complete.
+    plan: complete
+    final: true
+    allow:
+      write:
+        - .agent/**
+      actions:
+        - inspect task state
+        - archive task state
+      stop: true
+      human: true
+    deny:
+      write: []
+      actions:
+        - resume normal execution
+    enter:
+      - rule: required_command
+        value: mark-done
+        display: use mark-done
+      - rule: can_finalize_passes
+        display: can-finalize must pass
+    exit: []
+    expect: []
+    next: []

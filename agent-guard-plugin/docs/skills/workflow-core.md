@@ -93,7 +93,7 @@ Use only these workflow commands during normal stage progression:
 Use them like this:
 
 - Use `start-task` once at task start.
-- Use `start-task --workflow research` when the task should bind to `research.workflow.yaml`.
+- Use `start-task --workflow research` when the task should bind to `workflows/research.workflow.yaml`.
 - Use `status`, `session-start`, and `next-step` to rehydrate workflow context before acting.
 - Prefer `complete-step` when a real planned step finished.
 - Use `advance-stage` for stage-only moves such as `CLARIFYING -> PLANNING` or `REVIEW -> GREEN_IMPL`.

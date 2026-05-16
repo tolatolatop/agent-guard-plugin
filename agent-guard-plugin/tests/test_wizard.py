@@ -17,7 +17,8 @@ def make_repo() -> Path:
 
 def write_research_workflow(root: Path) -> None:
     """Write one minimal named workflow for wizard selection tests."""
-    (root / "research.workflow.yaml").write_text(
+    (root / "workflows").mkdir(exist_ok=True)
+    (root / "workflows" / "research.workflow.yaml").write_text(
         "\n".join(
             [
                 "version: 2",
@@ -80,6 +81,7 @@ def test_wizard_writes_state_and_plan_from_plain_streams() -> None:
     """Test that wizard writes state and plan from plain streams."""
     root = make_repo()
     answers = StringIO(
+        "default\n"
         "\n"
         "Build ffmpeg wrapper\n"
         "RED_TEST\n"
@@ -107,6 +109,7 @@ def test_wizard_can_skip_plan_generation() -> None:
     """Test that wizard can skip plan generation."""
     root = make_repo()
     answers = StringIO(
+        "default\n"
         "video-clipper\n"
         "Scaffold project\n"
         "CLARIFYING\n"
@@ -141,3 +144,25 @@ def test_wizard_lists_named_workflows_and_binds_selected_workflow() -> None:
     state = load_state(root)
     assert state["workflow_id"] == "research"
     assert state["stage"] == "DISCOVER"
+
+
+def test_wizard_lists_checked_in_named_workflows() -> None:
+    """Wizard should show the checked-in named workflows when run in the repository."""
+    root = make_repo()
+    output = StringIO()
+    answers = StringIO(
+        "docs\n"
+        "\n"
+        "Draft API guide\n"
+        "\n"
+        "\n"
+        "n\n"
+    )
+
+    result = run_wizard(root, answers, output)
+
+    assert "Workflow" in output.getvalue()
+    assert "docs" in output.getvalue()
+    assert "research" in output.getvalue()
+    assert result["workflow_id"] == "docs"
+    assert result["state"]["stage"] == "INTAKE"

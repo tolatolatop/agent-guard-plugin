@@ -7,8 +7,10 @@ from agent_guard.workflow_spec import (
     canonical_completion_ready_stage,
     canonical_completion_stage,
     canonical_entry_stage,
+    canonical_failure_analysis_stage,
     canonical_stage_plan_mode,
     canonical_stage_spec,
+    canonical_verification_stage,
     canonical_workflow_spec,
     discover_workflow_ids,
     failure_policy,
@@ -492,6 +494,15 @@ def test_discover_workflow_ids_prefers_user_workflow_directory(monkeypatch, tmp_
     assert "research" in workflow_ids
 
 
+def test_checked_in_named_workflows_are_discoverable() -> None:
+    """The repository should expose the checked-in named workflows for selection."""
+    workflow_ids = discover_workflow_ids(Path(__file__).resolve().parents[1])
+
+    assert workflow_ids[0] == "default"
+    assert "research" in workflow_ids
+    assert "docs" in workflow_ids
+
+
 def test_load_workflow_spec_prefers_user_workflow_over_repo(monkeypatch, tmp_path: Path) -> None:
     """Test that user-level workflow files override repository-local workflow files."""
     user_dir = tmp_path / "user"
@@ -522,7 +533,8 @@ def test_load_workflow_spec_prefers_user_workflow_over_repo(monkeypatch, tmp_pat
         ),
         encoding="utf-8",
     )
-    (repo_dir / "research.workflow.yaml").write_text(
+    (repo_dir / "workflows").mkdir()
+    (repo_dir / "workflows" / "research.workflow.yaml").write_text(
         yaml.safe_dump(
             {
                 "version": 2,
@@ -554,9 +566,48 @@ def test_load_workflow_spec_prefers_user_workflow_over_repo(monkeypatch, tmp_pat
     load_workflow_spec.cache_clear()
 
 
+def test_checked_in_research_workflow_loads_and_projects_compatibility_helpers() -> None:
+    """The checked-in research workflow should be loadable through the named-workflow path."""
+    spec = load_workflow_spec(workflow_id="research")
+
+    assert spec["metadata"]["id"] == "research"
+    assert spec["entry_stage"] == "QUESTIONING"
+    assert wizard_defaults(workflow_id="research")["start_stages"] == ["QUESTIONING", "DISCOVER", "ANALYZE"]
+    assert canonical_entry_stage(workflow_id="research") == "QUESTIONING"
+    assert canonical_verification_stage(workflow_id="research") == "VALIDATE"
+    assert canonical_failure_analysis_stage(workflow_id="research") == "NEEDS_FAILURE_ANALYSIS"
+    assert canonical_completion_ready_stage(workflow_id="research") == "READY_TO_DELIVER"
+    assert canonical_completion_stage(workflow_id="research") == "DONE"
+    assert stage_write_policy("DISCOVER", workflow_id="research")["writable_paths"] == [
+        "docs/**",
+        "notes/**",
+        "reports/**",
+        ".agent/artifacts/research-brief.md",
+    ]
+
+
+def test_checked_in_docs_workflow_loads_and_projects_compatibility_helpers() -> None:
+    """The checked-in docs workflow should expose its own stage model and compatibility targets."""
+    spec = load_workflow_spec(workflow_id="docs")
+
+    assert spec["metadata"]["id"] == "docs"
+    assert spec["entry_stage"] == "INTAKE"
+    assert wizard_defaults(workflow_id="docs")["start_stages"] == ["INTAKE", "OUTLINE", "DRAFT"]
+    assert canonical_entry_stage(workflow_id="docs") == "INTAKE"
+    assert canonical_verification_stage(workflow_id="docs") == "VALIDATE"
+    assert canonical_failure_analysis_stage(workflow_id="docs") == "NEEDS_FAILURE_ANALYSIS"
+    assert canonical_completion_ready_stage(workflow_id="docs") == "READY_TO_PUBLISH"
+    assert canonical_completion_stage(workflow_id="docs") == "DONE"
+    assert stage_write_policy("DRAFT", workflow_id="docs")["writable_paths"] == [
+        "docs/**",
+        "*.md",
+        ".agent/artifacts/draft.md",
+    ]
+
+
 def test_load_workflow_spec_reports_friendly_message_for_invalid_yaml(monkeypatch, tmp_path: Path) -> None:
     """Test that invalid workflow YAML reports a repair-required message."""
-    workflow_file = tmp_path / ".workflow.yaml"
+    workflow_file = tmp_path / "default.workflow.yaml"
     workflow_file.write_text("workflow: [\n", encoding="utf-8")
     load_workflow_spec.cache_clear()
     monkeypatch.setattr("agent_guard.workflow_spec.packaged_workflow_path", lambda workflow_id=None: workflow_file)
@@ -565,7 +616,7 @@ def test_load_workflow_spec_reports_friendly_message_for_invalid_yaml(monkeypatc
     try:
         load_workflow_spec()
     except RuntimeError as exc:
-        assert ".workflow.yaml appears damaged" in str(exc)
+        assert "appears damaged" in str(exc)
         assert "cannot continue" in str(exc)
     else:
         raise AssertionError("Expected invalid workflow YAML to fail")
@@ -575,7 +626,7 @@ def test_load_workflow_spec_reports_friendly_message_for_invalid_yaml(monkeypatc
 
 def test_load_workflow_spec_reports_friendly_message_for_non_mapping(monkeypatch, tmp_path: Path) -> None:
     """Test that non-mapping workflow documents report a repair-required message."""
-    workflow_file = tmp_path / ".workflow.yaml"
+    workflow_file = tmp_path / "default.workflow.yaml"
     workflow_file.write_text("- bad\n", encoding="utf-8")
     load_workflow_spec.cache_clear()
     monkeypatch.setattr("agent_guard.workflow_spec.packaged_workflow_path", lambda workflow_id=None: workflow_file)
@@ -584,7 +635,7 @@ def test_load_workflow_spec_reports_friendly_message_for_non_mapping(monkeypatch
     try:
         load_workflow_spec()
     except RuntimeError as exc:
-        assert ".workflow.yaml appears damaged" in str(exc)
+        assert "appears damaged" in str(exc)
         assert "cannot continue" in str(exc)
         assert "top-level document must be a YAML mapping" in str(exc)
     else:

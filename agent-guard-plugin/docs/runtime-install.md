@@ -46,7 +46,7 @@ Selective skill installation:
 - `--match REGEX` keeps only skills whose slug or filename matches the regex.
 - `--exclude-match REGEX` removes any matched skills after positive selection.
 - Both flags are repeatable, so you can build selection from multiple include and exclude groups.
-- If no CLI filters are passed, `agent-guard` may read default install filters from `.workflow.yaml` under `globals.install.skills`.
+- If no CLI filters are passed, `agent-guard` may read default install filters from `workflows/default.workflow.yaml` under `globals.install.skills`.
 - If workflow-provided filters match nothing, installation continues with the full skill bundle and adds a warning note instead of failing.
 
 Examples:
@@ -108,7 +108,7 @@ Interactive wizard:
 The wizard bootstraps a new task interactively:
 
 - ensures `.agent/` exists
-- can bind the task to a named workflow such as `research.workflow.yaml`
+- can bind the task to a named workflow such as `workflows/research.workflow.yaml`
 - collects `task_id`, goal, stage, current step, and workflow context
 - writes `state.json`
 - can generate a starter `.agent/plan.yaml`
@@ -156,6 +156,6 @@ When reset succeeds, the plugin archives the current task under `.agent/archive/
 
 Named workflows:
 
-- `agent-guard` still uses `.workflow.yaml` by default
-- `start-task --workflow research` binds the task to `research.workflow.yaml`
+- `agent-guard` uses `workflows/default.workflow.yaml` by default
+- `start-task --workflow research` binds the task to `workflows/research.workflow.yaml`
 - once bound, later stage, write, finalization, and session-start decisions continue using that workflow file

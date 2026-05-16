@@ -11,31 +11,52 @@ import yaml
 
 from .domain.rules import allowed_rule_names
 
+WORKFLOWS_DIRNAME = "workflows"
+BUNDLED_WORKFLOWS_DIRNAME = "_bundled_workflows"
+DEFAULT_WORKFLOW_FILENAME = "default.workflow.yaml"
+
 
 def _workflow_file_error(candidate: Path, detail: str) -> RuntimeError:
     """Build a user-facing workflow-spec corruption error."""
     return RuntimeError(
-        f".workflow.yaml appears damaged at {candidate}. {detail} "
+        f"{candidate.name} appears damaged at {candidate}. {detail} "
         "agent-guard cannot continue until this file is repaired or restored."
     )
 
 
+def workflow_filename(workflow_id: str | None = None) -> str:
+    """Filename for one workflow id."""
+    return f"{workflow_id}.workflow.yaml" if workflow_id else DEFAULT_WORKFLOW_FILENAME
+
+
 def packaged_workflow_path(workflow_id: str | None = None) -> Path:
     """Packaged workflow path."""
-    filename = f"{workflow_id}.workflow.yaml" if workflow_id else ".workflow.yaml"
-    return Path(__file__).resolve().parent / filename
+    return Path(__file__).resolve().parent / BUNDLED_WORKFLOWS_DIRNAME / workflow_filename(workflow_id)
+
+
+def packaged_workflow_dir() -> Path:
+    """Packaged workflow directory."""
+    return packaged_workflow_path().parent
 
 
 def source_workflow_path(workflow_id: str | None = None) -> Path:
     """Source workflow path."""
-    filename = f"{workflow_id}.workflow.yaml" if workflow_id else ".workflow.yaml"
-    return Path(__file__).resolve().parents[2] / filename
+    return Path(__file__).resolve().parents[2] / WORKFLOWS_DIRNAME / workflow_filename(workflow_id)
+
+
+def source_workflow_dir() -> Path:
+    """Source workflow directory."""
+    return source_workflow_path().parent
 
 
 def repo_workflow_path(root_dir: Path, workflow_id: str | None = None) -> Path:
     """Repository-local workflow path."""
-    filename = f"{workflow_id}.workflow.yaml" if workflow_id else ".workflow.yaml"
-    return root_dir / filename
+    return root_dir / WORKFLOWS_DIRNAME / workflow_filename(workflow_id)
+
+
+def repo_workflow_dir(root_dir: Path) -> Path:
+    """Repository-local workflow directory."""
+    return repo_workflow_path(root_dir).parent
 
 
 def user_workflow_dirs() -> list[Path]:
@@ -49,14 +70,13 @@ def user_workflow_dirs() -> list[Path]:
 
 def user_workflow_path(workflow_id: str | None = None, directory: Path | None = None) -> Path:
     """User-level workflow path."""
-    filename = f"{workflow_id}.workflow.yaml" if workflow_id else ".workflow.yaml"
     target_dir = directory if directory is not None else user_workflow_dirs()[0]
-    return target_dir / filename
+    return target_dir / workflow_filename(workflow_id)
 
 
 def _workflow_id_from_filename(name: str) -> str | None:
     """Derive a workflow id from one workflow filename."""
-    if name == ".workflow.yaml":
+    if name == DEFAULT_WORKFLOW_FILENAME:
         return None
     suffix = ".workflow.yaml"
     if not name.endswith(suffix):
@@ -72,8 +92,8 @@ def discover_workflow_ids(root_dir: Path | None = None) -> list[str]:
 
     candidate_dirs: list[Path] = [*user_workflow_dirs()]
     if root_dir is not None:
-        candidate_dirs.append(root_dir)
-    candidate_dirs.extend([packaged_workflow_path().parent, source_workflow_path().parent])
+        candidate_dirs.append(repo_workflow_dir(root_dir))
+    candidate_dirs.extend([packaged_workflow_dir(), source_workflow_dir()])
 
     seen_dirs: set[Path] = set()
     for directory in candidate_dirs:
@@ -81,7 +101,7 @@ def discover_workflow_ids(root_dir: Path | None = None) -> list[str]:
             continue
         seen_dirs.add(directory)
 
-        default_available = default_available or (directory / ".workflow.yaml").exists()
+        default_available = default_available or (directory / DEFAULT_WORKFLOW_FILENAME).exists()
         for workflow_file in directory.glob("*.workflow.yaml"):
             workflow_id = _workflow_id_from_filename(workflow_file.name)
             if workflow_id is not None:
@@ -147,7 +167,8 @@ def load_workflow_spec(root_dir: Path | None = None, workflow_id: str | None = N
             "agent-guard cannot continue until the workflow definition is restored."
         )
     raise RuntimeError(
-        "Could not locate .workflow.yaml. agent-guard cannot continue until the workflow definition is restored."
+        f"Could not locate {DEFAULT_WORKFLOW_FILENAME}. "
+        "agent-guard cannot continue until the workflow definition is restored."
     )
 
 
