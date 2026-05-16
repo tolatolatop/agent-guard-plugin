@@ -5,10 +5,20 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 from typing import Any, Callable
-from uuid import uuid4
 
 from .domain.models import TaskSession
-from agent_guard_file_lock import read_protected_text, resolve_protected_path, write_protected_text
+from agent_guard_file_lock import (
+    DEFAULT_STATE_RELATIVE,
+    derive_state_id,
+    fuse_enabled,
+    lock_file as lock_public_file,
+    managed_file_path,
+    public_file_path,
+    write as lock_write,
+    lock as lock_file,
+    unlock_file as unlock_public_file,
+    unlock as unlock_file,
+)
 
 AGENT_DIR = ".agent"
 ARTIFACTS_DIR = f"{AGENT_DIR}/artifacts"
@@ -62,32 +72,9 @@ def managed_state_dir(state_id: str) -> Path:
     return managed_state_root() / state_id
 
 
-def managed_state_workspace_marker(state_id: str) -> Path:
-    """Marker file linking one managed state dir back to its workspace."""
-    return managed_state_dir(state_id) / "workspace-root.txt"
-
-
-def find_managed_state_dir_for_workspace(root_dir: Path) -> Path | None:
-    """Resolve a managed state dir from its workspace marker without loading state.json."""
-    normalized_root = str(root_dir.resolve())
-    for candidate in managed_state_root().glob("*/workspace-root.txt"):
-        try:
-            if candidate.read_text(encoding="utf-8").strip() == normalized_root:
-                return candidate.parent
-        except OSError:
-            continue
-    return None
-
-
 def current_managed_state_dir(root_dir: Path) -> Path:
     """Global state directory for the current workspace state."""
-    existing = find_managed_state_dir_for_workspace(root_dir)
-    if existing is not None:
-        existing.mkdir(parents=True, exist_ok=True)
-        return existing
-    state = load_state(root_dir)
-    state_id = str(state["state_id"])
-    target = managed_state_dir(state_id)
+    target = managed_state_dir(derive_state_id(root_dir))
     target.mkdir(parents=True, exist_ok=True)
     return target
 
@@ -136,13 +123,7 @@ def record_stage_artifact_snapshot(root_dir: Path, stage: str, workflow_id: str 
             for artifact_path in stage_required_artifacts(stage, root_dir, workflow_id)
         },
     }
-    write_protected_text(
-        root_dir,
-        ".agent/stage-artifacts.json",
-        json.dumps(snapshot, indent=2) + "\n",
-        encoding="utf-8",
-        enforce_lock=False,
-    )
+    _write_text(root_dir, ".agent/stage-artifacts.json", json.dumps(snapshot, indent=2) + "\n")
     return snapshot
 
 
@@ -178,18 +159,7 @@ def ensure_stage_artifact_snapshot(root_dir: Path, stage: str, workflow_id: str 
 def _write_json_if_missing(file_path: Path, value: dict[str, Any]) -> None:
     """Internal helper for write json if missing."""
     if not file_path.exists():
-        write_protected_text(
-            file_path.parent.parent,
-            file_path.relative_to(file_path.parent.parent).as_posix(),
-            json.dumps(value, indent=2) + "\n",
-            encoding="utf-8",
-            enforce_lock=False,
-        )
-
-
-def _next_state_id() -> str:
-    """Generate a stable new state id."""
-    return uuid4().hex
+        file_path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
 
 def ensure_managed_state_dir(state_id: str | None, root_dir: Path | None = None) -> Path | None:
@@ -198,8 +168,6 @@ def ensure_managed_state_dir(state_id: str | None, root_dir: Path | None = None)
         return None
     target = managed_state_dir(state_id)
     target.mkdir(parents=True, exist_ok=True)
-    if root_dir is not None:
-        managed_state_workspace_marker(state_id).write_text(str(root_dir.resolve()) + "\n", encoding="utf-8")
     return target
 
 
@@ -217,14 +185,47 @@ def ensure_agent_files(root_dir: Path) -> None:
         record_stage_artifact_snapshot(root_dir, str(DEFAULT_STATE["stage"]), None)
 
 
+def _protected_read_path(root_dir: Path, relative_path: str) -> Path:
+    if relative_path in {DEFAULT_STATE_RELATIVE, ".agent/plan.yaml"}:
+        if fuse_enabled(root_dir):
+            return public_file_path(root_dir, relative_path)
+        public_target = public_file_path(root_dir, relative_path)
+        return public_target if public_target.exists() else managed_file_path(root_dir, relative_path)
+    return root_dir / relative_path
+
+
+def _write_text(root_dir: Path, relative_path: str, content: str) -> Path:
+    if relative_path in {DEFAULT_STATE_RELATIVE, ".agent/plan.yaml"}:
+        managed_target = managed_file_path(root_dir, relative_path)
+        managed_target.parent.mkdir(parents=True, exist_ok=True)
+        if fuse_enabled(root_dir):
+            token = lock_file(root_dir)
+            try:
+                lock_public_file(str(public_file_path(root_dir, relative_path)), token)
+                lock_write(str(public_file_path(root_dir, relative_path)), content, token)
+            finally:
+                unlock_public_file(str(public_file_path(root_dir, relative_path)), token)
+                unlock_file(root_dir, token)
+            return public_file_path(root_dir, relative_path)
+        managed_target.write_text(content, encoding="utf-8")
+        public_target = public_file_path(root_dir, relative_path)
+        public_target.parent.mkdir(parents=True, exist_ok=True)
+        public_target.write_text(content, encoding="utf-8")
+        return managed_target
+    target = root_dir / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    return target
+
+
 def read_json(file_path: Path, label: str) -> dict[str, Any]:
     """Read json."""
     root_dir = file_path.parent.parent
-    actual_path = resolve_protected_path(root_dir, file_path.relative_to(root_dir).as_posix())
+    actual_path = _protected_read_path(root_dir, file_path.relative_to(root_dir).as_posix())
     if not actual_path.exists():
         raise RuntimeError(f"{label} is missing at {file_path}. Run agent-guard init first.")
     try:
-        value = json.loads(read_protected_text(root_dir, file_path.relative_to(root_dir).as_posix(), encoding="utf-8"))
+        value = json.loads(actual_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise _state_file_error(file_path, f"JSON parsing failed: {exc}.") from exc
     if not isinstance(value, dict):
@@ -249,8 +250,6 @@ def validate_state(state: dict[str, Any]) -> dict[str, Any]:
                 "The current task cannot continue until .agent/state.json is repaired or restored."
             )
     state.setdefault("state_id", None)
-    if not isinstance(state.get("state_id"), str) or not str(state.get("state_id")).strip():
-        state["state_id"] = _next_state_id()
     state.setdefault("workflow_id", None)
     state.setdefault("fuse", "disabled")
     state.pop("completed_steps", None)
@@ -273,30 +272,28 @@ def save_task_session(root_dir: Path, session: TaskSession) -> TaskSession:
 def load_state(root_dir: Path) -> dict[str, Any]:
     """Load state."""
     file_path = state_path(root_dir)
-    actual_path = resolve_protected_path(root_dir, file_path.relative_to(root_dir).as_posix())
+    actual_path = _protected_read_path(root_dir, file_path.relative_to(root_dir).as_posix())
     if not actual_path.exists():
         validated = validate_state(DEFAULT_STATE.copy())
+        validated["state_id"] = derive_state_id(root_dir)
+        validated["fuse"] = "enabled" if fuse_enabled(root_dir) else "disabled"
         ensure_managed_state_dir(str(validated.get("state_id")), root_dir)
         return validated
     raw = read_json(file_path, "state.json")
     raw_before = dict(raw)
     validated = validate_state(raw)
+    validated["state_id"] = derive_state_id(root_dir)
+    validated["fuse"] = "enabled" if fuse_enabled(root_dir) else "disabled"
     ensure_managed_state_dir(str(validated.get("state_id")), root_dir)
     if validated != raw_before:
-        write_protected_text(
-            root_dir,
-            ".agent/state.json",
-            json.dumps(validated, indent=2) + "\n",
-            encoding="utf-8",
-            enforce_lock=False,
-        )
+        _write_text(root_dir, DEFAULT_STATE_RELATIVE, json.dumps(validated, indent=2) + "\n")
     return validated
 
 
 def save_state(root_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
     """Save state."""
     file_path = state_path(root_dir)
-    actual_path = resolve_protected_path(root_dir, file_path.relative_to(root_dir).as_posix())
+    actual_path = _protected_read_path(root_dir, file_path.relative_to(root_dir).as_posix())
     if (not isinstance(state.get("state_id"), str) or not str(state.get("state_id")).strip()) and actual_path.exists():
         try:
             existing_state_id = read_json(file_path, "state.json").get("state_id")
@@ -305,6 +302,8 @@ def save_state(root_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
         if isinstance(existing_state_id, str) and existing_state_id.strip():
             state = {**state, "state_id": existing_state_id}
     validated = validate_state(state)
+    validated["state_id"] = derive_state_id(root_dir)
+    validated["fuse"] = "enabled" if fuse_enabled(root_dir) else "disabled"
     ensure_managed_state_dir(str(validated.get("state_id")), root_dir)
     previous_stage: str | None = None
     if actual_path.exists():
@@ -312,13 +311,7 @@ def save_state(root_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
             previous_stage = str(read_json(file_path, "state.json").get("stage") or "IDLE")
         except RuntimeError:
             previous_stage = None
-    write_protected_text(
-        root_dir,
-        ".agent/state.json",
-        json.dumps(validated, indent=2) + "\n",
-        encoding="utf-8",
-        enforce_lock=False,
-    )
+    _write_text(root_dir, DEFAULT_STATE_RELATIVE, json.dumps(validated, indent=2) + "\n")
     current_stage = str(validated.get("stage") or "IDLE")
     if previous_stage != current_stage or not stage_artifacts_path(root_dir).exists():
         workflow_id = str(validated.get("workflow_id")) if isinstance(validated.get("workflow_id"), str) else None

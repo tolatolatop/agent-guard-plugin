@@ -6,7 +6,17 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from agent_guard_file_lock import read_protected_text, resolve_protected_path, write_protected_text
+from agent_guard_file_lock import (
+    DEFAULT_PLAN_RELATIVE,
+    fuse_enabled,
+    lock as lock_file,
+    lock_file as lock_public_file,
+    managed_file_path,
+    public_file_path,
+    unlock_file as unlock_public_file,
+    unlock as unlock_file,
+    write as lock_write,
+)
 
 from ..domain.models import FailureRecord, Job, PlanStep, TaskSession
 from ..state import (
@@ -45,11 +55,15 @@ class PlanRepository:
 
     def load_raw(self) -> dict[str, Any] | None:
         """Load raw YAML plan data."""
-        actual_path = resolve_protected_path(self.root_dir, ".agent/plan.yaml")
+        if fuse_enabled(self.root_dir):
+            actual_path = public_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)
+        else:
+            public_target = public_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)
+            actual_path = public_target if public_target.exists() else managed_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)
         if not actual_path.exists():
             return None
         try:
-            data = yaml.safe_load(read_protected_text(self.root_dir, ".agent/plan.yaml")) or {}
+            data = yaml.safe_load(actual_path.read_text(encoding="utf-8")) or {}
         except yaml.YAMLError as exc:
             raise RuntimeError(f"plan.yaml is invalid YAML: {exc}") from exc
         if not isinstance(data, dict):
@@ -74,12 +88,22 @@ class PlanRepository:
             "task_id": task_id,
             "steps": [step.to_mapping() for step in steps],
         }
-        write_protected_text(
-            self.root_dir,
-            ".agent/plan.yaml",
-            yaml.safe_dump(payload, sort_keys=False),
-            enforce_lock=False,
-        )
+        rendered = yaml.safe_dump(payload, sort_keys=False)
+        managed_target = managed_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)
+        managed_target.parent.mkdir(parents=True, exist_ok=True)
+        if fuse_enabled(self.root_dir):
+            token = lock_file(self.root_dir)
+            try:
+                lock_public_file(str(public_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)), token)
+                lock_write(str(public_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)), rendered, token)
+            finally:
+                unlock_public_file(str(public_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)), token)
+                unlock_file(self.root_dir, token)
+        else:
+            managed_target.write_text(rendered, encoding="utf-8")
+            public_target = public_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)
+            public_target.parent.mkdir(parents=True, exist_ok=True)
+            public_target.write_text(rendered, encoding="utf-8")
         return payload
 
     def update_step_status(self, step_id: str, status: str) -> dict[str, Any]:
@@ -97,12 +121,22 @@ class PlanRepository:
             break
         if not updated:
             raise RuntimeError(f"plan.yaml step {step_id} was not found.")
-        write_protected_text(
-            self.root_dir,
-            ".agent/plan.yaml",
-            yaml.safe_dump(data, sort_keys=False),
-            enforce_lock=False,
-        )
+        rendered = yaml.safe_dump(data, sort_keys=False)
+        managed_target = managed_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)
+        managed_target.parent.mkdir(parents=True, exist_ok=True)
+        if fuse_enabled(self.root_dir):
+            token = lock_file(self.root_dir)
+            try:
+                lock_public_file(str(public_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)), token)
+                lock_write(str(public_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)), rendered, token)
+            finally:
+                unlock_public_file(str(public_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)), token)
+                unlock_file(self.root_dir, token)
+        else:
+            managed_target.write_text(rendered, encoding="utf-8")
+            public_target = public_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)
+            public_target.parent.mkdir(parents=True, exist_ok=True)
+            public_target.write_text(rendered, encoding="utf-8")
         return data
 
 

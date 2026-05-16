@@ -1,185 +1,273 @@
-"""Tests for token-gated FUSE file locks."""
+"""Tests for the minimal file-lock SDK."""
 from __future__ import annotations
 
-from pathlib import Path
 import json
+from pathlib import Path
+
 import pytest
 
-from agent_guard_file_lock import (
-    delete_protected_file,
-    grant_file_lock,
-    load_manifest,
-    lock_status,
-    protect_file,
-    read_protected_text,
-    resolve_protected_path,
-    revoke_file_lock,
-    write_protected_text,
-)
 from agent_guard.infrastructure.repositories import PlanRepository, StateRepository
 from agent_guard.state import DEFAULT_STATE, current_managed_state_dir, load_state, save_state
+from agent_guard_file_lock import (
+    AGENT_DIR,
+    DEFAULT_PLAN_RELATIVE,
+    DEFAULT_STATE_RELATIVE,
+    delete,
+    derive_state_id,
+    fuse_enabled,
+    load_locks,
+    lock,
+    lock_file,
+    lock_file_path,
+    managed_file_path,
+    public_file_path,
+    save_locks,
+    unlock,
+    unlock_file,
+    write,
+)
 
 from .helpers import make_temp_repo
 
 
-def test_protect_file_moves_original_to_managed_state_and_replaces_public_path_with_mount_symlink(
+def test_derive_state_id_is_stable_for_workspace() -> None:
+    root_dir = make_temp_repo()
+
+    first = derive_state_id(root_dir)
+    second = derive_state_id(root_dir)
+
+    assert first == second
+    assert len(first) == 32
+
+
+def test_lock_creates_global_lock_json_entry() -> None:
+    root_dir = make_temp_repo()
+    root_key = str(root_dir.resolve())
+
+    token = lock(root_dir)
+    payload = load_locks()
+
+    assert payload["version"] == 3
+    assert payload["roots"][root_key]["managed"] == str(
+        managed_file_path(root_dir, DEFAULT_PLAN_RELATIVE).parent.resolve()
+    )
+    assert payload["roots"][root_key]["files"] == []
+    assert payload["roots"][root_key]["token"] == token
+    assert lock_file_path().exists()
+
+
+def test_lock_reuses_workspace_token() -> None:
+    root_dir = make_temp_repo()
+    first = lock(root_dir)
+    second = lock(root_dir)
+    payload = load_locks()
+
+    assert first == second
+    assert payload["roots"][str(root_dir.resolve())]["token"] == first
+
+
+def test_lock_file_and_unlock_file_update_locked_file_set() -> None:
+    root_dir = make_temp_repo()
+    root_key = str(root_dir.resolve())
+    token = lock(root_dir)
+    plan_path = public_file_path(root_dir, DEFAULT_PLAN_RELATIVE)
+    state_path = public_file_path(root_dir, DEFAULT_STATE_RELATIVE)
+
+    assert lock_file(str(plan_path), token) is True
+    assert load_locks()["roots"][root_key]["files"] == ["plan.yaml"]
+
+    assert lock_file(str(state_path), token) is True
+    assert load_locks()["roots"][root_key]["files"] == ["plan.yaml", "state.json"]
+
+    assert unlock_file(str(plan_path), token) is True
+    assert load_locks()["roots"][root_key]["files"] == ["state.json"]
+
+
+def test_lock_file_and_unlock_file_fail_with_wrong_token() -> None:
+    root_dir = make_temp_repo()
+    token = lock(root_dir)
+    plan_path = public_file_path(root_dir, DEFAULT_PLAN_RELATIVE)
+
+    with pytest.raises(PermissionError):
+        lock_file(str(plan_path), "wrong-token")
+
+    lock_file(str(plan_path), token)
+    with pytest.raises(PermissionError):
+        unlock_file(str(plan_path), "wrong-token")
+
+    assert load_locks()["roots"][str(root_dir.resolve())]["files"] == ["plan.yaml"]
+
+
+def test_unlock_only_succeeds_with_matching_token_and_clears_files() -> None:
+    root_dir = make_temp_repo()
+    root_key = str(root_dir.resolve())
+    token = lock(root_dir)
+    plan_path = public_file_path(root_dir, DEFAULT_PLAN_RELATIVE)
+    lock_file(str(plan_path), token)
+
+    assert unlock(root_dir, "wrong-token") is False
+    assert unlock(root_dir, token) is True
+    assert load_locks()["roots"][root_key]["token"] == ""
+    assert load_locks()["roots"][root_key]["files"] == []
+
+
+def test_write_requires_matching_file_lock_and_writes_public_path() -> None:
+    root_dir = make_temp_repo()
+    target = public_file_path(root_dir, DEFAULT_STATE_RELATIVE)
+    token = lock(root_dir)
+
+    with pytest.raises(PermissionError):
+        write(str(target), "{}\n", token)
+
+    lock_file(str(target), token)
+    write(str(target), '{"task_id": null}\n', token)
+
+    assert target.read_text(encoding="utf-8") == '{"task_id": null}\n'
+    assert load_locks()["roots"][str(root_dir.resolve())]["files"] == ["state.json"]
+
+
+def test_write_and_delete_restore_locked_files_after_operation() -> None:
+    root_dir = make_temp_repo()
+    state_target = public_file_path(root_dir, DEFAULT_STATE_RELATIVE)
+    plan_target = public_file_path(root_dir, DEFAULT_PLAN_RELATIVE)
+    plan_target.write_text("task_id: demo\nsteps: []\n", encoding="utf-8")
+    token = lock(root_dir)
+
+    lock_file(str(state_target), token)
+    lock_file(str(plan_target), token)
+    write(str(state_target), '{"task_id":"demo"}\n', token)
+    assert set(load_locks()["roots"][str(root_dir.resolve())]["files"]) == {
+        "state.json",
+        "plan.yaml",
+    }
+
+    delete(str(plan_target), token)
+    assert set(load_locks()["roots"][str(root_dir.resolve())]["files"]) == {
+        "state.json",
+        "plan.yaml",
+    }
+
+
+def test_delete_requires_matching_file_lock() -> None:
+    root_dir = make_temp_repo()
+    target = public_file_path(root_dir, DEFAULT_PLAN_RELATIVE)
+    target.write_text("task_id: demo\nsteps: []\n", encoding="utf-8")
+    token = lock(root_dir)
+
+    with pytest.raises(PermissionError):
+        delete(str(target), token)
+
+    lock_file(str(target), token)
+    assert delete(str(target), token) is True
+    assert not target.exists()
+
+
+def test_delete_requires_matching_root_token_when_file_is_locked() -> None:
+    root_dir = make_temp_repo()
+    target = public_file_path(root_dir, DEFAULT_PLAN_RELATIVE)
+    target.write_text("task_id: demo\nsteps: []\n", encoding="utf-8")
+    token = lock(root_dir)
+    lock_file(str(target), token)
+
+    with pytest.raises(PermissionError):
+        delete(str(target), "wrong-token")
+
+
+def test_save_state_uses_managed_storage_when_fuse_is_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root_dir = make_temp_repo()
-    state_file = root_dir / ".agent" / "state.json"
-    original = state_file.read_text(encoding="utf-8")
-    monkeypatch.setattr("agent_guard_file_lock.core.fuse_runtime_available", lambda: True)
+    monkeypatch.setattr("agent_guard.state.fuse_enabled", lambda _: False)
+    monkeypatch.setattr("agent_guard_file_lock.core.fuse_enabled", lambda _: False)
 
-    result = protect_file(root_dir, ".agent/state.json", "secret-token")
-
-    managed_path = Path(result["managed_path"])
-    assert result["mode"] == "fuse"
-    assert state_file.is_symlink()
-    assert managed_path.parent == current_managed_state_dir(root_dir)
-    assert '"stage": "IDLE"' in original
-    assert '"stage": "IDLE"' in managed_path.read_text(encoding="utf-8")
-    assert read_protected_text(root_dir, ".agent/state.json") == managed_path.read_text(encoding="utf-8")
-    assert load_state(root_dir)["fuse"] == "enabled"
-    assert (current_managed_state_dir(root_dir) / "file-lock.json").exists()
-
-
-def test_write_protected_text_requires_matching_token_or_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    root_dir = make_temp_repo()
-    monkeypatch.setattr("agent_guard_file_lock.core.fuse_runtime_available", lambda: True)
-    protect_file(root_dir, ".agent/state.json", "secret-token", token_env="STATE_WRITE_TOKEN")
-
-    with pytest.raises(PermissionError):
-        write_protected_text(root_dir, ".agent/state.json", "{}\n")
-
-    write_protected_text(
-        root_dir,
-        ".agent/state.json",
-        '{"task_id": null, "workflow_id": null, "stage": "IDLE", "current_step": null, "can_finalize": false, "last_verification": null, "needs_human": false, "state_id": "abc", "fuse": "enabled"}\n',
-        env={"STATE_WRITE_TOKEN": "secret-token"},
+    saved = save_state(
+        root_dir, {**DEFAULT_STATE, "task_id": "password-reset", "stage": "VERIFY"}
     )
 
-    assert '"state_id": "abc"' in read_protected_text(root_dir, ".agent/state.json")
+    assert saved["state_id"] == derive_state_id(root_dir)
+    assert managed_file_path(root_dir, DEFAULT_STATE_RELATIVE).read_text(encoding="utf-8")
+    assert public_file_path(root_dir, DEFAULT_STATE_RELATIVE).read_text(encoding="utf-8")
 
 
-def test_grant_temporarily_allows_write_without_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_plan_repository_mirrors_public_and_managed_when_fuse_is_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     root_dir = make_temp_repo()
-    monkeypatch.setattr("agent_guard_file_lock.core.fuse_runtime_available", lambda: True)
-    protect_file(root_dir, ".agent/plan.yaml", "plan-token")
-
-    grant_file_lock(root_dir, ".agent/plan.yaml", "plan-token", ttl_seconds=30)
-    write_protected_text(root_dir, ".agent/plan.yaml", "task_id: demo\nsteps: []\n")
-    assert read_protected_text(root_dir, ".agent/plan.yaml") == "task_id: demo\nsteps: []\n"
-
-    revoke_file_lock(root_dir, ".agent/plan.yaml")
-    with pytest.raises(PermissionError):
-        write_protected_text(root_dir, ".agent/plan.yaml", "task_id: changed\nsteps: []\n")
-
-
-def test_state_repository_save_uses_managed_file_when_locked(monkeypatch: pytest.MonkeyPatch) -> None:
-    root_dir = make_temp_repo()
-    monkeypatch.setattr("agent_guard_file_lock.core.fuse_runtime_available", lambda: True)
-    protect_file(root_dir, ".agent/state.json", "secret-token")
-
-    saved = save_state(root_dir, {**DEFAULT_STATE, "task_id": "password-reset", "stage": "VERIFY", "fuse": "enabled"})
-    loaded = load_state(root_dir)
-
-    assert saved["state_id"] == loaded["state_id"]
-    assert StateRepository(root_dir).load().stage == "VERIFY"
-
-
-def test_plan_repository_writes_managed_file_when_locked(monkeypatch: pytest.MonkeyPatch) -> None:
-    root_dir = make_temp_repo()
-    monkeypatch.setattr("agent_guard_file_lock.core.fuse_runtime_available", lambda: True)
-    protect_file(root_dir, ".agent/plan.yaml", "plan-token", token_env="PLAN_WRITE_TOKEN")
+    monkeypatch.setattr("agent_guard.infrastructure.repositories.fuse_enabled", lambda _: False)
 
     repository = PlanRepository(root_dir)
     repository.save_steps("password-reset", [])
 
-    assert resolve_protected_path(root_dir, ".agent/plan.yaml").read_text(encoding="utf-8") == "task_id: password-reset\nsteps: []\n"
+    managed_text = managed_file_path(root_dir, DEFAULT_PLAN_RELATIVE).read_text(
+        encoding="utf-8"
+    )
+    public_text = public_file_path(root_dir, DEFAULT_PLAN_RELATIVE).read_text(
+        encoding="utf-8"
+    )
+    assert managed_text == public_text == "task_id: password-reset\nsteps: []\n"
 
 
-def test_delete_protected_file_requires_authorization(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_state_backfills_stable_state_id_from_workspace() -> None:
     root_dir = make_temp_repo()
-    target = root_dir / ".agent" / "plan.yaml"
-    target.write_text("task_id: demo\nsteps: []\n", encoding="utf-8")
-    monkeypatch.setattr("agent_guard_file_lock.core.fuse_runtime_available", lambda: True)
-    protect_file(root_dir, ".agent/plan.yaml", "plan-token")
+    (root_dir / AGENT_DIR / "state.json").write_text(
+        '{"task_id": "password-reset", "workflow_id": null, "stage": "VERIFY", "current_step": null, "can_finalize": false, "last_verification": null, "needs_human": false}\n',
+        encoding="utf-8",
+    )
 
-    with pytest.raises(PermissionError):
-        delete_protected_file(root_dir, ".agent/plan.yaml")
-
-    delete_protected_file(root_dir, ".agent/plan.yaml", token="plan-token")
-    assert not resolve_protected_path(root_dir, ".agent/plan.yaml").exists()
-
-
-def test_lock_status_reports_managed_paths_and_grants(monkeypatch: pytest.MonkeyPatch) -> None:
-    root_dir = make_temp_repo()
-    monkeypatch.setattr("agent_guard_file_lock.core.fuse_runtime_available", lambda: True)
-    result = protect_file(root_dir, ".agent/state.json", "state-token")
-    grant_file_lock(root_dir, ".agent/state.json", "state-token", ttl_seconds=30)
-
-    status = lock_status(root_dir)
-
-    assert status["files"][0]["path"] == ".agent/state.json"
-    assert status["files"][0]["mode"] == "fuse"
-    assert status["files"][0]["grant_active"] is True
-    assert status["files"][0]["managed_path"] == result["managed_path"]
-    assert (current_managed_state_dir(root_dir) / "file-lock-grants" / ".agent__state.json.json").exists()
-
-
-def test_protect_file_fails_closed_without_fuse_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
-    root_dir = make_temp_repo()
-    monkeypatch.setattr("agent_guard_file_lock.core.fuse_runtime_available", lambda: False)
-
-    with pytest.raises(RuntimeError, match="FUSE runtime is unavailable"):
-        protect_file(root_dir, ".agent/state.json", "state-token")
-
-    assert load_state(root_dir)["fuse"] == "disabled"
-
-
-def test_load_manifest_migrates_legacy_workspace_lock_files(monkeypatch: pytest.MonkeyPatch) -> None:
-    root_dir = make_temp_repo()
     state = load_state(root_dir)
-    managed_dir = current_managed_state_dir(root_dir)
-    legacy_manifest = root_dir / ".agent" / "locks" / "manifest.json"
-    legacy_grants_dir = root_dir / ".agent" / "locks" / "grants"
-    legacy_grants_dir.mkdir(parents=True, exist_ok=True)
-    legacy_manifest.parent.mkdir(parents=True, exist_ok=True)
-    legacy_manifest.write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "files": {
-                    ".agent/plan.yaml": {
-                        "path": ".agent/plan.yaml",
-                        "mode": "fuse",
-                        "token_hash": "abc",
-                        "token_env": "PLAN_TOKEN",
-                        "managed_path": str(managed_dir / "plan.yaml"),
-                        "mount_path": ".agent/.mount/plan.yaml",
-                    }
-                },
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    (legacy_grants_dir / ".agent__plan.yaml.json").write_text(
-        json.dumps(
-            {
-                "path": ".agent/plan.yaml",
-                "token_hash": "abc",
-                "expires_at": "2999-01-01T00:00:00+00:00",
-            }
-        )
-        + "\n",
-        encoding="utf-8",
+
+    assert state["state_id"] == derive_state_id(root_dir)
+    assert current_managed_state_dir(root_dir) == Path.home() / ".agent-guard" / "state" / state["state_id"]
+
+
+def test_fuse_enabled_requires_agent_dir_mount(monkeypatch: pytest.MonkeyPatch) -> None:
+    root_dir = make_temp_repo()
+    agent_dir = root_dir / AGENT_DIR
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(Path, "is_mount", lambda self: self == agent_dir)
+
+    assert fuse_enabled(root_dir) is True
+
+
+def test_state_repository_round_trips_task_session() -> None:
+    root_dir = make_temp_repo()
+    save_state(
+        root_dir, {**DEFAULT_STATE, "task_id": "password-reset", "stage": "VERIFY"}
     )
 
-    manifest = load_manifest(root_dir)
+    loaded = StateRepository(root_dir).load()
 
-    assert state["state_id"]
-    assert ".agent/plan.yaml" in manifest.files
-    assert (managed_dir / "file-lock.json").exists()
-    assert (managed_dir / "file-lock-grants" / ".agent__plan.yaml.json").exists()
-    assert not legacy_manifest.exists()
+    assert loaded.task_id == "password-reset"
+    assert loaded.state_id == derive_state_id(root_dir)
+
+
+def test_save_locks_persists_expected_wire_shape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock_path = tmp_path / "lock.json"
+    monkeypatch.setattr("agent_guard_file_lock.core.LOCK_FILE", lock_path)
+    monkeypatch.setattr("agent_guard_file_lock.core.LOCK_ROOT", tmp_path)
+
+    save_locks(
+        {
+            "version": 3,
+            "roots": {
+                "/repo": {
+                    "managed": "/managed/repo",
+                    "token": "token-a",
+                    "files": ["plan.yaml"],
+                }
+            },
+        }
+    )
+
+    assert json.loads(lock_path.read_text(encoding="utf-8")) == {
+        "version": 3,
+        "roots": {
+            "/repo": {
+                "managed": "/managed/repo",
+                "token": "token-a",
+                "files": ["plan.yaml"],
+            }
+        },
+    }
