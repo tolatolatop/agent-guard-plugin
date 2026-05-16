@@ -12,9 +12,11 @@ from typing import Any
 
 DEFAULT_TOKEN_ENV = "AGENT_GUARD_LOCK_TOKEN"
 LOCKS_DIR = ".agent/locks"
-MANIFEST_PATH = f"{LOCKS_DIR}/manifest.json"
-GRANTS_DIR = f"{LOCKS_DIR}/grants"
-FUSE_MOUNT_DIR = f"{LOCKS_DIR}/mount"
+FUSE_MOUNT_DIR = ".agent/.mount"
+MANIFEST_FILENAME = "file-lock.json"
+GRANTS_DIRNAME = "file-lock-grants"
+LEGACY_MANIFEST_PATH = f"{LOCKS_DIR}/manifest.json"
+LEGACY_GRANTS_DIR = f"{LOCKS_DIR}/grants"
 
 
 def _utc_now() -> datetime:
@@ -144,10 +146,54 @@ class FileLockManifest:
 
 
 def manifest_path(root_dir: Path) -> Path:
-    return root_dir / MANIFEST_PATH
+    from agent_guard.state import find_managed_state_dir_for_workspace
+
+    managed_dir = find_managed_state_dir_for_workspace(root_dir)
+    if managed_dir is None:
+        return root_dir / LEGACY_MANIFEST_PATH
+    return managed_dir / MANIFEST_FILENAME
+
+
+def _legacy_manifest_path(root_dir: Path) -> Path:
+    return root_dir / LEGACY_MANIFEST_PATH
+
+
+def _grants_dir(root_dir: Path) -> Path:
+    from agent_guard.state import find_managed_state_dir_for_workspace
+
+    managed_dir = find_managed_state_dir_for_workspace(root_dir)
+    if managed_dir is None:
+        return root_dir / LEGACY_GRANTS_DIR
+    return managed_dir / GRANTS_DIRNAME
+
+
+def _legacy_grants_dir(root_dir: Path) -> Path:
+    return root_dir / LEGACY_GRANTS_DIR
+
+
+def _migrate_legacy_lock_files(root_dir: Path) -> None:
+    target_manifest = manifest_path(root_dir)
+    legacy_manifest = _legacy_manifest_path(root_dir)
+    if legacy_manifest == target_manifest:
+        return
+    if legacy_manifest.exists() and not target_manifest.exists():
+        target_manifest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(legacy_manifest), str(target_manifest))
+
+    target_grants = _grants_dir(root_dir)
+    legacy_grants = _legacy_grants_dir(root_dir)
+    if legacy_grants.exists():
+        target_grants.mkdir(parents=True, exist_ok=True)
+        for candidate in sorted(legacy_grants.glob("*.json")):
+            destination = target_grants / candidate.name
+            if not destination.exists():
+                shutil.move(str(candidate), str(destination))
+        if not any(legacy_grants.iterdir()):
+            legacy_grants.rmdir()
 
 
 def load_manifest(root_dir: Path) -> FileLockManifest:
+    _migrate_legacy_lock_files(root_dir)
     file_path = manifest_path(root_dir)
     if not file_path.exists():
         return FileLockManifest.empty()
@@ -166,7 +212,7 @@ def _save_manifest(root_dir: Path, manifest: FileLockManifest) -> FileLockManife
 
 
 def _grant_path(root_dir: Path, target_path: str) -> Path:
-    return root_dir / GRANTS_DIR / f"{_safe_name(target_path)}.json"
+    return _grants_dir(root_dir) / f"{_safe_name(target_path)}.json"
 
 
 def _load_grant(root_dir: Path, target_path: str) -> FileLockGrant | None:

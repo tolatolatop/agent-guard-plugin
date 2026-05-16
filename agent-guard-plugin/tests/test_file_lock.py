@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import pytest
 
 from agent_guard_file_lock import (
     delete_protected_file,
     grant_file_lock,
+    load_manifest,
     lock_status,
     protect_file,
     read_protected_text,
@@ -38,6 +40,7 @@ def test_protect_file_moves_original_to_managed_state_and_replaces_public_path_w
     assert '"stage": "IDLE"' in managed_path.read_text(encoding="utf-8")
     assert read_protected_text(root_dir, ".agent/state.json") == managed_path.read_text(encoding="utf-8")
     assert load_state(root_dir)["fuse"] == "enabled"
+    assert (current_managed_state_dir(root_dir) / "file-lock.json").exists()
 
 
 def test_write_protected_text_requires_matching_token_or_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -121,6 +124,7 @@ def test_lock_status_reports_managed_paths_and_grants(monkeypatch: pytest.Monkey
     assert status["files"][0]["mode"] == "fuse"
     assert status["files"][0]["grant_active"] is True
     assert status["files"][0]["managed_path"] == result["managed_path"]
+    assert (current_managed_state_dir(root_dir) / "file-lock-grants" / ".agent__state.json.json").exists()
 
 
 def test_protect_file_fails_closed_without_fuse_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -131,3 +135,51 @@ def test_protect_file_fails_closed_without_fuse_runtime(monkeypatch: pytest.Monk
         protect_file(root_dir, ".agent/state.json", "state-token")
 
     assert load_state(root_dir)["fuse"] == "disabled"
+
+
+def test_load_manifest_migrates_legacy_workspace_lock_files(monkeypatch: pytest.MonkeyPatch) -> None:
+    root_dir = make_temp_repo()
+    state = load_state(root_dir)
+    managed_dir = current_managed_state_dir(root_dir)
+    legacy_manifest = root_dir / ".agent" / "locks" / "manifest.json"
+    legacy_grants_dir = root_dir / ".agent" / "locks" / "grants"
+    legacy_grants_dir.mkdir(parents=True, exist_ok=True)
+    legacy_manifest.parent.mkdir(parents=True, exist_ok=True)
+    legacy_manifest.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "files": {
+                    ".agent/plan.yaml": {
+                        "path": ".agent/plan.yaml",
+                        "mode": "fuse",
+                        "token_hash": "abc",
+                        "token_env": "PLAN_TOKEN",
+                        "managed_path": str(managed_dir / "plan.yaml"),
+                        "mount_path": ".agent/.mount/plan.yaml",
+                    }
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (legacy_grants_dir / ".agent__plan.yaml.json").write_text(
+        json.dumps(
+            {
+                "path": ".agent/plan.yaml",
+                "token_hash": "abc",
+                "expires_at": "2999-01-01T00:00:00+00:00",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    manifest = load_manifest(root_dir)
+
+    assert state["state_id"]
+    assert ".agent/plan.yaml" in manifest.files
+    assert (managed_dir / "file-lock.json").exists()
+    assert (managed_dir / "file-lock-grants" / ".agent__plan.yaml.json").exists()
+    assert not legacy_manifest.exists()

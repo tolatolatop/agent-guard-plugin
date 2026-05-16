@@ -62,8 +62,29 @@ def managed_state_dir(state_id: str) -> Path:
     return managed_state_root() / state_id
 
 
+def managed_state_workspace_marker(state_id: str) -> Path:
+    """Marker file linking one managed state dir back to its workspace."""
+    return managed_state_dir(state_id) / "workspace-root.txt"
+
+
+def find_managed_state_dir_for_workspace(root_dir: Path) -> Path | None:
+    """Resolve a managed state dir from its workspace marker without loading state.json."""
+    normalized_root = str(root_dir.resolve())
+    for candidate in managed_state_root().glob("*/workspace-root.txt"):
+        try:
+            if candidate.read_text(encoding="utf-8").strip() == normalized_root:
+                return candidate.parent
+        except OSError:
+            continue
+    return None
+
+
 def current_managed_state_dir(root_dir: Path) -> Path:
     """Global state directory for the current workspace state."""
+    existing = find_managed_state_dir_for_workspace(root_dir)
+    if existing is not None:
+        existing.mkdir(parents=True, exist_ok=True)
+        return existing
     state = load_state(root_dir)
     state_id = str(state["state_id"])
     target = managed_state_dir(state_id)
@@ -171,12 +192,14 @@ def _next_state_id() -> str:
     return uuid4().hex
 
 
-def ensure_managed_state_dir(state_id: str | None) -> Path | None:
+def ensure_managed_state_dir(state_id: str | None, root_dir: Path | None = None) -> Path | None:
     """Ensure the global state directory exists for one state id."""
     if not state_id:
         return None
     target = managed_state_dir(state_id)
     target.mkdir(parents=True, exist_ok=True)
+    if root_dir is not None:
+        managed_state_workspace_marker(state_id).write_text(str(root_dir.resolve()) + "\n", encoding="utf-8")
     return target
 
 
@@ -253,12 +276,12 @@ def load_state(root_dir: Path) -> dict[str, Any]:
     actual_path = resolve_protected_path(root_dir, file_path.relative_to(root_dir).as_posix())
     if not actual_path.exists():
         validated = validate_state(DEFAULT_STATE.copy())
-        ensure_managed_state_dir(str(validated.get("state_id")))
+        ensure_managed_state_dir(str(validated.get("state_id")), root_dir)
         return validated
     raw = read_json(file_path, "state.json")
     raw_before = dict(raw)
     validated = validate_state(raw)
-    ensure_managed_state_dir(str(validated.get("state_id")))
+    ensure_managed_state_dir(str(validated.get("state_id")), root_dir)
     if validated != raw_before:
         write_protected_text(
             root_dir,
@@ -282,7 +305,7 @@ def save_state(root_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
         if isinstance(existing_state_id, str) and existing_state_id.strip():
             state = {**state, "state_id": existing_state_id}
     validated = validate_state(state)
-    ensure_managed_state_dir(str(validated.get("state_id")))
+    ensure_managed_state_dir(str(validated.get("state_id")), root_dir)
     previous_stage: str | None = None
     if actual_path.exists():
         try:
