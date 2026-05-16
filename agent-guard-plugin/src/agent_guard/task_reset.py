@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .fuse_integration import stop_fuse_protection
 from .state import (
     AGENT_DIR,
     DEFAULT_FAILURES,
@@ -176,4 +177,34 @@ def reset_task(root_dir: Path, new_task_id: str, workflow_id: str | None = None)
         "archive_dir": archive_result["archive_dir"],
         "archived_task_id": archive_result["archived_task_id"],
         "state": new_state,
+    }
+
+
+def close_task(root_dir: Path, force: bool = False) -> dict[str, Any]:
+    """Close the current workspace task and release workspace protection."""
+    ensure_agent_files(root_dir)
+    state = load_state(root_dir)
+    stage = str(state.get("stage") or "IDLE")
+
+    if not force and stage != "IDLE" and not _is_resettable_state(root_dir, state):
+        current_workflow = str(state.get("workflow_id")) if isinstance(state.get("workflow_id"), str) else None
+        raise RuntimeError(
+            "close-task is only allowed when the current task is complete or the workspace is idle. "
+            f"Move the state to {canonical_completion_stage(root_dir, current_workflow)} or "
+            f"{canonical_completion_ready_stage(root_dir, current_workflow)} with can_finalize=true first, "
+            "or pass --force to close the workspace anyway."
+        )
+
+    fuse = stop_fuse_protection(root_dir)
+    refreshed_state = load_state(root_dir)
+    summary = {
+        "protection": str(fuse.get("protection") or "inactive"),
+    }
+    if "reason" in fuse:
+        summary["reason"] = str(fuse["reason"])
+    if "stopped" in fuse:
+        summary["stopped"] = bool(fuse["stopped"])
+    return {
+        "state": refreshed_state,
+        "fuse": summary,
     }

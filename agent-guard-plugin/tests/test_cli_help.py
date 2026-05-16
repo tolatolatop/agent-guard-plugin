@@ -26,6 +26,7 @@ def test_top_level_help_flag_prints_command_overview() -> None:
 
     assert code == 0
     assert "Usage: agent-guard <command> [options]" in output
+    assert "close-task [--force]" in output
     assert "record-command --cmd CMD --exit-code CODE [--log PATH]" in output
     assert "help [command]" in output
 
@@ -41,11 +42,11 @@ def test_subcommand_help_flag_prints_specific_usage() -> None:
 
 def test_help_command_supports_command_specific_help() -> None:
     """Test that help command supports command-specific help."""
-    code, output = invoke_help(["help", "install"])
+    code, output = invoke_help(["help", "close-task"])
 
     assert code == 0
-    assert "Usage: agent-guard install [--runtime RUNTIME] [--scope SCOPE]" in output
-    assert "Supported: claude-code, codex, opencode" in output
+    assert "Usage: agent-guard close-task [--force]" in output
+    assert "release .agent protection" in output
 
 
 def test_missing_command_prints_help_and_exits_nonzero() -> None:

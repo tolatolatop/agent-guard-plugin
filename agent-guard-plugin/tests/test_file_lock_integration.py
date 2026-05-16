@@ -71,6 +71,7 @@ import time
 
 import pytest
 
+from agent_guard.state import save_state
 from agent_guard_file_lock import (
     DEFAULT_PLAN_RELATIVE,
     DEFAULT_STATE_RELATIVE,
@@ -245,6 +246,33 @@ def test_first_mount_creates_root_lock_entry_with_empty_files(
         proc.wait(timeout=5)
 
 
+def test_state_json_becomes_long_lived_strategy_lock_after_state_sync(
+    mounted_workspace,
+) -> None:
+    root_dir, _temp_home, _env = mounted_workspace
+
+    save_state(
+        root_dir,
+        {
+            "task_id": "demo-task",
+            "workflow_id": None,
+            "stage": "CLARIFYING",
+            "current_step": None,
+            "can_finalize": False,
+            "last_verification": None,
+            "needs_human": False,
+        },
+    )
+
+    with pytest.raises(PermissionError):
+        public_file_path(root_dir, DEFAULT_STATE_RELATIVE).write_text(
+            '{"task_id":"tampered","stage":"DONE"}\n',
+            encoding="utf-8",
+        )
+
+    assert "state.json" in load_locks()["roots"][str(root_dir.resolve())]["files"]
+
+
 def test_remount_preserves_existing_token_and_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -358,8 +386,12 @@ def test_mount_creation_preserves_existing_managed_file_over_stale_workspace_cop
 
     agent_dir = root_dir / ".agent"
     agent_dir.mkdir(parents=True, exist_ok=True)
-    (agent_dir / "plan.yaml").write_text("task_id: stale\nsteps: []\n", encoding="utf-8")
+    public_plan = agent_dir / "plan.yaml"
+    public_plan.write_text("task_id: stale\nsteps: []\n", encoding="utf-8")
     (agent_dir / "events.jsonl").write_text('{"event":"legacy"}\n', encoding="utf-8")
+    managed_plan = _managed_file(temp_home, root_dir, DEFAULT_PLAN_RELATIVE)
+    older_mtime = managed_plan.stat().st_mtime - 10
+    os.utime(public_plan, (older_mtime, older_mtime))
 
     runtime, env, proc = _mount_root(root_dir, temp_home)
     try:

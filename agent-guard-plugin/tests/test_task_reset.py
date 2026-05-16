@@ -1,6 +1,7 @@
 """Tests for test task reset."""
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 from agent_guard.cli import run_command
 from agent_guard.state import AGENT_DIR, load_state
@@ -67,3 +68,65 @@ def test_reset_task_archives_current_records_and_initializes_new_task() -> None:
     assert (root_dir / ".agent" / "events.jsonl").read_text(encoding="utf-8") == ""
     assert not (root_dir / ".agent" / "plan.yaml").exists()
     assert not list((root_dir / ".agent" / "artifacts").iterdir())
+
+
+def test_close_task_requires_completed_state_without_force() -> None:
+    """close-task should reject in-progress tasks by default."""
+    root_dir = make_temp_repo()
+    write_state(root_dir, task_id="old-task", stage="GREEN_IMPL", current_step="green-001")
+
+    try:
+        run_command(["close-task"], root_dir)
+    except SystemExit as exc:
+        assert exc.code == 1
+    else:
+        raise AssertionError("close-task should have failed")
+
+
+def test_close_task_stops_workspace_protection_for_completed_task() -> None:
+    """close-task should stop workspace protection after completion."""
+    root_dir = make_temp_repo()
+    write_state(
+        root_dir,
+        task_id="old-task",
+        stage="DONE",
+        current_step=None,
+        can_finalize=True,
+        fuse="enabled",
+    )
+
+    with (
+        patch(
+            "agent_guard.task_reset.stop_fuse_protection",
+            return_value={"protection": "inactive", "stopped": True},
+        ) as stop_protection,
+    ):
+        try:
+            run_command(["close-task"], root_dir)
+        except SystemExit as exc:
+            assert exc.code == 0
+        else:
+            raise AssertionError("close-task should exit")
+
+    stop_protection.assert_called_once_with(root_dir)
+
+
+def test_close_task_force_stops_workspace_protection_for_in_progress_task() -> None:
+    """close-task --force should stop protection even before DONE."""
+    root_dir = make_temp_repo()
+    write_state(root_dir, task_id="old-task", stage="GREEN_IMPL", current_step="green-001")
+
+    with (
+        patch(
+            "agent_guard.task_reset.stop_fuse_protection",
+            return_value={"protection": "inactive", "stopped": True},
+        ) as stop_protection,
+    ):
+        try:
+            run_command(["close-task", "--force"], root_dir)
+        except SystemExit as exc:
+            assert exc.code == 0
+        else:
+            raise AssertionError("close-task --force should exit")
+
+    stop_protection.assert_called_once_with(root_dir)

@@ -126,6 +126,37 @@ def unlock(root_dir: str | Path, token: str) -> bool:
     return True
 
 
+def release_token(root_dir: str | Path, token: str) -> bool:
+    """Release a workspace token while preserving the current locked-file set."""
+    normalized = normalize_root_path(root_dir)
+    payload = load_locks()
+    roots = dict(payload["roots"])
+    entry = dict(roots.get(normalized, {}))
+    if entry.get("token") != token:
+        return False
+    entry["managed"] = entry.get("managed") or _managed_root_for(normalized)
+    entry["token"] = ""
+    entry["files"] = list(entry.get("files") or [])
+    roots[normalized] = entry
+    save_locks({"version": 3, "roots": roots})
+    return True
+
+
+def set_locked_files(root_dir: str | Path, files: list[str]) -> list[str]:
+    """Persist the policy-managed locked-file set for one workspace."""
+    normalized = normalize_root_path(root_dir)
+    payload = load_locks()
+    roots = dict(payload["roots"])
+    entry = dict(roots.get(normalized, {}))
+    normalized_files = sorted({str(item) for item in files})
+    entry["managed"] = entry.get("managed") or _managed_root_for(normalized)
+    entry["token"] = str(entry.get("token") or "")
+    entry["files"] = normalized_files
+    roots[normalized] = entry
+    save_locks({"version": 3, "roots": roots})
+    return normalized_files
+
+
 def _file_context(file_path: str | Path) -> tuple[str, str]:
     path = Path(os.path.abspath(os.fspath(file_path)))
     if path.parent.name != AGENT_DIR:
@@ -183,6 +214,7 @@ def _temporarily_unlock_file(file_path: str | Path, token: str) -> Iterator[None
     payload = load_locks()
     roots = dict(payload["roots"])
     entry = dict(roots[root_dir])
+    originally_locked = file_name in list(entry.get("files", []))
     entry["files"] = [name for name in entry.get("files", []) if name != file_name]
     roots[root_dir] = entry
     save_locks({"version": 3, "roots": roots})
@@ -195,7 +227,7 @@ def _temporarily_unlock_file(file_path: str | Path, token: str) -> Iterator[None
         current["managed"] = current.get("managed") or _managed_root_for(root_dir)
         current["token"] = current.get("token") or token
         files = list(current.get("files") or [])
-        if current.get("token") == token and file_name not in files:
+        if originally_locked and current.get("token") == token and file_name not in files:
             files.append(file_name)
         current["files"] = files
         roots[root_dir] = current

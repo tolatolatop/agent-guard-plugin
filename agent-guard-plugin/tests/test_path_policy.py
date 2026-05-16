@@ -72,6 +72,7 @@ def test_clarifying_blocks_agent_plan_updates_when_plan_mode_is_not_create() -> 
         ".agent/plan.yaml",
     )
     assert result["decision"] == "block"
+    assert "plan.yaml is not writable during CLARIFYING" in result["reason"]
 
 
 def test_planning_blocks_root_plan_markdown() -> None:

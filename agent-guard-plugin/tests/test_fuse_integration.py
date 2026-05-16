@@ -69,6 +69,24 @@ def test_ensure_fuse_protection_starts_runtime_when_available(monkeypatch) -> No
     assert result["pid"] == 43210
 
 
+def test_ensure_fuse_protection_syncs_strategy_locks_when_already_mounted(monkeypatch) -> None:
+    """Mounted workspaces should refresh long-lived managed-document protection."""
+    root_dir = make_temp_repo()
+    synced: list[Path] = []
+    monkeypatch.setattr("agent_guard.fuse_integration.fuse_runtime_available", lambda: True)
+    monkeypatch.setattr("agent_guard.fuse_integration.fuse_enabled", lambda _: True)
+    monkeypatch.setattr(
+        "agent_guard.fuse_integration.fuse_status",
+        lambda _: {"running": True, "pid": 321, "root": str(root_dir.resolve())},
+    )
+    monkeypatch.setattr("agent_guard.fuse_integration._sync_workspace_protection", lambda root: synced.append(root))
+
+    result = ensure_fuse_protection(root_dir)
+
+    assert result["protection"] == "mounted"
+    assert synced == [root_dir]
+
+
 def test_status_exposes_only_public_fuse_summary(monkeypatch) -> None:
     """Status should not expose low-level fuse runtime details."""
     root_dir = make_temp_repo()

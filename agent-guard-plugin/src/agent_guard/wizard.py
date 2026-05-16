@@ -27,7 +27,7 @@ def write_plan_template(
 ) -> Path:
     """Write plan template."""
     repository = PlanRepository(root_dir)
-    repository.save_steps(task_id, [plan_template_step(task_id, stage, step_name, goal)])
+    repository.save_steps(task_id, [plan_template_step(task_id, stage, step_name, goal)], command_name="wizard")
     return repository.file_path
 
 

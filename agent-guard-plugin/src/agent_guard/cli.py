@@ -24,7 +24,7 @@ from .jobs import load_jobs
 from .plan import load_plan_summary
 from .runtime_adapter import get_next_step
 from .state import AGENT_DIR, ensure_agent_files, load_state, update_state
-from .task_reset import reset_task
+from .task_reset import close_task, reset_task
 from .transitions import (
     advance_stage,
     complete_step,
@@ -46,6 +46,8 @@ Commands:
                                     Archive completed task state and initialize a new task.
   next-task <task-id> [--workflow ID]
                                     Alias for reset-task.
+  close-task [--force]
+                                    Close the current workspace task and release .agent protection.
   status                            Show current state, jobs, plan summary, and next step.
   session-start                     Emit a concise session reminder.
   can-write <path>                  Check whether a file write is allowed in the current stage.
@@ -87,6 +89,12 @@ COMMAND_HELP: dict[str, str] = {
     "start-task": "Usage: agent-guard start-task <task-id> [--workflow ID]\n\nStart or register a task and move IDLE repositories into the selected workflow entry stage.",
     "reset-task": "Usage: agent-guard reset-task <task-id> [--workflow ID]\n\nArchive completed task state and initialize a new task.",
     "next-task": "Usage: agent-guard next-task <task-id> [--workflow ID]\n\nAlias for reset-task.",
+    "close-task": (
+        "Usage: agent-guard close-task [--force]\n\n"
+        "Close the current workspace task and release .agent protection.\n\n"
+        "By default this requires the task to be complete or the workspace to be idle. "
+        "Use --force to stop protection even when the current task is still in progress."
+    ),
     "status": "Usage: agent-guard status\n\nShow current state, jobs, plan summary, and next step.",
     "session-start": "Usage: agent-guard session-start\n\nEmit a concise session reminder for hooks and agents.",
     "can-write": "Usage: agent-guard can-write <path>\n\nCheck whether a file write is allowed in the current stage.",
@@ -190,6 +198,9 @@ def run_command(argv: list[str], cwd: Path) -> int:
             workflow_id = str(flags["workflow"]) if "workflow" in flags else None
             result = reset_task(cwd, task_id, workflow_id=workflow_id)
             print_json({"ok": True, **result})
+        elif command == "close-task":
+            flags = parse_flags(rest)
+            print_json({"ok": True, **close_task(cwd, force=bool(flags.get("force")))})
         elif command == "status":
             state = load_state(cwd)
             print_json(
@@ -299,7 +310,7 @@ def run_command(argv: list[str], cwd: Path) -> int:
                     "error": (
                         "Unknown command. Supported: init, start-task, status, session-start, "
                         "can-write, record-command, advance-stage, complete-step, ready-to-summarize, "
-                        "mark-done, check-failure-loop, check-job-poll, can-finalize, next-step, "
+                        "mark-done, check-failure-loop, check-job-poll, can-finalize, next-step, close-task, "
                         "reset-task, next-task, install, uninstall, wizard"
                     )
                 },

@@ -9,16 +9,11 @@ import yaml
 from agent_guard_file_lock import (
     DEFAULT_PLAN_RELATIVE,
     fuse_enabled,
-    lock as lock_file,
-    lock_file as lock_public_file,
     managed_file_path,
-    public_file_path,
-    unlock_file as unlock_public_file,
-    unlock as unlock_file,
-    write as lock_write,
 )
 
 from ..domain.models import FailureRecord, Job, PlanStep, TaskSession
+from ..managed_documents import ManagedDocumentKind, managed_document_path, write_managed_document
 from ..state import (
     DEFAULT_FAILURES,
     DEFAULT_JOBS,
@@ -55,15 +50,7 @@ class PlanRepository:
 
     def load_raw(self) -> dict[str, Any] | None:
         """Load raw YAML plan data."""
-        if fuse_enabled(self.root_dir):
-            actual_path = public_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)
-        else:
-            managed_target = managed_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)
-            actual_path = (
-                managed_target
-                if managed_target.exists()
-                else public_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)
-            )
+        actual_path = managed_document_path(self.root_dir, DEFAULT_PLAN_RELATIVE)
         if not actual_path.exists():
             return None
         try:
@@ -86,31 +73,24 @@ class PlanRepository:
             return []
         return [PlanStep.from_mapping(step, index) for index, step in enumerate(data.get("steps", []))]
 
-    def save_steps(self, task_id: str | None, steps: list[PlanStep]) -> dict[str, Any]:
+    def save_steps(self, task_id: str | None, steps: list[PlanStep], command_name: str | None = None) -> dict[str, Any]:
         """Persist a structured plan document."""
         payload = {
             "task_id": task_id,
             "steps": [step.to_mapping() for step in steps],
         }
         rendered = yaml.safe_dump(payload, sort_keys=False)
-        managed_target = managed_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)
-        managed_target.parent.mkdir(parents=True, exist_ok=True)
-        if fuse_enabled(self.root_dir):
-            token = lock_file(self.root_dir)
-            try:
-                lock_public_file(str(public_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)), token)
-                lock_write(str(public_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)), rendered, token)
-            finally:
-                unlock_public_file(str(public_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)), token)
-                unlock_file(self.root_dir, token)
-        else:
-            managed_target.write_text(rendered, encoding="utf-8")
-            public_target = public_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)
-            public_target.parent.mkdir(parents=True, exist_ok=True)
-            public_target.write_text(rendered, encoding="utf-8")
+        write_managed_document(
+            self.root_dir,
+            DEFAULT_PLAN_RELATIVE,
+            rendered,
+            document_kind=ManagedDocumentKind.WORKFLOW_PLAN,
+            session=load_task_session(self.root_dir),
+            command_name=command_name,
+        )
         return payload
 
-    def update_step_status(self, step_id: str, status: str) -> dict[str, Any]:
+    def update_step_status(self, step_id: str, status: str, command_name: str | None = "complete-step") -> dict[str, Any]:
         """Update one step by stable id/name."""
         data = self.load_raw()
         if data is None:
@@ -126,21 +106,14 @@ class PlanRepository:
         if not updated:
             raise RuntimeError(f"plan.yaml step {step_id} was not found.")
         rendered = yaml.safe_dump(data, sort_keys=False)
-        managed_target = managed_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)
-        managed_target.parent.mkdir(parents=True, exist_ok=True)
-        if fuse_enabled(self.root_dir):
-            token = lock_file(self.root_dir)
-            try:
-                lock_public_file(str(public_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)), token)
-                lock_write(str(public_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)), rendered, token)
-            finally:
-                unlock_public_file(str(public_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)), token)
-                unlock_file(self.root_dir, token)
-        else:
-            managed_target.write_text(rendered, encoding="utf-8")
-            public_target = public_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)
-            public_target.parent.mkdir(parents=True, exist_ok=True)
-            public_target.write_text(rendered, encoding="utf-8")
+        write_managed_document(
+            self.root_dir,
+            DEFAULT_PLAN_RELATIVE,
+            rendered,
+            document_kind=ManagedDocumentKind.WORKFLOW_PLAN,
+            session=load_task_session(self.root_dir),
+            command_name=command_name,
+        )
         return data
 
 

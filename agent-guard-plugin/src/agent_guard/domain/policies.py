@@ -9,6 +9,13 @@ from typing import Any
 
 from .models import FailureRecord, GuardDecision, TaskSession, VerificationRecord
 from .rules import RuleContext, evaluate_rule
+from ..managed_documents import (
+    ManagedDocumentKind,
+    ManagedDocumentOperation,
+    ManagedDocumentPolicyService,
+    managed_document_backing_path,
+    managed_document_kind_for_path,
+)
 from ..events import append_event
 from ..infrastructure.repositories import FailuresRepository, JobsRepository, StateRepository
 from ..workflow_spec import (
@@ -87,11 +94,19 @@ class WorkflowPolicyService:
         stage_write_policy = stage_rule.get("write_policy", {})
         writable_paths = [str(item) for item in stage_write_policy.get("writable_paths", [])]
         denied_paths = [str(item) for item in stage_write_policy.get("denied_paths", [])]
+        document_kind = managed_document_kind_for_path(normalized)
 
-        if matches_any(normalized, policy["protected_paths"]):
+        if document_kind == ManagedDocumentKind.SESSION_STATE:
+            decision = ManagedDocumentPolicyService().decide_write(
+                session,
+                document_kind,
+                ManagedDocumentOperation.DIRECT_WRITE,
+                root_dir=root_dir,
+                stage_rule=stage_rule,
+            )
             return self._blocked_write_decision(
                 session,
-                "Path .agent/state.json is managed by agent-guard and cannot be edited directly. Use agent-guard commands to change task state.",
+                decision.reason,
                 writable_paths,
                 denied_paths,
             )
@@ -100,6 +115,35 @@ class WorkflowPolicyService:
             return self._blocked_write_decision(
                 session,
                 f"No active task is set and stage is {session.stage}. Run agent-guard start-task before writing project files.",
+                writable_paths,
+                denied_paths,
+            )
+
+        if document_kind == ManagedDocumentKind.WORKFLOW_PLAN:
+            decision = ManagedDocumentPolicyService().decide_write(
+                session,
+                document_kind,
+                ManagedDocumentOperation.DIRECT_WRITE,
+                root_dir=root_dir,
+                stage_rule=stage_rule,
+            )
+            if decision.allowed:
+                return GuardDecision(
+                    "allow",
+                    decision.reason,
+                    payload=self._write_payload(session, writable_paths, denied_paths),
+                )
+            return self._blocked_write_decision(
+                session,
+                decision.reason,
+                writable_paths,
+                denied_paths,
+            )
+
+        if matches_any(normalized, policy["protected_paths"]):
+            return self._blocked_write_decision(
+                session,
+                f"Path {normalized} is managed by agent-guard and cannot be edited directly.",
                 writable_paths,
                 denied_paths,
             )
@@ -159,7 +203,11 @@ class StageExitPolicyService:
         self.state_repo = StateRepository(root_dir)
 
     def _artifact_mtime_ns(self, artifact_path: str) -> int | None:
-        candidate = self.root_dir / artifact_path
+        candidate = (
+            managed_document_backing_path(self.root_dir, artifact_path)
+            if managed_document_kind_for_path(artifact_path) is not None
+            else self.root_dir / artifact_path
+        )
         if not candidate.exists():
             return None
         return int(candidate.stat().st_mtime_ns)

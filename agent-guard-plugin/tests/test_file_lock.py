@@ -23,7 +23,9 @@ from agent_guard_file_lock import (
     managed_file_path,
     pid_file,
     public_file_path,
+    release_token,
     save_locks,
+    set_locked_files,
     start_fuse,
     stop_fuse,
     unlock,
@@ -115,6 +117,28 @@ def test_unlock_only_succeeds_with_matching_token_and_clears_files() -> None:
     assert unlock(root_dir, token) is True
     assert load_locks()["roots"][root_key]["token"] == ""
     assert load_locks()["roots"][root_key]["files"] == []
+
+
+def test_release_token_preserves_locked_files() -> None:
+    root_dir = make_temp_repo()
+    root_key = str(root_dir.resolve())
+    token = lock(root_dir)
+    lock_file(str(public_file_path(root_dir, DEFAULT_STATE_RELATIVE)), token)
+
+    assert release_token(root_dir, token) is True
+    assert load_locks()["roots"][root_key]["token"] == ""
+    assert load_locks()["roots"][root_key]["files"] == ["state.json"]
+
+
+def test_set_locked_files_updates_strategy_set_without_token() -> None:
+    root_dir = make_temp_repo()
+    root_key = str(root_dir.resolve())
+
+    files = set_locked_files(root_dir, ["plan.yaml", "state.json", "plan.yaml"])
+
+    assert files == ["plan.yaml", "state.json"]
+    assert load_locks()["roots"][root_key]["token"] == ""
+    assert load_locks()["roots"][root_key]["files"] == ["plan.yaml", "state.json"]
 
 
 def test_write_requires_matching_file_lock_and_writes_public_path() -> None:

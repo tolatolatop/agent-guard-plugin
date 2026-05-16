@@ -7,18 +7,20 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .domain.models import TaskSession
+from .managed_documents import (
+    ManagedDocumentKind,
+    managed_document_backing_path,
+    managed_document_path,
+    sync_managed_document_protection,
+    write_managed_document,
+)
 from agent_guard_file_lock import (
     DEFAULT_STATE_RELATIVE,
     derive_state_id,
     fuse_enabled,
-    lock_file as lock_public_file,
     managed_file_path,
     public_file_path,
-    write as lock_write,
-    lock as lock_file,
     managed_root_path,
-    unlock_file as unlock_public_file,
-    unlock as unlock_file,
 )
 
 AGENT_DIR = ".agent"
@@ -106,7 +108,11 @@ def stage_artifacts_path(root_dir: Path) -> Path:
 
 
 def _artifact_mtime_ns(root_dir: Path, artifact_path: str) -> int | None:
-    candidate = root_dir / artifact_path
+    candidate = (
+        managed_document_backing_path(root_dir, artifact_path)
+        if artifact_path in {DEFAULT_STATE_RELATIVE, ".agent/plan.yaml"}
+        else root_dir / artifact_path
+    )
     if not candidate.exists():
         return None
     return int(candidate.stat().st_mtime_ns)
@@ -188,31 +194,39 @@ def ensure_agent_files(root_dir: Path) -> None:
 
 def _protected_read_path(root_dir: Path, relative_path: str) -> Path:
     if relative_path in {DEFAULT_STATE_RELATIVE, ".agent/plan.yaml"}:
-        if fuse_enabled(root_dir):
-            return public_file_path(root_dir, relative_path)
-        managed_target = managed_file_path(root_dir, relative_path)
-        return managed_target if managed_target.exists() else public_file_path(root_dir, relative_path)
+        return managed_document_path(root_dir, relative_path)
     return root_dir / relative_path
 
 
 def _write_text(root_dir: Path, relative_path: str, content: str) -> Path:
     if relative_path in {DEFAULT_STATE_RELATIVE, ".agent/plan.yaml"}:
-        managed_target = managed_file_path(root_dir, relative_path)
-        managed_target.parent.mkdir(parents=True, exist_ok=True)
-        if fuse_enabled(root_dir):
-            token = lock_file(root_dir)
-            try:
-                lock_public_file(str(public_file_path(root_dir, relative_path)), token)
-                lock_write(str(public_file_path(root_dir, relative_path)), content, token)
-            finally:
-                unlock_public_file(str(public_file_path(root_dir, relative_path)), token)
-                unlock_file(root_dir, token)
-            return public_file_path(root_dir, relative_path)
-        managed_target.write_text(content, encoding="utf-8")
-        public_target = public_file_path(root_dir, relative_path)
-        public_target.parent.mkdir(parents=True, exist_ok=True)
-        public_target.write_text(content, encoding="utf-8")
-        return managed_target
+        document_kind = (
+            ManagedDocumentKind.SESSION_STATE
+            if relative_path == DEFAULT_STATE_RELATIVE
+            else ManagedDocumentKind.WORKFLOW_PLAN
+        )
+        session = (
+            TaskSession(
+                task_id=None,
+                workflow_id=None,
+                stage="IDLE",
+                current_step=None,
+                can_finalize=False,
+                last_verification=None,
+                needs_human=False,
+                state_id=derive_state_id(root_dir),
+                fuse="enabled" if fuse_enabled(root_dir) else "disabled",
+            )
+            if relative_path == DEFAULT_STATE_RELATIVE
+            else load_task_session(root_dir)
+        )
+        return write_managed_document(
+            root_dir,
+            relative_path,
+            content,
+            document_kind=document_kind,
+            session=session,
+        )
     target = root_dir / relative_path
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
@@ -279,6 +293,7 @@ def load_state(root_dir: Path) -> dict[str, Any]:
         validated["state_id"] = derive_state_id(root_dir)
         validated["fuse"] = "enabled" if fuse_enabled(root_dir) else "disabled"
         ensure_managed_state_dir(str(validated.get("state_id")), root_dir)
+        sync_managed_document_protection(root_dir, TaskSession.from_mapping(validated))
         return validated
     raw = read_json(file_path, "state.json")
     raw_before = dict(raw)
@@ -288,6 +303,7 @@ def load_state(root_dir: Path) -> dict[str, Any]:
     ensure_managed_state_dir(str(validated.get("state_id")), root_dir)
     if validated != raw_before:
         _write_text(root_dir, DEFAULT_STATE_RELATIVE, json.dumps(validated, indent=2) + "\n")
+    sync_managed_document_protection(root_dir, TaskSession.from_mapping(validated))
     return validated
 
 
@@ -312,7 +328,14 @@ def save_state(root_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
             previous_stage = str(read_json(file_path, "state.json").get("stage") or "IDLE")
         except RuntimeError:
             previous_stage = None
-    _write_text(root_dir, DEFAULT_STATE_RELATIVE, json.dumps(validated, indent=2) + "\n")
+    write_managed_document(
+        root_dir,
+        DEFAULT_STATE_RELATIVE,
+        json.dumps(validated, indent=2) + "\n",
+        document_kind=ManagedDocumentKind.SESSION_STATE,
+        session=TaskSession.from_mapping(validated),
+    )
+    sync_managed_document_protection(root_dir, TaskSession.from_mapping(validated))
     current_stage = str(validated.get("stage") or "IDLE")
     if previous_stage != current_stage or not stage_artifacts_path(root_dir).exists():
         workflow_id = str(validated.get("workflow_id")) if isinstance(validated.get("workflow_id"), str) else None

@@ -14,6 +14,14 @@ from agent_guard_file_lock import (
 )
 
 
+def _sync_workspace_protection(root_dir: Path) -> None:
+    """Refresh long-lived managed document protection for the mounted workspace."""
+    from .managed_documents import sync_managed_document_protection
+    from .state import load_task_session
+
+    sync_managed_document_protection(root_dir, load_task_session(root_dir))
+
+
 def fuse_state(root_dir: Path) -> dict[str, Any]:
     """Return the current FUSE protection state for one workspace."""
     available = fuse_runtime_available()
@@ -45,7 +53,10 @@ def public_fuse_status(root_dir: Path) -> dict[str, Any]:
 def ensure_fuse_protection(root_dir: Path) -> dict[str, Any]:
     """Start the workspace FUSE runtime when available and not already mounted."""
     current = fuse_state(root_dir)
-    if current["enabled"] or not current["available"]:
+    if current["enabled"]:
+        _sync_workspace_protection(root_dir)
+        return current
+    if not current["available"]:
         return current
 
     runtime = current["runtime"]
@@ -66,6 +77,8 @@ def ensure_fuse_protection(root_dir: Path) -> dict[str, Any]:
         }
 
     refreshed = fuse_state(root_dir)
+    if refreshed["enabled"]:
+        _sync_workspace_protection(root_dir)
     return {
         **refreshed,
         "started": True,
