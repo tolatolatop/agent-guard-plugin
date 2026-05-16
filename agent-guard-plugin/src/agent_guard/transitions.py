@@ -55,8 +55,13 @@ def _require_direct_transition(from_stage: str, to_stage: str, workflow_id: str 
     completion_stage = canonical_completion_stage(workflow_id=workflow_id)
     if from_stage == completion_stage:
         raise RuntimeError(f"{completion_stage} cannot transition anywhere. Use reset-task or next-task to start a new task.")
-    if to_stage not in transitions.get(from_stage, []):
-        raise RuntimeError(f"Illegal transition: {from_stage} -> {to_stage}")
+    allowed_targets = transitions.get(from_stage, [])
+    if to_stage not in allowed_targets:
+        allowed_display = ", ".join(allowed_targets) if allowed_targets else "none"
+        raise RuntimeError(
+            f"Illegal transition: {from_stage} -> {to_stage}. "
+            f"Allowed next stages from {from_stage}: {allowed_display}."
+        )
 
 
 def _guard_transition(

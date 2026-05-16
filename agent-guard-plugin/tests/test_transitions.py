@@ -43,6 +43,7 @@ def test_advance_stage_allows_legal_transition_and_blocks_illegal_transition() -
         advance_stage(root_dir, "DONE")
     except RuntimeError as exc:
         assert "Illegal transition" in str(exc)
+        assert "Allowed next stages from PLANNING: RED_TEST, GREEN_IMPL." in str(exc)
     else:
         raise AssertionError("Expected illegal transition to fail")
 
