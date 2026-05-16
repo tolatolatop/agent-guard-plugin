@@ -2,5 +2,6 @@
 .agent-guard/skills/
 .venv/
 .pytest_cache/
+fuse-runtime/target/
 __pycache__/
 *.pyc
