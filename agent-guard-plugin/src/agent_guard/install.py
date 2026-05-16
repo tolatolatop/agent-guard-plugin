@@ -55,6 +55,33 @@ def prompt_install_options(
         updated["exclude-match"] = exclude_patterns
     elif "exclude-match" in updated:
         updated.pop("exclude-match", None)
+    updated["wizard"] = bool(updated.get("wizard")) or confirm_action(
+        "Run setup wizard after install?",
+        input_stream,
+        output,
+    )
+    return updated
+
+
+def prompt_missing_install_axes(
+    flags: dict[str, Any],
+    input_stream: TextIO,
+    output: TextIO,
+) -> dict[str, Any]:
+    """Prompt only for missing runtime and scope install axes."""
+    updated = dict(flags)
+    runtime = updated.get("runtime")
+    scope = updated.get("scope")
+    prompted = False
+
+    if runtime not in SUPPORTED_RUNTIMES:
+        updated["runtime"] = prompt_choice("Runtime", list(SUPPORTED_RUNTIMES), input_stream, output, default="codex")
+        prompted = True
+    if scope not in SUPPORTED_SCOPES:
+        updated["scope"] = prompt_choice("Scope", list(SUPPORTED_SCOPES), input_stream, output, default="project")
+        prompted = True
+    if prompted and "wizard" not in updated:
+        updated["wizard"] = confirm_action("Run setup wizard after install?", input_stream, output)
     return updated
 
 
@@ -578,6 +605,8 @@ def install_runtime(
     install_output = output or sys.stdout
     if bool(flags.get("interactive")):
         flags = prompt_install_options(flags, install_input, install_output)
+    else:
+        flags = prompt_missing_install_axes(flags, install_input, install_output)
     runtime = flags.get("runtime")
     scope = flags.get("scope", "project")
     if runtime not in SUPPORTED_RUNTIMES:
@@ -588,11 +617,21 @@ def install_runtime(
     resolved_home = home_dir or Path(os.path.expanduser("~"))
     include_matches = [str(item) for item in flags.get("match", [])] if isinstance(flags.get("match"), list) else []
     exclude_matches = [str(item) for item in flags.get("exclude-match", [])] if isinstance(flags.get("exclude-match"), list) else []
+    run_wizard_after_install = bool(flags.get("wizard"))
     if runtime == "claude-code":
-        return install_claude_code(cwd, resolved_home, str(scope), plugin_root, include_matches, exclude_matches)
-    if runtime == "codex":
-        return install_codex(cwd, resolved_home, str(scope), plugin_root, include_matches, exclude_matches)
-    return install_opencode(cwd, resolved_home, str(scope), plugin_root, include_matches, exclude_matches)
+        result = install_claude_code(cwd, resolved_home, str(scope), plugin_root, include_matches, exclude_matches)
+    elif runtime == "codex":
+        result = install_codex(cwd, resolved_home, str(scope), plugin_root, include_matches, exclude_matches)
+    else:
+        result = install_opencode(cwd, resolved_home, str(scope), plugin_root, include_matches, exclude_matches)
+
+    if run_wizard_after_install:
+        from .wizard import run_wizard
+
+        result["wizard"] = run_wizard(cwd, install_input, install_output)
+    else:
+        result["wizard"] = None
+    return result
 
 
 def _hook_matches_marker(hook: Any, marker: str) -> bool:

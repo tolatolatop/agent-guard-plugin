@@ -238,7 +238,7 @@ def test_install_runtime_uses_workflow_defaults_when_cli_filters_are_absent(
 def test_install_runtime_supports_interactive_prompts() -> None:
     """Test that install_runtime can collect options interactively."""
     root, home = make_dirs()
-    answers = StringIO("codex\nproject\n\n\n")
+    answers = StringIO("codex\nproject\n\n\nn\n")
 
     result = install_runtime(
         ["--interactive"],
@@ -255,10 +255,48 @@ def test_install_runtime_supports_interactive_prompts() -> None:
     assert (root / ".agent-guard" / "skills" / "workflow-core.md").exists()
 
 
+def test_install_runtime_prompts_for_missing_runtime_and_scope() -> None:
+    """Test that install prompts for runtime and scope when omitted."""
+    root, home = make_dirs()
+    answers = StringIO("codex\nproject\nn\n")
+
+    result = install_runtime(
+        [],
+        root,
+        home,
+        PLUGIN_ROOT,
+        input_stream=answers,
+        output=StringIO(),
+    )
+
+    assert result["runtime"] == "codex"
+    assert result["scope"] == "project"
+    assert (root / ".codex" / "hooks.json").exists()
+
+
+def test_install_runtime_prompts_only_for_missing_scope() -> None:
+    """Test that install prompts only for the missing install axis."""
+    root, home = make_dirs()
+    answers = StringIO("user\nn\n")
+
+    result = install_runtime(
+        ["--runtime", "codex"],
+        root,
+        home,
+        PLUGIN_ROOT,
+        input_stream=answers,
+        output=StringIO(),
+    )
+
+    assert result["runtime"] == "codex"
+    assert result["scope"] == "user"
+    assert (home / ".codex" / "hooks.json").exists()
+
+
 def test_install_runtime_supports_short_interactive_alias() -> None:
     """Test that install_runtime can collect options through -i."""
     root, home = make_dirs()
-    answers = StringIO("codex\nproject\n\n\n")
+    answers = StringIO("codex\nproject\n\n\nn\n")
 
     result = install_runtime(
         ["-i"],
@@ -282,7 +320,7 @@ def test_install_runtime_interactive_filters_override_workflow_defaults(
         lambda: {"skill_match": ["definitely-no-such-skill"], "skill_exclude_match": []},
     )
     root, home = make_dirs()
-    answers = StringIO("claude-code\nproject\nworkflow-core\n\n")
+    answers = StringIO("claude-code\nproject\nworkflow-core\n\nn\n")
 
     result = install_runtime(
         ["--interactive"],
@@ -296,6 +334,41 @@ def test_install_runtime_interactive_filters_override_workflow_defaults(
     assert result["runtime"] == "claude-code"
     assert (root / ".claude" / "skills" / "workflow-core" / "SKILL.md").exists()
     assert not (root / ".claude" / "skills" / "using-workflow" / "SKILL.md").exists()
+
+
+def test_install_runtime_can_enter_wizard_after_install(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that install can chain into the setup wizard when requested."""
+    root, home = make_dirs()
+    monkeypatch.setattr(
+        "agent_guard.wizard.run_wizard",
+        lambda cwd, input_stream, output: {"ok": True, "task_id": "demo-task", "state": {"stage": "CLARIFYING"}},
+    )
+
+    result = install_runtime(["--runtime", "codex", "--scope", "project", "--wizard"], root, home, PLUGIN_ROOT)
+
+    assert result["runtime"] == "codex"
+    assert result["wizard"] == {"ok": True, "task_id": "demo-task", "state": {"stage": "CLARIFYING"}}
+
+
+def test_install_runtime_interactive_can_enable_wizard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that interactive install can opt into the wizard flow."""
+    root, home = make_dirs()
+    answers = StringIO("codex\nproject\n\n\ny\n")
+    monkeypatch.setattr(
+        "agent_guard.wizard.run_wizard",
+        lambda cwd, input_stream, output: {"ok": True, "task_id": "wizard-task"},
+    )
+
+    result = install_runtime(
+        ["--interactive"],
+        root,
+        home,
+        PLUGIN_ROOT,
+        input_stream=answers,
+        output=StringIO(),
+    )
+
+    assert result["wizard"] == {"ok": True, "task_id": "wizard-task"}
 
 
 def test_install_writes_codex_hooks_json() -> None:
