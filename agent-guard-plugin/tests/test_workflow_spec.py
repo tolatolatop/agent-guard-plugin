@@ -10,6 +10,7 @@ from agent_guard.workflow_spec import (
     canonical_stage_plan_mode,
     canonical_stage_spec,
     canonical_workflow_spec,
+    discover_workflow_ids,
     failure_policy,
     finalization_policy,
     install_defaults,
@@ -476,6 +477,81 @@ def test_canonical_helpers_resolve_legacy_completion_and_entry_stages() -> None:
     assert canonical_completion_stage() == "DONE"
     assert canonical_stage_plan_mode("VERIFY") == "advance"
     assert canonical_stage_spec("DONE")["final"] is True
+
+
+def test_discover_workflow_ids_prefers_user_workflow_directory(monkeypatch, tmp_path: Path) -> None:
+    """Test that user-level workflow directories participate in discovery."""
+    user_dir = tmp_path / "user"
+    user_dir.mkdir()
+    (user_dir / "research.workflow.yaml").write_text("workflow: {}\nglobals: {}\nstages: {}\n", encoding="utf-8")
+    monkeypatch.setattr("agent_guard.workflow_spec.user_workflow_dirs", lambda: [user_dir])
+
+    workflow_ids = discover_workflow_ids()
+
+    assert workflow_ids[0] == "default"
+    assert "research" in workflow_ids
+
+
+def test_load_workflow_spec_prefers_user_workflow_over_repo(monkeypatch, tmp_path: Path) -> None:
+    """Test that user-level workflow files override repository-local workflow files."""
+    user_dir = tmp_path / "user"
+    user_dir.mkdir()
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+
+    user_workflow = user_dir / "research.workflow.yaml"
+    user_workflow.write_text(
+        yaml.safe_dump(
+            {
+                "version": 2,
+                "workflow": {"id": "research-user", "title": "User Research", "entry": "QUESTION"},
+                "globals": {"protected": [], "sensitive": [], "failures": {}, "finalize": {"require": []}, "session_start": {}},
+                "stages": {
+                    "QUESTION": {
+                        "goal": "Start from user workflow.",
+                        "plan": "deny",
+                        "allow": {"write": [], "actions": [], "stop": True, "human": True},
+                        "deny": {"write": [], "actions": []},
+                        "enter": [],
+                        "exit": [],
+                        "expect": [],
+                        "next": [],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (repo_dir / "research.workflow.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "version": 2,
+                "workflow": {"id": "research-repo", "title": "Repo Research", "entry": "REPO"},
+                "globals": {"protected": [], "sensitive": [], "failures": {}, "finalize": {"require": []}, "session_start": {}},
+                "stages": {
+                    "REPO": {
+                        "goal": "Start from repo workflow.",
+                        "plan": "deny",
+                        "allow": {"write": [], "actions": [], "stop": True, "human": True},
+                        "deny": {"write": [], "actions": []},
+                        "enter": [],
+                        "exit": [],
+                        "expect": [],
+                        "next": [],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("agent_guard.workflow_spec.user_workflow_dirs", lambda: [user_dir])
+    load_workflow_spec.cache_clear()
+
+    spec = load_workflow_spec(repo_dir, "research")
+
+    assert spec["metadata"]["id"] == "research-user"
+    assert spec["entry_stage"] == "QUESTION"
+    load_workflow_spec.cache_clear()
 
 
 def test_load_workflow_spec_reports_friendly_message_for_invalid_yaml(monkeypatch, tmp_path: Path) -> None:

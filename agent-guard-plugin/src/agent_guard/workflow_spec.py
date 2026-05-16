@@ -38,6 +38,22 @@ def repo_workflow_path(root_dir: Path, workflow_id: str | None = None) -> Path:
     return root_dir / filename
 
 
+def user_workflow_dirs() -> list[Path]:
+    """User-level workflow override directories, highest priority first."""
+    config_root = Path.home() / ".config"
+    return [
+        config_root / "agent-gurad" / "workflow",
+        config_root / "agent-guard" / "workflow",
+    ]
+
+
+def user_workflow_path(workflow_id: str | None = None, directory: Path | None = None) -> Path:
+    """User-level workflow path."""
+    filename = f"{workflow_id}.workflow.yaml" if workflow_id else ".workflow.yaml"
+    target_dir = directory if directory is not None else user_workflow_dirs()[0]
+    return target_dir / filename
+
+
 def _workflow_id_from_filename(name: str) -> str | None:
     """Derive a workflow id from one workflow filename."""
     if name == ".workflow.yaml":
@@ -54,7 +70,7 @@ def discover_workflow_ids(root_dir: Path | None = None) -> list[str]:
     workflow_ids: set[str] = set()
     default_available = False
 
-    candidate_dirs: list[Path] = []
+    candidate_dirs: list[Path] = [*user_workflow_dirs()]
     if root_dir is not None:
         candidate_dirs.append(root_dir)
     candidate_dirs.extend([packaged_workflow_path().parent, source_workflow_path().parent])
@@ -99,6 +115,7 @@ def load_workflow_spec(root_dir: Path | None = None, workflow_id: str | None = N
     """Load workflow spec."""
     selected_workflow = workflow_id or _bound_workflow_id(root_dir)
     candidates: list[Path] = []
+    candidates.extend(user_workflow_path(selected_workflow, directory) for directory in user_workflow_dirs())
     if root_dir is not None:
         candidates.append(repo_workflow_path(root_dir, selected_workflow))
     candidates.extend(
