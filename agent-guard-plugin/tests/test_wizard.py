@@ -15,6 +15,62 @@ def make_repo() -> Path:
     return Path(tempfile.mkdtemp(prefix="agent-guard-wizard-"))
 
 
+def write_research_workflow(root: Path) -> None:
+    """Write one minimal named workflow for wizard selection tests."""
+    (root / "research.workflow.yaml").write_text(
+        "\n".join(
+            [
+                "version: 2",
+                "workflow:",
+                "  id: research",
+                "  title: Research Workflow",
+                "  entry: DISCOVER",
+                "globals:",
+                "  protected:",
+                "    - .agent/state.json",
+                "  sensitive: []",
+                "  failures:",
+                "    repeat_threshold: 2",
+                "    fingerprint_roots:",
+                "      - notes",
+                "  finalize:",
+                "    require:",
+                "      - all_plan_steps_terminal",
+                "    messages: {}",
+                "  wizard:",
+                "    start_stages:",
+                "      - DISCOVER",
+                "  session_start:",
+                "    navigator_skill: using-workflow",
+                "  install:",
+                "    skills:",
+                "      match: []",
+                "      exclude_match: []",
+                "stages:",
+                "  DISCOVER:",
+                "    goal: Gather evidence and frame the research task.",
+                "    plan: create",
+                "    allow:",
+                "      write:",
+                "        - notes/**",
+                "      actions:",
+                "        - inspect sources",
+                "      stop: true",
+                "      human: true",
+                "    deny:",
+                "      write: []",
+                "      actions: []",
+                "    enter: []",
+                "    exit: []",
+                "    expect: []",
+                "    next: []",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def test_slugify_task_id_normalizes_free_text() -> None:
     """Test that slugify task id normalizes free text."""
     assert slugify_task_id("Init Video Clipper!") == "init-video-clipper"
@@ -62,3 +118,26 @@ def test_wizard_can_skip_plan_generation() -> None:
 
     assert result["plan_written"] is None
     assert not plan_path(root).exists()
+
+
+def test_wizard_lists_named_workflows_and_binds_selected_workflow() -> None:
+    """Test that wizard prompts for workflow choice when named workflows exist."""
+    root = make_repo()
+    write_research_workflow(root)
+    output = StringIO()
+    answers = StringIO(
+        "research\n"
+        "\n"
+        "Investigate retrieval options\n"
+        "\n"
+        "\n"
+        "n\n"
+    )
+
+    result = run_wizard(root, answers, output)
+
+    assert "Workflow" in output.getvalue()
+    assert result["workflow_id"] == "research"
+    state = load_state(root)
+    assert state["workflow_id"] == "research"
+    assert state["stage"] == "DISCOVER"

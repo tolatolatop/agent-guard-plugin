@@ -38,6 +38,43 @@ def repo_workflow_path(root_dir: Path, workflow_id: str | None = None) -> Path:
     return root_dir / filename
 
 
+def _workflow_id_from_filename(name: str) -> str | None:
+    """Derive a workflow id from one workflow filename."""
+    if name == ".workflow.yaml":
+        return None
+    suffix = ".workflow.yaml"
+    if not name.endswith(suffix):
+        return None
+    workflow_id = name[: -len(suffix)].strip()
+    return workflow_id or None
+
+
+def discover_workflow_ids(root_dir: Path | None = None) -> list[str]:
+    """Discover available workflow ids for interactive selection."""
+    workflow_ids: set[str] = set()
+    default_available = False
+
+    candidate_dirs: list[Path] = []
+    if root_dir is not None:
+        candidate_dirs.append(root_dir)
+    candidate_dirs.extend([packaged_workflow_path().parent, source_workflow_path().parent])
+
+    seen_dirs: set[Path] = set()
+    for directory in candidate_dirs:
+        if directory in seen_dirs or not directory.exists():
+            continue
+        seen_dirs.add(directory)
+
+        default_available = default_available or (directory / ".workflow.yaml").exists()
+        for workflow_file in directory.glob("*.workflow.yaml"):
+            workflow_id = _workflow_id_from_filename(workflow_file.name)
+            if workflow_id is not None:
+                workflow_ids.add(workflow_id)
+
+    choices: list[str] = ["default"] if default_available else []
+    return [*choices, *sorted(workflow_ids)]
+
+
 def _bound_workflow_id(root_dir: Path | None) -> str | None:
     """Read the workflow binding from .agent/state.json when present."""
     if root_dir is None:

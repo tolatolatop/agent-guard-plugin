@@ -8,7 +8,7 @@ from .application.use_cases import plan_template_step
 from .interactive import confirm_action, prompt_choice, prompt_text
 from .infrastructure.repositories import PlanRepository
 from .state import ensure_agent_files, save_state
-from .workflow_spec import wizard_defaults
+from .workflow_spec import discover_workflow_ids, wizard_defaults
 
 
 def slugify_task_id(value: str) -> str:
@@ -34,7 +34,19 @@ def write_plan_template(
 def run_wizard(root_dir: Path, input_stream: TextIO, output: TextIO, workflow_id: str | None = None) -> dict[str, Any]:
     """Run wizard."""
     ensure_agent_files(root_dir)
-    stages = wizard_defaults(root_dir, workflow_id)["start_stages"]
+    selected_workflow_id = workflow_id
+    available_workflows = discover_workflow_ids(root_dir)
+    if selected_workflow_id is None and len(available_workflows) > 1:
+        workflow_choice = prompt_choice(
+            "Workflow",
+            available_workflows,
+            input_stream,
+            output,
+            default="default" if "default" in available_workflows else available_workflows[0],
+        )
+        selected_workflow_id = None if workflow_choice == "default" else workflow_choice
+
+    stages = wizard_defaults(root_dir, selected_workflow_id)["start_stages"]
 
     suggested_task = slugify_task_id(root_dir.name)
     task_id = slugify_task_id(prompt_text("Task id", input_stream, output, default=suggested_task))
@@ -47,7 +59,7 @@ def run_wizard(root_dir: Path, input_stream: TextIO, output: TextIO, workflow_id
         root_dir,
         {
             "task_id": task_id,
-            "workflow_id": workflow_id,
+            "workflow_id": selected_workflow_id,
             "stage": stage,
             "current_step": current_step or None,
             "can_finalize": False,
@@ -59,6 +71,7 @@ def run_wizard(root_dir: Path, input_stream: TextIO, output: TextIO, workflow_id
     result: dict[str, Any] = {
         "ok": True,
         "task_id": task_id,
+        "workflow_id": selected_workflow_id,
         "goal": goal,
         "state": state,
         "plan_written": None,
