@@ -169,7 +169,16 @@ def _handle_pre_write(cwd: Path, payload: dict[str, Any]) -> None:
     target_path = _normalize_target_path_for_policy(cwd, target_path)
     code, result = _cli_json(["can-write", target_path], cwd)
     if code != 0:
-        _fail(str(result.get("reason") or result.get("error") or "write blocked"))
+        writable_paths = result.get("writable_paths")
+        if isinstance(writable_paths, list) and writable_paths:
+            allowed = ", ".join(str(item) for item in writable_paths)
+            fallback = f"{result.get('reason') or result.get('error') or 'write blocked'} Allowed write paths: {allowed}"
+        else:
+            stage = result.get("stage")
+            fallback = str(result.get("reason") or result.get("error") or "write blocked")
+            if stage and "does not allow agent writes" not in fallback:
+                fallback = f"{fallback} Current stage {stage} does not allow agent writes."
+        _fail(str(result.get("display_reason") or fallback))
 
 
 def _handle_pre_command(cwd: Path) -> None:

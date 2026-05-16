@@ -1,4 +1,6 @@
 """Tests for test path policy."""
+from agent_guard.domain.models import TaskSession
+from agent_guard.domain.policies import WorkflowPolicyService
 from agent_guard.path_policy import decide_write
 from agent_guard.state import DEFAULT_STATE
 
@@ -24,6 +26,8 @@ def test_red_test_blocks_src_writes() -> None:
     """Test that red test blocks src writes."""
     result = decide_write({**DEFAULT_STATE, "task_id": "password-reset", "stage": "RED_TEST"}, "src/auth/reset.py")
     assert result["decision"] == "block"
+    assert result["writable_paths"] == ["tests/**"]
+    assert "Allowed write paths during RED_TEST: tests/**." in result["reason"]
 
 
 def test_red_test_allows_test_writes_in_allowed_scope() -> None:
@@ -49,6 +53,7 @@ def test_green_impl_blocks_other_agent_writes() -> None:
     """Test that GREEN_IMPL still blocks .agent writes outside managed system updates."""
     result = decide_write({**DEFAULT_STATE, "task_id": "password-reset", "stage": "GREEN_IMPL"}, ".agent/events.jsonl")
     assert result["decision"] == "block"
+    assert "Allowed write paths during GREEN_IMPL:" in result["reason"]
 
 
 def test_planning_allows_agent_plan_updates_only() -> None:
@@ -109,3 +114,21 @@ def test_ready_to_summarize_allows_summary_artifact_only() -> None:
         "src/app.py",
     )
     assert blocked_result["decision"] == "block"
+    assert blocked_result["writable_paths"] == [".agent/artifacts/summary.md"]
+    assert "Allowed write paths during READY_TO_SUMMARIZE: .agent/artifacts/summary.md." in blocked_result["reason"]
+
+
+def test_blocked_write_reports_stage_as_fully_non_writable_when_no_paths_exist() -> None:
+    """Stages with no writable paths should say so directly."""
+    service = WorkflowPolicyService()
+    session = TaskSession(task_id="demo", workflow_id=None, stage="LOCKED", current_step=None)
+
+    result = service.decide_write(
+        session,
+        "src/app.py",
+        {"write_policy": {"writable_paths": [], "denied_paths": []}},
+    ).to_mapping()
+
+    assert result["decision"] == "block"
+    assert result["writable_paths"] == []
+    assert "Current stage LOCKED does not allow agent writes." in result["reason"]

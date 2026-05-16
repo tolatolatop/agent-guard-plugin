@@ -55,6 +55,31 @@ def matches_any(target_path: str, patterns: list[str] | tuple[str, ...]) -> bool
 class WorkflowPolicyService:
     """Policy service for write scope and path protection."""
 
+    @staticmethod
+    def _write_payload(session: TaskSession, writable_paths: list[str], denied_paths: list[str]) -> dict[str, Any]:
+        """Build structured write-policy context for CLI and hooks."""
+        return {
+            "stage": session.stage,
+            "writable_paths": list(writable_paths),
+            "denied_paths": list(denied_paths),
+        }
+
+    def _blocked_write_decision(
+        self,
+        session: TaskSession,
+        reason: str,
+        writable_paths: list[str],
+        denied_paths: list[str],
+    ) -> GuardDecision:
+        """Build one blocked write decision with actionable guidance."""
+        payload = self._write_payload(session, writable_paths, denied_paths)
+        if writable_paths:
+            display_reason = f"{reason} Allowed write paths during {session.stage}: {', '.join(writable_paths)}."
+        else:
+            display_reason = f"{reason} Current stage {session.stage} does not allow agent writes."
+        payload["display_reason"] = display_reason
+        return GuardDecision("block", display_reason, payload=payload)
+
     def decide_write(self, session: TaskSession, target_path: str, stage_rule: dict[str, Any], root_dir: Path | None = None) -> GuardDecision:
         """Decide whether the current session may write the target path."""
         normalized = normalize_path(target_path)
@@ -64,36 +89,66 @@ class WorkflowPolicyService:
         denied_paths = [str(item) for item in stage_write_policy.get("denied_paths", [])]
 
         if matches_any(normalized, policy["protected_paths"]):
-            return GuardDecision(
-                "block",
+            return self._blocked_write_decision(
+                session,
                 "Path .agent/state.json is managed by agent-guard and cannot be edited directly. Use agent-guard commands to change task state.",
+                writable_paths,
+                denied_paths,
             )
 
         if not session.has_active_task and not matches_any(normalized, writable_paths):
-            return GuardDecision(
-                "block",
+            return self._blocked_write_decision(
+                session,
                 f"No active task is set and stage is {session.stage}. Run agent-guard start-task before writing project files.",
+                writable_paths,
+                denied_paths,
             )
 
         if matches_any(normalized, denied_paths):
-            return GuardDecision("block", f"Path {normalized} is denied during {session.stage}.")
-
-        if matches_any(normalized, policy["sensitive_paths"]) and not matches_any(normalized, writable_paths):
-            return GuardDecision("block", f"Path {normalized} is sensitive and not writable during {session.stage}.")
-
-        if not writable_paths:
-            return GuardDecision("block", f"Current stage is {session.stage}. No writable paths are configured.")
-
-        if matches_any(normalized, writable_paths):
-            return GuardDecision("allow", f"Path {normalized} is allowed during {session.stage}.")
-
-        if session.stage == "IDLE":
-            return GuardDecision(
-                "block",
-                f"No active task is set and stage is {session.stage}. Run agent-guard start-task before writing project files.",
+            return self._blocked_write_decision(
+                session,
+                f"Path {normalized} is denied during {session.stage}.",
+                writable_paths,
+                denied_paths,
             )
 
-        return GuardDecision("block", f"Path {normalized} is not writable during {session.stage}.")
+        if matches_any(normalized, policy["sensitive_paths"]) and not matches_any(normalized, writable_paths):
+            return self._blocked_write_decision(
+                session,
+                f"Path {normalized} is sensitive and not writable during {session.stage}.",
+                writable_paths,
+                denied_paths,
+            )
+
+        if not writable_paths:
+            return self._blocked_write_decision(
+                session,
+                f"Path {normalized} is not writable during {session.stage}.",
+                writable_paths,
+                denied_paths,
+            )
+
+        if matches_any(normalized, writable_paths):
+            return GuardDecision(
+                "allow",
+                f"Path {normalized} is allowed during {session.stage}.",
+                payload=self._write_payload(session, writable_paths, denied_paths),
+            )
+
+        if session.stage == "IDLE":
+            return self._blocked_write_decision(
+                session,
+                f"No active task is set and stage is {session.stage}. Run agent-guard start-task before writing project files.",
+                writable_paths,
+                denied_paths,
+            )
+
+        return self._blocked_write_decision(
+            session,
+            f"Path {normalized} is not writable during {session.stage}.",
+            writable_paths,
+            denied_paths,
+        )
 
 
 class StageExitPolicyService:

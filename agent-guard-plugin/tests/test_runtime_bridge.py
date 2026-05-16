@@ -40,6 +40,7 @@ def test_bridge_blocks_forbidden_write() -> None:
     result = run_bridge(root_dir, "pre-write", {"tool_input": {"file_path": "src/app.py"}})
     assert result.returncode == 2
     assert "denied during RED_TEST" in result.stderr
+    assert "Allowed write paths" in result.stderr
 
 
 def test_bridge_allows_absolute_agent_plan_write_within_repo() -> None:
