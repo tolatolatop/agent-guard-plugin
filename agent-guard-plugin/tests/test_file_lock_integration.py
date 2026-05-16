@@ -17,23 +17,23 @@ BDD scenarios covered by this integration module:
    and reattaches the FUSE view.
 
 4. Given `.agent/state.json` or `.agent/plan.yaml` exists in both `.agent/`
-   and managed-state before mount, when one side has the newer modification
+   and managed storage before mount, when one side has the newer modification
    time, then mount synchronizes the newer content into the older side before
    taking over `.agent/`.
 
 5. Given `.agent/` already contains legacy managed files and passthrough
-   content before mount, when managed-state already has a conflicting managed
-   file, then mount preserves the newer synchronized managed-state view while
-   keeping passthrough content available through `.agent.backing/`.
+   content before mount, when managed storage already has a conflicting managed
+   file, then mount preserves the newer synchronized managed view while
+   keeping passthrough content available through the mounted `.agent/`.
 
 6. Given passthrough files and directories already exist under `.agent/` before
-   mount, when mount takes over `.agent/`, then those entries are preserved
-   through `.agent.backing/` and remain accessible through the mounted `.agent/`
+   mount, when mount takes over `.agent/`, then those entries are synchronized
+   into managed storage and remain accessible through the mounted `.agent/`
    view.
 
 7. Given a workspace mounted by the real Rust FUSE runtime, when the Python SDK
    acquires a root token, locks `plan.yaml`, writes through the SDK, and then
-   unlocks the file again, then the managed backing file is updated and direct
+   unlocks the file again, then the managed file is updated and direct
    writes to `.agent/plan.yaml` are rejected only while that file remains in the
    current locked-file set.
 
@@ -52,7 +52,7 @@ BDD scenarios covered by this integration module:
 
 11. Given both `state.json` and `plan.yaml` are currently locked, when SDK
     `write(...)` is called for each file with the same root token, then both
-    writes succeed and each managed backing file is updated independently.
+    writes succeed and each managed file is updated independently.
 
 12. Given `.agent/` is mounted and only `plan.yaml` is currently locked, when
     unprotected files and directories such as `events.jsonl` and `artifacts/`
@@ -94,7 +94,7 @@ def _runtime_binary() -> Path:
 
 
 def _managed_root(temp_home: Path, root_dir: Path) -> Path:
-    return temp_home / ".agent-guard" / "state" / derive_state_id(root_dir)
+    return temp_home / ".agent-guard-fuse" / "managed" / derive_state_id(root_dir)
 
 
 def _managed_file(temp_home: Path, root_dir: Path, relative_path: str) -> Path:
@@ -126,11 +126,11 @@ def _patch_managed_paths(monkeypatch: pytest.MonkeyPatch, temp_home: Path) -> No
     monkeypatch.setattr(lock_core, "managed_file_path", managed_file)
     monkeypatch.setattr(state_module, "managed_file_path", managed_file)
     monkeypatch.setattr(repositories_module, "managed_file_path", managed_file)
-    monkeypatch.setattr(state_module, "managed_state_root", lambda: temp_home / ".agent-guard" / "state")
+    monkeypatch.setattr(state_module, "managed_state_root", lambda: temp_home / ".agent-guard-fuse" / "managed")
     monkeypatch.setattr(
         state_module,
         "managed_state_dir",
-        lambda state_id: temp_home / ".agent-guard" / "state" / state_id,
+        lambda state_id: temp_home / ".agent-guard-fuse" / "managed" / state_id,
     )
 
 
@@ -209,8 +209,8 @@ def test_mount_creation_handles_missing_empty_and_non_empty_agent_dirs(
             ) == '{"task_id":"legacy","stage":"PLANNING"}\n'
             assert (root_dir / ".agent" / "artifacts").is_dir()
             assert (root_dir / ".agent" / "events.jsonl").read_text(encoding="utf-8") == '{"event":"legacy"}\n'
-            assert (root_dir / ".agent.backing" / "artifacts").is_dir()
-            assert (root_dir / ".agent.backing" / "events.jsonl").read_text(encoding="utf-8") == '{"event":"legacy"}\n'
+            assert (_managed_root(temp_home, root_dir) / "artifacts").is_dir()
+            assert (_managed_root(temp_home, root_dir) / "events.jsonl").read_text(encoding="utf-8") == '{"event":"legacy"}\n'
     finally:
         subprocess.run([str(runtime), "unmount", "--root", str(root_dir)], env=env, check=True)
         proc.wait(timeout=5)
@@ -231,6 +231,29 @@ def test_first_mount_creates_root_lock_entry_with_empty_files(
         payload = load_locks()
         assert payload["roots"][str(root_dir.resolve())]["files"] == []
         assert payload["roots"][str(root_dir.resolve())]["token"] == ""
+    finally:
+        subprocess.run([str(runtime), "unmount", "--root", str(root_dir)], env=env, check=True)
+        proc.wait(timeout=5)
+
+
+def test_remount_preserves_existing_token_and_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root_dir = tmp_path / "repo-remount"
+    root_dir.mkdir(parents=True, exist_ok=True)
+    temp_home = tmp_path / "home-remount"
+    temp_home.mkdir(parents=True, exist_ok=True)
+    _patch_managed_paths(monkeypatch, temp_home)
+    _seed_managed_files(temp_home, root_dir)
+
+    token = lock(root_dir)
+    lock_file(str(public_file_path(root_dir, DEFAULT_PLAN_RELATIVE)), token)
+
+    runtime, env, proc = _mount_root(root_dir, temp_home)
+    try:
+        payload = load_locks()
+        assert payload["roots"][str(root_dir.resolve())]["token"] == token
+        assert payload["roots"][str(root_dir.resolve())]["files"] == ["plan.yaml"]
     finally:
         subprocess.run([str(runtime), "unmount", "--root", str(root_dir)], env=env, check=True)
         proc.wait(timeout=5)
@@ -258,6 +281,34 @@ def test_mount_sync_prefers_newer_workspace_managed_file(
             encoding="utf-8"
         ) == "task_id: newer-workspace\nsteps: []\n"
         assert public_plan.read_text(encoding="utf-8") == "task_id: newer-workspace\nsteps: []\n"
+    finally:
+        subprocess.run([str(runtime), "unmount", "--root", str(root_dir)], env=env, check=True)
+        proc.wait(timeout=5)
+
+
+def test_mount_sync_prefers_managed_content_when_mtime_is_equal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root_dir = tmp_path / "repo-sync-equal"
+    root_dir.mkdir(parents=True, exist_ok=True)
+    temp_home = tmp_path / "home-sync-equal"
+    temp_home.mkdir(parents=True, exist_ok=True)
+    _patch_managed_paths(monkeypatch, temp_home)
+    _seed_managed_files(temp_home, root_dir)
+
+    public_plan = public_file_path(root_dir, DEFAULT_PLAN_RELATIVE)
+    managed_plan = _managed_file(temp_home, root_dir, DEFAULT_PLAN_RELATIVE)
+    public_plan.parent.mkdir(parents=True, exist_ok=True)
+    public_plan.write_text("task_id: workspace-copy\nsteps: []\n", encoding="utf-8")
+    managed_plan.write_text("task_id: managed-copy\nsteps: []\n", encoding="utf-8")
+    shared_ns = managed_plan.stat().st_mtime_ns + 5_000_000
+    os.utime(public_plan, ns=(shared_ns, shared_ns))
+    os.utime(managed_plan, ns=(shared_ns, shared_ns))
+
+    runtime, env, proc = _mount_root(root_dir, temp_home)
+    try:
+        assert public_plan.read_text(encoding="utf-8") == "task_id: managed-copy\nsteps: []\n"
+        assert managed_plan.read_text(encoding="utf-8") == "task_id: managed-copy\nsteps: []\n"
     finally:
         subprocess.run([str(runtime), "unmount", "--root", str(root_dir)], env=env, check=True)
         proc.wait(timeout=5)
@@ -461,10 +512,10 @@ def test_unprotected_files_and_directories_passthrough_while_locked_file_needs_t
 
         assert artifacts_dir.is_dir()
         assert events_file.read_text(encoding="utf-8") == '{"event":"ok"}\n'
-        assert (root_dir / ".agent.backing" / "events.jsonl").read_text(encoding="utf-8") == '{"event":"ok"}\n'
+        assert (_managed_root(temp_home, root_dir) / "events.jsonl").read_text(encoding="utf-8") == '{"event":"ok"}\n'
         assert events_file.unlink() is None
         assert not events_file.exists()
-        assert not (root_dir / ".agent.backing" / "events.jsonl").exists()
+        assert not (_managed_root(temp_home, root_dir) / "events.jsonl").exists()
 
         with pytest.raises(PermissionError):
             public_plan.unlink()

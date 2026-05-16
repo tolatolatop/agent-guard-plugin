@@ -58,8 +58,12 @@ class PlanRepository:
         if fuse_enabled(self.root_dir):
             actual_path = public_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)
         else:
-            public_target = public_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)
-            actual_path = public_target if public_target.exists() else managed_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)
+            managed_target = managed_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)
+            actual_path = (
+                managed_target
+                if managed_target.exists()
+                else public_file_path(self.root_dir, DEFAULT_PLAN_RELATIVE)
+            )
         if not actual_path.exists():
             return None
         try:

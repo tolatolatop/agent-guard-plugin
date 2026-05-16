@@ -12,11 +12,9 @@ from typing import Any, Iterator
 
 LOCK_ROOT = Path.home() / ".agent-guard-fuse"
 LOCK_FILE = LOCK_ROOT / "lock.json"
-BACKING_DIR = ".agent.backing"
 AGENT_DIR = ".agent"
 DEFAULT_STATE_RELATIVE = ".agent/state.json"
 DEFAULT_PLAN_RELATIVE = ".agent/plan.yaml"
-MANAGED_FILES = ("state.json", "plan.yaml")
 
 
 def derive_state_id(root_dir: Path) -> str:
@@ -44,15 +42,18 @@ def public_file_path(root_dir: Path, relative_path: str) -> Path:
     return root_dir / relative_path
 
 
+def managed_root_path(root_dir: str | Path) -> Path:
+    """Return the managed root for one workspace."""
+    return LOCK_ROOT / "managed" / derive_state_id(Path(root_dir))
+
+
 def managed_file_path(root_dir: Path, relative_path: str) -> Path:
-    """Return the managed state path for a managed file."""
-    state_id = derive_state_id(root_dir)
-    return Path.home() / ".agent-guard" / "state" / state_id / Path(relative_path).name
-
-
-def backing_root_path(root_dir: Path) -> Path:
-    """Return the workspace-local backing directory for passthrough agent files."""
-    return root_dir / BACKING_DIR
+    """Return the managed path for one .agent-relative file."""
+    relative = Path(relative_path)
+    parts = list(relative.parts)
+    if parts and parts[0] == AGENT_DIR:
+        relative = Path(*parts[1:]) if len(parts) > 1 else Path()
+    return managed_root_path(root_dir) / relative
 
 
 def fuse_enabled(root_dir: Path) -> bool:
@@ -91,8 +92,7 @@ def save_locks(payload: dict[str, Any]) -> None:
 
 
 def _managed_root_for(root_dir: str | Path) -> str:
-    root_path = Path(root_dir)
-    return str((Path.home() / ".agent-guard" / "state" / derive_state_id(root_path)).resolve(strict=False))
+    return str(managed_root_path(root_dir).resolve(strict=False))
 
 
 def lock(root_dir: str | Path) -> str:

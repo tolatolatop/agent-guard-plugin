@@ -21,8 +21,8 @@ fn derive_state_id(root: &Path) -> String {
 }
 
 fn managed_path(home: &Path, root: &Path, name: &str) -> PathBuf {
-    home.join(".agent-guard")
-        .join("state")
+    home.join(".agent-guard-fuse")
+        .join("managed")
         .join(derive_state_id(root))
         .join(name)
 }
@@ -46,8 +46,8 @@ fn write_lock(home: &Path, root: &Path, token: &str, files: &[&str]) {
             root.canonicalize()
                 .unwrap_or_else(|_| root.to_path_buf())
                 .display(),
-            home.join(".agent-guard")
-                .join("state")
+            home.join(".agent-guard-fuse")
+                .join("managed")
                 .join(derive_state_id(root))
                 .display(),
             token,
@@ -134,8 +134,14 @@ fn setup(name: &str, content: &str) -> (TempDir, TempDir, PathBuf, PathBuf, Chil
     fs::write(&managed, content).expect("seed managed file");
 
     let child = spawn_mount(home.path(), root.path());
-    sleep(Duration::from_millis(300));
     let public = root.path().join(".agent").join(name);
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while std::time::Instant::now() < deadline {
+        if public.exists() {
+            break;
+        }
+        sleep(Duration::from_millis(50));
+    }
     (root, home, public, managed, child)
 }
 
@@ -162,7 +168,7 @@ fn mounted_runtime_reads_managed_content_and_requires_lock_for_writes() {
     fs::write(lock_file(home.path()), format!(
         "{{\"version\":3,\"roots\":{{\"{}\":{{\"managed\":\"{}\",\"token\":\"token-1\",\"files\":[]}}}}}}",
         root.path().canonicalize().unwrap_or_else(|_| root.path().to_path_buf()).display(),
-        home.path().join(".agent-guard").join("state").join(derive_state_id(root.path())).display()
+        home.path().join(".agent-guard-fuse").join("managed").join(derive_state_id(root.path())).display()
     )).expect("unlock file by clearing files");
     let allowed_again = timed_write(&mount_path, "{\"stage\":\"VERIFY\"}\n");
     assert!(allowed_again.status.success(), "direct write after unlock should succeed");
@@ -191,7 +197,7 @@ fn mounted_runtime_requires_lock_for_delete_on_public_path() {
     fs::write(lock_file(home.path()), format!(
         "{{\"version\":3,\"roots\":{{\"{}\":{{\"managed\":\"{}\",\"token\":\"token-2\",\"files\":[]}}}}}}",
         root.path().canonicalize().unwrap_or_else(|_| root.path().to_path_buf()).display(),
-        home.path().join(".agent-guard").join("state").join(derive_state_id(root.path())).display()
+        home.path().join(".agent-guard-fuse").join("managed").join(derive_state_id(root.path())).display()
     )).expect("unlock file by clearing files");
     let deleted = timed_delete(&mount_path);
     assert!(deleted.status.success(), "direct delete after unlock should succeed");
@@ -227,8 +233,8 @@ fn mounted_runtime_allows_passthrough_directories_and_files_without_token() {
 
     assert!(root.path().join(".agent").join("artifacts").is_dir());
     assert_eq!(
-        fs::read_to_string(root.path().join(".agent.backing").join("events.jsonl"))
-            .expect("read passthrough file"),
+        fs::read_to_string(managed_path(home.path(), root.path(), "events.jsonl"))
+            .expect("read managed passthrough file"),
         "{\"event\":\"ok\"}\n"
     );
 

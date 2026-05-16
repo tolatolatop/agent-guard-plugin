@@ -16,6 +16,7 @@ from agent_guard_file_lock import (
     public_file_path,
     write as lock_write,
     lock as lock_file,
+    managed_root_path,
     unlock_file as unlock_public_file,
     unlock as unlock_file,
 )
@@ -64,7 +65,7 @@ def artifacts_dir(root_dir: Path) -> Path:
 
 def managed_state_root() -> Path:
     """Global state storage root."""
-    return Path.home() / ".agent-guard" / "state"
+    return Path.home() / ".agent-guard-fuse" / "managed"
 
 
 def managed_state_dir(state_id: str) -> Path:
@@ -74,7 +75,7 @@ def managed_state_dir(state_id: str) -> Path:
 
 def current_managed_state_dir(root_dir: Path) -> Path:
     """Global state directory for the current workspace state."""
-    target = managed_state_dir(derive_state_id(root_dir))
+    target = managed_root_path(root_dir)
     target.mkdir(parents=True, exist_ok=True)
     return target
 
@@ -166,7 +167,7 @@ def ensure_managed_state_dir(state_id: str | None, root_dir: Path | None = None)
     """Ensure the global state directory exists for one state id."""
     if not state_id:
         return None
-    target = managed_state_dir(state_id)
+    target = managed_root_path(root_dir) if root_dir is not None else managed_state_dir(state_id)
     target.mkdir(parents=True, exist_ok=True)
     return target
 
@@ -189,8 +190,8 @@ def _protected_read_path(root_dir: Path, relative_path: str) -> Path:
     if relative_path in {DEFAULT_STATE_RELATIVE, ".agent/plan.yaml"}:
         if fuse_enabled(root_dir):
             return public_file_path(root_dir, relative_path)
-        public_target = public_file_path(root_dir, relative_path)
-        return public_target if public_target.exists() else managed_file_path(root_dir, relative_path)
+        managed_target = managed_file_path(root_dir, relative_path)
+        return managed_target if managed_target.exists() else public_file_path(root_dir, relative_path)
     return root_dir / relative_path
 
 

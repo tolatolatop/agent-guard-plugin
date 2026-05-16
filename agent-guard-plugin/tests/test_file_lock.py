@@ -15,13 +15,17 @@ from agent_guard_file_lock import (
     delete,
     derive_state_id,
     fuse_enabled,
+    fuse_status,
     load_locks,
     lock,
     lock_file,
     lock_file_path,
     managed_file_path,
+    pid_file,
     public_file_path,
     save_locks,
+    start_fuse,
+    stop_fuse,
     unlock,
     unlock_file,
     write,
@@ -59,11 +63,13 @@ def test_lock_creates_global_lock_json_entry() -> None:
 def test_lock_reuses_workspace_token() -> None:
     root_dir = make_temp_repo()
     first = lock(root_dir)
+    lock_file(str(public_file_path(root_dir, DEFAULT_PLAN_RELATIVE)), first)
     second = lock(root_dir)
     payload = load_locks()
 
     assert first == second
     assert payload["roots"][str(root_dir.resolve())]["token"] == first
+    assert payload["roots"][str(root_dir.resolve())]["files"] == ["plan.yaml"]
 
 
 def test_lock_file_and_unlock_file_update_locked_file_set() -> None:
@@ -217,7 +223,7 @@ def test_load_state_backfills_stable_state_id_from_workspace() -> None:
     state = load_state(root_dir)
 
     assert state["state_id"] == derive_state_id(root_dir)
-    assert current_managed_state_dir(root_dir) == Path.home() / ".agent-guard" / "state" / state["state_id"]
+    assert current_managed_state_dir(root_dir) == Path.home() / ".agent-guard-fuse" / "managed" / state["state_id"]
 
 
 def test_fuse_enabled_requires_agent_dir_mount(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -271,3 +277,112 @@ def test_save_locks_persists_expected_wire_shape(
             }
         },
     }
+
+
+def test_start_fuse_records_detached_runtime_pid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root_dir = make_temp_repo()
+    runtime_root = tmp_path / "runtime"
+    monkeypatch.setattr("agent_guard_file_lock.fuse_fs.LOCK_ROOT", runtime_root)
+    monkeypatch.setattr(
+        "agent_guard_file_lock.fuse_fs.mount_command",
+        lambda root: ["agent-guard-fuse", "mount", "--root", str(root)],
+    )
+    monkeypatch.setattr("agent_guard_file_lock.fuse_fs._wait_for_mount", lambda root, timeout_seconds=5.0: True)
+
+    class FakeProcess:
+        pid = 43210
+
+        def poll(self) -> None:
+            return None
+
+    popen_calls: list[dict[str, object]] = []
+
+    def fake_popen(cmd: list[str], **kwargs: object) -> FakeProcess:
+        popen_calls.append({"cmd": cmd, **kwargs})
+        return FakeProcess()
+
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
+    monkeypatch.setattr("agent_guard_file_lock.fuse_fs._process_alive", lambda pid: True)
+
+    pid = start_fuse(root_dir)
+
+    assert pid == 43210
+    assert popen_calls[0]["start_new_session"] is True
+    assert popen_calls[0]["stdin"] is not None
+    assert pid_file(root_dir).exists()
+    assert fuse_status(root_dir)["running"] is True
+
+
+def test_start_fuse_rejects_duplicate_running_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root_dir = make_temp_repo()
+    runtime_root = tmp_path / "runtime"
+    monkeypatch.setattr("agent_guard_file_lock.fuse_fs.LOCK_ROOT", runtime_root)
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    pid_file(root_dir).parent.mkdir(parents=True, exist_ok=True)
+    pid_file(root_dir).write_text(
+        json.dumps({"pid": 12345, "root": str(root_dir.resolve())}) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("agent_guard_file_lock.fuse_fs._process_alive", lambda pid: True)
+
+    with pytest.raises(RuntimeError, match="already running"):
+        start_fuse(root_dir)
+
+
+def test_fuse_status_cleans_stale_pid_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root_dir = make_temp_repo()
+    runtime_root = tmp_path / "runtime"
+    monkeypatch.setattr("agent_guard_file_lock.fuse_fs.LOCK_ROOT", runtime_root)
+    pid_file(root_dir).parent.mkdir(parents=True, exist_ok=True)
+    pid_file(root_dir).write_text(
+        json.dumps({"pid": 12345, "root": str(root_dir.resolve())}) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("agent_guard_file_lock.fuse_fs._process_alive", lambda pid: False)
+
+    status = fuse_status(root_dir)
+
+    assert status["running"] is False
+    assert not pid_file(root_dir).exists()
+
+
+def test_stop_fuse_unmounts_and_cleans_pid_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root_dir = make_temp_repo()
+    runtime_root = tmp_path / "runtime"
+    monkeypatch.setattr("agent_guard_file_lock.fuse_fs.LOCK_ROOT", runtime_root)
+    pid_file(root_dir).parent.mkdir(parents=True, exist_ok=True)
+    pid_file(root_dir).write_text(
+        json.dumps({"pid": 54321, "root": str(root_dir.resolve())}) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "agent_guard_file_lock.fuse_fs.unmount_command",
+        lambda root: ["agent-guard-fuse", "unmount", "--root", str(root)],
+    )
+    run_calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **kwargs: object):
+        run_calls.append(cmd)
+
+        class Result:
+            returncode = 0
+
+        return Result()
+
+    alive_states = iter([True, False])
+    monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr(
+        "agent_guard_file_lock.fuse_fs._process_alive", lambda pid: next(alive_states)
+    )
+
+    assert stop_fuse(root_dir) is True
+    assert run_calls == [["agent-guard-fuse", "unmount", "--root", str(root_dir)]]
+    assert not pid_file(root_dir).exists()

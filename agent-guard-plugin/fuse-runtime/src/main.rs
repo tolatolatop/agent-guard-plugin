@@ -51,9 +51,49 @@ struct RootLock {
     files: Vec<String>,
 }
 
-struct GuardFs {
+#[derive(Clone)]
+struct WorkspaceMount {
     home: PathBuf,
     root: PathBuf,
+}
+
+impl WorkspaceMount {
+    fn new(root: PathBuf, home: PathBuf) -> Self {
+        Self { home, root }
+    }
+
+    fn root_key(&self) -> String {
+        normalize_root_path(&self.root)
+    }
+
+    fn state_id(&self) -> String {
+        derive_state_id(&self.root)
+    }
+
+    fn mount_dir(&self) -> PathBuf {
+        self.root.join(".agent")
+    }
+
+    fn lock_file(&self) -> PathBuf {
+        self.home.join(".agent-guard-fuse").join("lock.json")
+    }
+
+    fn public_path(&self, name: &str) -> PathBuf {
+        self.mount_dir().join(name)
+    }
+
+    fn managed_root(&self, lock_file: &LockFile) -> PathBuf {
+        if let Some(entry) = lock_file.roots.get(&self.root_key()) {
+            if !entry.managed.is_empty() {
+                return PathBuf::from(&entry.managed);
+            }
+        }
+        self.home.join(".agent-guard-fuse").join("managed").join(self.state_id())
+    }
+}
+
+struct GuardFs {
+    workspace: WorkspaceMount,
     ino_to_rel: HashMap<u64, PathBuf>,
     rel_to_ino: HashMap<PathBuf, u64>,
     next_ino: u64,
@@ -66,8 +106,7 @@ impl GuardFs {
         ino_to_rel.insert(ROOT_INO, PathBuf::new());
         rel_to_ino.insert(PathBuf::new(), ROOT_INO);
         Self {
-            home,
-            root,
+            workspace: WorkspaceMount::new(root, home),
             ino_to_rel,
             rel_to_ino,
             next_ino: 10,
@@ -79,40 +118,19 @@ impl GuardFs {
     }
 
     fn lock_file(&self) -> PathBuf {
-        self.home.join(".agent-guard-fuse").join("lock.json")
-    }
-
-    fn state_id(&self) -> String {
-        derive_state_id(&self.root)
-    }
-
-    fn managed_path(&self, name: &str) -> PathBuf {
-        self.managed_root().join(name)
+        self.workspace.lock_file()
     }
 
     fn public_path(&self, name: &str) -> PathBuf {
-        self.root.join(".agent").join(name)
-    }
-
-    fn agent_backing_root(&self) -> PathBuf {
-        self.root.join(".agent.backing")
+        self.workspace.public_path(name)
     }
 
     fn managed_root(&self) -> PathBuf {
-        let root_key = normalize_root_path(&self.root);
-        if let Some(entry) = self.load_locks().roots.get(&root_key) {
-            if !entry.managed.is_empty() {
-                return PathBuf::from(&entry.managed);
-            }
-        }
-        self.home
-            .join(".agent-guard")
-            .join("state")
-            .join(self.state_id())
+        self.workspace.managed_root(&self.load_locks())
     }
 
     fn root_lock(&self) -> Option<RootLock> {
-        self.load_locks().roots.get(&normalize_root_path(&self.root)).cloned()
+        self.load_locks().roots.get(&self.workspace.root_key()).cloned()
     }
 
     fn locked_files(&self) -> Vec<String> {
@@ -131,29 +149,12 @@ impl GuardFs {
         self.locked_files().iter().any(|item| item == name)
     }
 
-    fn is_managed_rel(&self, rel: &Path) -> bool {
-        if rel.components().count() != 1 {
-            return false;
-        }
-        let Some(name) = rel.file_name().and_then(|item| item.to_str()) else {
-            return false;
-        };
-        managed_file_names().iter().any(|item| item == name)
-    }
-
     fn visible_root_entries(&self) -> Vec<String> {
         let mut names = BTreeSet::new();
-        if let Ok(entries) = fs::read_dir(self.agent_backing_root()) {
+        if let Ok(entries) = fs::read_dir(self.managed_root()) {
             for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().to_string();
-                if managed_file_names().iter().any(|item| item == &name) {
-                    continue;
-                }
-                names.insert(name);
+                names.insert(entry.file_name().to_string_lossy().to_string());
             }
-        }
-        for name in managed_file_names() {
-            names.insert(name);
         }
         names.into_iter().collect()
     }
@@ -183,12 +184,10 @@ impl GuardFs {
     }
 
     fn backing_path(&self, rel: &Path) -> PathBuf {
-        if self.is_managed_rel(rel) {
-            self.managed_root().join(rel.file_name().unwrap_or_default())
-        } else if rel.as_os_str().is_empty() {
-            self.agent_backing_root()
+        if rel.as_os_str().is_empty() {
+            self.managed_root()
         } else {
-            self.agent_backing_root().join(rel)
+            self.managed_root().join(rel)
         }
     }
 
@@ -241,7 +240,7 @@ impl GuardFs {
             let name = rel.file_name().and_then(|item| item.to_str()).unwrap_or_default();
             debug_log(format!(
                 "deny direct write root={} public={} file={} because it is locked",
-                normalize_root_path(&self.root),
+                self.workspace.root_key(),
                 self.public_path(name).display(),
                 name
             ));
@@ -285,10 +284,6 @@ fn derive_state_id(root: &Path) -> String {
     hex[..32].to_string()
 }
 
-fn managed_file_names() -> Vec<String> {
-    vec!["state.json".to_string(), "plan.yaml".to_string()]
-}
-
 fn normalize_root_path(root: &Path) -> String {
     root.canonicalize()
         .unwrap_or_else(|_| root.to_path_buf())
@@ -312,7 +307,7 @@ fn save_locks(lock_path: &Path, payload: &LockFile) -> std::io::Result<()> {
 }
 
 fn ensure_root_lock_entry(fs_view: &GuardFs) -> std::io::Result<()> {
-    let root_key = normalize_root_path(&fs_view.root);
+    let root_key = fs_view.workspace.root_key();
     let mut payload = fs_view.load_locks();
     if payload.roots.contains_key(&root_key) {
         return Ok(());
@@ -358,17 +353,17 @@ fn sync_file_pair(left: &Path, right: &Path) -> std::io::Result<()> {
             match (left_mtime, right_mtime) {
                 (Some(lhs), Some(rhs)) if lhs > rhs => copy_file_with_mtime(left, right),
                 (Some(lhs), Some(rhs)) if rhs > lhs => copy_file_with_mtime(right, left),
-                _ => Ok(()),
+                _ => {
+                    let left_bytes = fs::read(left)?;
+                    let right_bytes = fs::read(right)?;
+                    if left_bytes != right_bytes {
+                        copy_file_with_mtime(right, left)?;
+                    }
+                    Ok(())
+                }
             }
         }
     }
-}
-
-fn sync_managed_files_with_agent(fs_view: &GuardFs, agent_dir: &Path) -> std::io::Result<()> {
-    for name in managed_file_names() {
-        sync_file_pair(&agent_dir.join(&name), &fs_view.managed_path(&name))?;
-    }
-    Ok(())
 }
 
 fn clear_directory(dir: &Path) -> std::io::Result<()> {
@@ -401,6 +396,78 @@ fn restore_tree(source: &Path, target: &Path) -> std::io::Result<()> {
             continue;
         }
         copy_file_with_mtime(&source_path, &target_path)?;
+    }
+    Ok(())
+}
+
+fn sync_trees(public: &Path, managed: &Path) -> std::io::Result<()> {
+    let public_exists = public.exists();
+    let managed_exists = managed.exists();
+    match (public_exists, managed_exists) {
+        (false, false) => return Ok(()),
+        (false, true) => {
+            if managed.is_dir() {
+                fs::create_dir_all(public)?;
+                return restore_tree(managed, public);
+            }
+            return copy_file_with_mtime(managed, public);
+        }
+        (true, false) => {
+            if public.is_dir() {
+                fs::create_dir_all(managed)?;
+                return restore_tree(public, managed);
+            }
+            return copy_file_with_mtime(public, managed);
+        }
+        (true, true) => {}
+    }
+
+    let public_meta = public.metadata()?;
+    let managed_meta = managed.metadata()?;
+    if public_meta.is_file() && managed_meta.is_file() {
+        return sync_file_pair(public, managed);
+    }
+    if public_meta.is_dir() && managed_meta.is_dir() {
+        let mut names = BTreeSet::new();
+        for entry in fs::read_dir(public)? {
+            names.insert(entry?.file_name());
+        }
+        for entry in fs::read_dir(managed)? {
+            names.insert(entry?.file_name());
+        }
+        for name in names {
+            sync_trees(&public.join(&name), &managed.join(&name))?;
+        }
+        return Ok(());
+    }
+
+    let public_time = FileTime::from_last_modification_time(&public_meta);
+    let managed_time = FileTime::from_last_modification_time(&managed_meta);
+    if public_time > managed_time {
+        if managed_meta.is_dir() {
+            fs::remove_dir_all(managed)?;
+        } else {
+            fs::remove_file(managed)?;
+        }
+        if public_meta.is_dir() {
+            fs::create_dir_all(managed)?;
+            restore_tree(public, managed)?;
+        } else {
+            copy_file_with_mtime(public, managed)?;
+        }
+        return Ok(());
+    }
+
+    if public_meta.is_dir() {
+        fs::remove_dir_all(public)?;
+    } else {
+        fs::remove_file(public)?;
+    }
+    if managed_meta.is_dir() {
+        fs::create_dir_all(public)?;
+        restore_tree(managed, public)?;
+    } else {
+        copy_file_with_mtime(managed, public)?;
     }
     Ok(())
 }
@@ -660,7 +727,7 @@ impl Filesystem for GuardFs {
         };
         let old_rel = self.child_rel(&parent_rel, name);
         let new_rel = self.child_rel(&newparent_rel, newname);
-        if self.is_managed_rel(&old_rel) || self.is_managed_rel(&new_rel) {
+        if self.is_locked_rel(&old_rel) || self.is_locked_rel(&new_rel) {
             reply.error(EPERM);
             return;
         }
@@ -671,57 +738,19 @@ impl Filesystem for GuardFs {
     }
 }
 
-fn move_entry(source: &Path, target: &Path) -> std::io::Result<()> {
-    if !source.exists() {
-        return Ok(());
-    }
-    if source.is_dir() {
-        fs::create_dir_all(target)?;
-        for entry in fs::read_dir(source)? {
-            let entry = entry?;
-            move_entry(&entry.path(), &target.join(entry.file_name()))?;
-        }
-        fs::remove_dir(source)?;
-        return Ok(());
-    }
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    if target.exists() {
-        fs::remove_file(source)?;
-        return Ok(());
-    }
-    fs::rename(source, target)
-}
-
 fn prepare_mount_layout(fs_view: &GuardFs) -> std::io::Result<()> {
-    let mount_dir = fs_view.root.join(".agent");
-    let backing_root = fs_view.agent_backing_root();
+    let mount_dir = fs_view.workspace.mount_dir();
     ensure_root_lock_entry(fs_view)?;
+    fs::create_dir_all(fs_view.managed_root())?;
     fs::create_dir_all(&mount_dir)?;
-    fs::create_dir_all(&backing_root)?;
-    sync_managed_files_with_agent(fs_view, &mount_dir)?;
-    for entry in fs::read_dir(&mount_dir)? {
-        let entry = entry?;
-        let name = entry.file_name().to_string_lossy().to_string();
-        let source = entry.path();
-        if managed_file_names().iter().any(|item| item == &name) {
-            if source.exists() {
-                fs::remove_file(&source)?;
-            }
-            continue;
-        }
-        move_entry(&source, &backing_root.join(&name))?;
-    }
-    Ok(())
+    sync_trees(&mount_dir, &fs_view.managed_root())
 }
 
 fn restore_public_layout(fs_view: &GuardFs) -> std::io::Result<()> {
-    let mount_dir = fs_view.root.join(".agent");
+    let mount_dir = fs_view.workspace.mount_dir();
     fs::create_dir_all(&mount_dir)?;
     clear_directory(&mount_dir)?;
-    restore_tree(&fs_view.agent_backing_root(), &mount_dir)?;
-    sync_managed_files_with_agent(fs_view, &mount_dir)
+    restore_tree(&fs_view.managed_root(), &mount_dir)
 }
 
 fn unmount(root: &Path) -> anyhow::Result<()> {
@@ -784,8 +813,8 @@ mod tests {
         let payload = format!(
             "{{\"version\":3,\"roots\":{{\"{}\":{{\"managed\":\"{}\",\"token\":\"{}\",\"files\":[{}]}}}}}}",
             normalize_root_path(root),
-            home.join(".agent-guard")
-                .join("state")
+            home.join(".agent-guard-fuse")
+                .join("managed")
                 .join(derive_state_id(root))
                 .display(),
             token,
@@ -828,7 +857,7 @@ mod tests {
         let _guard = test_lock();
         let (_root, home, fs_view) = setup_paths();
         assert!(!fs_view.is_unlocked_for_write(Path::new("state.json")));
-        write_lock_file(home.path(), &fs_view.root, "token-1", &["state.json"]);
+        write_lock_file(home.path(), &fs_view.workspace.root, "token-1", &["state.json"]);
         assert!(fs_view.is_unlocked_for_write(Path::new("state.json")));
     }
 
@@ -836,7 +865,7 @@ mod tests {
     fn files_list_controls_authorization_only() {
         let _guard = test_lock();
         let (_root, home, mut fs_view) = setup_paths();
-        let managed_plan = fs_view.managed_path("plan.yaml");
+        let managed_plan = fs_view.managed_root().join("plan.yaml");
         fs::create_dir_all(managed_plan.parent().expect("managed parent"))
             .expect("create managed root");
         fs::write(&managed_plan, "steps: []\n").expect("write managed plan");
@@ -844,11 +873,11 @@ mod tests {
         fs::create_dir_all(&lock_dir).expect("create lock dir");
         let payload = format!(
             "{{\"version\":3,\"roots\":{{\"{}\":{{\"managed\":\"{}\",\"token\":\"token-1\",\"files\":[\"state.json\"]}}}}}}",
-            normalize_root_path(&fs_view.root),
+            fs_view.workspace.root_key(),
             home.path()
-                .join(".agent-guard")
-                .join("state")
-                .join(derive_state_id(&fs_view.root))
+                .join(".agent-guard-fuse")
+                .join("managed")
+                .join(fs_view.workspace.state_id())
                 .display()
         );
         fs::write(lock_dir.join("lock.json"), payload).expect("write lock file");
@@ -861,17 +890,16 @@ mod tests {
     }
 
     #[test]
-    fn root_entries_include_passthrough_directories() {
+    fn root_entries_include_managed_directories() {
         let _guard = test_lock();
         let (_root, _home, fs_view) = setup_paths();
-        let artifacts = fs_view.agent_backing_root().join("artifacts");
+        let artifacts = fs_view.managed_root().join("artifacts");
         fs::create_dir_all(&artifacts).expect("create artifacts dir");
-        fs::write(fs_view.agent_backing_root().join("jobs.json"), "{\"jobs\":[]}\n").expect("write jobs");
+        fs::write(fs_view.managed_root().join("jobs.json"), "{\"jobs\":[]}\n").expect("write jobs");
         let names = fs_view.visible_root_entries();
 
         assert!(names.contains(&"artifacts".to_string()));
         assert!(names.contains(&"jobs.json".to_string()));
-        assert!(names.contains(&"state.json".to_string()));
     }
 
     #[test]
@@ -884,18 +912,18 @@ mod tests {
 
         prepare_mount_layout(&fs_view).expect("prepare mount layout");
 
-        assert!(!public.exists());
         assert_eq!(
-            fs::read_to_string(fs_view.managed_path("state.json")).expect("read managed state"),
+            fs::read_to_string(fs_view.managed_root().join("state.json")).expect("read managed state"),
             "{\"stage\":\"IDLE\"}\n"
         );
+        assert_eq!(fs::read_to_string(&public).expect("read synced public state"), "{\"stage\":\"IDLE\"}\n");
     }
 
     #[test]
     fn prepare_mount_layout_preserves_existing_managed_state() {
         let _guard = test_lock();
         let (_root, _home, fs_view) = setup_paths();
-        let managed = fs_view.managed_path("plan.yaml");
+        let managed = fs_view.managed_root().join("plan.yaml");
         fs::create_dir_all(managed.parent().expect("managed parent")).expect("create managed dir");
         fs::write(&managed, "steps: []\n").expect("write managed file");
 
@@ -905,12 +933,12 @@ mod tests {
 
         prepare_mount_layout(&fs_view).expect("prepare mount layout");
 
-        assert!(!public.exists());
         assert_eq!(fs::read_to_string(&managed).expect("read managed plan"), "steps: []\n");
+        assert_eq!(fs::read_to_string(&public).expect("read synced public plan"), "steps: []\n");
     }
 
     #[test]
-    fn prepare_mount_layout_moves_passthrough_content_into_backing_root() {
+    fn prepare_mount_layout_syncs_passthrough_content_into_managed_root() {
         let _guard = test_lock();
         let (_root, _home, fs_view) = setup_paths();
         let events = fs_view.public_path("events.jsonl");
@@ -921,10 +949,9 @@ mod tests {
         prepare_mount_layout(&fs_view).expect("prepare mount layout");
 
         assert_eq!(
-            fs::read_to_string(fs_view.agent_backing_root().join("events.jsonl"))
-                .expect("read passthrough file"),
+            fs::read_to_string(fs_view.managed_root().join("events.jsonl")).expect("read passthrough file"),
             "{\"event\":\"ok\"}\n"
         );
-        assert!(fs_view.agent_backing_root().join("artifacts").is_dir());
+        assert!(fs_view.managed_root().join("artifacts").is_dir());
     }
 }
