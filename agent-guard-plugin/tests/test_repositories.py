@@ -33,7 +33,8 @@ def test_state_repository_save_round_trips_task_session() -> None:
         needs_human=False,
     )
 
-    StateRepository(root_dir).save(session)
+    saved = StateRepository(root_dir).save(session)
     loaded = StateRepository(root_dir).load()
 
-    assert loaded == session
+    assert saved.state_id is not None
+    assert loaded == saved
