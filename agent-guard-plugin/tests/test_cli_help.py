@@ -27,6 +27,7 @@ def test_top_level_help_flag_prints_command_overview() -> None:
     assert code == 0
     assert "Usage: agent-guard <command> [options]" in output
     assert "record-command --cmd CMD --exit-code CODE [--log PATH]" in output
+    assert "fuse-status" in output
     assert "help [command]" in output
 
 

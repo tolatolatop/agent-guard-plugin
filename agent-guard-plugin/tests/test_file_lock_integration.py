@@ -85,12 +85,19 @@ from agent_guard_file_lock import (
     write,
 )
 
+_RUNTIME_BINARY: Path | None = None
+
 
 def _runtime_binary() -> Path:
+    global _RUNTIME_BINARY
+    if _RUNTIME_BINARY is not None:
+        return _RUNTIME_BINARY
     repo_root = Path(__file__).resolve().parents[1]
     runtime_dir = repo_root / "fuse-runtime"
+    subprocess.run(["cargo", "clean"], cwd=runtime_dir, check=True)
     subprocess.run(["cargo", "build", "-q"], cwd=runtime_dir, check=True)
-    return runtime_dir / "target" / "debug" / "agent-guard-fuse"
+    _RUNTIME_BINARY = runtime_dir / "target" / "debug" / "agent-guard-fuse"
+    return _RUNTIME_BINARY
 
 
 def _managed_root(temp_home: Path, root_dir: Path) -> Path:
@@ -137,8 +144,10 @@ def _patch_managed_paths(monkeypatch: pytest.MonkeyPatch, temp_home: Path) -> No
 def _wait_for_mount(root_dir: Path, proc: subprocess.Popen[str]) -> None:
     deadline = time.time() + 5
     mount_dir = root_dir / ".agent"
+    state_file = mount_dir / "state.json"
+    plan_file = mount_dir / "plan.yaml"
     while time.time() < deadline:
-        if mount_dir.exists() and mount_dir.is_mount():
+        if mount_dir.exists() and mount_dir.is_mount() and state_file.exists() and plan_file.exists():
             return
         time.sleep(0.1)
     proc.terminate()

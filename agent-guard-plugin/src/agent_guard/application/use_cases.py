@@ -6,6 +6,7 @@ from typing import Any
 
 from ..domain.models import PlanStep
 from ..domain.policies import FailurePolicyService, FinalizationPolicyService, JobPolicyService, WorkflowPolicyService
+from ..fuse_integration import ensure_fuse_protection
 from ..infrastructure.repositories import StateRepository
 from ..path_policy import stage_rule_for
 from ..runtime_adapter import get_next_step, get_session_reminder
@@ -16,12 +17,13 @@ from ..workflow_spec import canonical_entry_stage
 def initialize_workspace(root_dir: Path) -> dict[str, Any]:
     """Initialize the managed .agent workspace."""
     ensure_agent_files(root_dir)
-    return {"ok": True, "agent_dir": str(root_dir / AGENT_DIR)}
+    return {"ok": True, "agent_dir": str(root_dir / AGENT_DIR), "fuse": ensure_fuse_protection(root_dir)}
 
 
 def start_task(root_dir: Path, task_id: str, workflow_id: str | None = None) -> dict[str, Any]:
     """Start or register a task session."""
     ensure_agent_files(root_dir)
+    fuse = ensure_fuse_protection(root_dir)
     repo = StateRepository(root_dir)
     session = repo.load()
     resolved_workflow = workflow_id or session.workflow_id
@@ -33,7 +35,7 @@ def start_task(root_dir: Path, task_id: str, workflow_id: str | None = None) -> 
             workflow_id=resolved_workflow,
         )
     )
-    return {"ok": True, "state": updated.to_mapping()}
+    return {"ok": True, "state": updated.to_mapping(), "fuse": fuse}
 
 
 def build_session_reminder(root_dir: Path) -> dict[str, Any]:

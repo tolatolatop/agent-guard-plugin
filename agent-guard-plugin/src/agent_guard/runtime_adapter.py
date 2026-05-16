@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .fuse_integration import ensure_fuse_protection
 from .plan import first_nonterminal_plan_step_name
 from .state import load_state
 from .task_reset import latest_archive
@@ -18,6 +19,7 @@ def get_next_step(root_dir: Path, state: dict[str, Any]) -> str | None:
 
 def get_session_reminder(root_dir: Path) -> dict[str, Any]:
     """Return session reminder."""
+    fuse = ensure_fuse_protection(root_dir)
     state = load_state(root_dir)
     next_step = get_next_step(root_dir, state)
     stage = state.get("stage", "IDLE")
@@ -25,6 +27,19 @@ def get_session_reminder(root_dir: Path) -> dict[str, Any]:
     workflow_context = get_workflow_context(root_dir, stage, workflow_id)
     recent_archive = latest_archive(root_dir)
     navigator = workflow_context["session_start_navigator"]
+    prompt_block = build_session_prompt_block(
+        task_id=state.get("task_id"),
+        stage=stage,
+        current_step=state.get("current_step"),
+        next_step=next_step,
+        can_finalize=bool(state.get("can_finalize")),
+        workflow_context=workflow_context,
+        recent_archive=recent_archive,
+    )
+    if fuse.get("protection") != "mounted":
+        reason = str(fuse.get("reason") or "agent-guard-fuse is not actively mounted.")
+        prompt_block = f"{prompt_block}\nFUSE protection: {fuse.get('protection')} ({reason})"
+
     return {
         "task": state.get("task_id"),
         "stage": stage,
@@ -38,21 +53,15 @@ def get_session_reminder(root_dir: Path) -> dict[str, Any]:
             "instruction": navigator["instruction"],
         },
         "workflow": workflow_context,
+        "fuse": fuse,
         "recent_archive": recent_archive,
-        "prompt_block": build_session_prompt_block(
-            task_id=state.get("task_id"),
-            stage=stage,
-            current_step=state.get("current_step"),
-            next_step=next_step,
-            can_finalize=bool(state.get("can_finalize")),
-            workflow_context=workflow_context,
-            recent_archive=recent_archive,
-        ),
+        "prompt_block": prompt_block,
         "reminder": (
             f"Task={state.get('task_id') or 'unset'} "
             f"stage={stage} "
             f"step={state.get('current_step') or 'unset'} "
             f"next={next_step or 'none'} "
-            f"finalize={state.get('can_finalize')}"
+            f"finalize={state.get('can_finalize')} "
+            f"fuse={fuse.get('protection')}"
         ),
     }

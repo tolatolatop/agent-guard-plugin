@@ -38,6 +38,7 @@ def test_session_start_includes_meta_skill_and_workflow_context() -> None:
     assert reminder["workflow"]["complete_step_allowed_from_stages"] == ["RED_TEST", "GREEN_IMPL", "REVIEW", "VERIFY"]
     assert reminder["workflow"]["session_start_navigator"]["skill_id"] == "using-workflow"
     assert reminder["workflow"]["session_start_navigator"]["prompt_heading"] == "Workflow Navigator"
+    assert reminder["fuse"]["protection"] in {"mounted", "unavailable", "inactive", "error", "desynced"}
     assert "# Using Workflow" in reminder["prompt_block"]
     assert "Soft guidance:" in reminder["prompt_block"]
     assert "Hard gates:" in reminder["prompt_block"]
@@ -135,3 +136,27 @@ def test_session_start_defaults_to_idle_when_agent_dir_is_missing() -> None:
     assert reminder["next_required_action"] is None
     assert "explore repository directories and files in read-only mode" in reminder["workflow"]["allowed_actions"]
     assert "modify files before a task is started" in reminder["workflow"]["forbidden_actions"]
+
+
+def test_session_start_reports_fuse_degradation_when_runtime_is_unavailable(
+    monkeypatch,
+) -> None:
+    """Test that session-start exposes fuse degradation details when unavailable."""
+    root_dir = make_temp_repo()
+    write_state(root_dir, task_id="password-reset", stage="RED_TEST")
+    monkeypatch.setattr(
+        "agent_guard.runtime_adapter.ensure_fuse_protection",
+        lambda _: {
+            "available": False,
+            "enabled": False,
+            "managed_root": "/tmp/managed",
+            "runtime": {"running": False, "pid": None, "root": str(root_dir.resolve())},
+            "protection": "unavailable",
+            "reason": "agent-guard-fuse is not installed.",
+        },
+    )
+
+    reminder = get_session_reminder(root_dir)
+
+    assert reminder["fuse"]["protection"] == "unavailable"
+    assert "FUSE protection: unavailable" in reminder["prompt_block"]

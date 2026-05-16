@@ -453,6 +453,7 @@ def install_claude_code(
             *selection_warnings,
             "Installed Claude Code hooks into a settings JSON file.",
             "Claude Code passes hook payloads over stdin and can block PreToolUse or Stop hooks with exit code 2.",
+            "Session-start and status flows will auto-start agent-guard-fuse when the runtime binary is installed, so .agent/state.json and .agent/plan.yaml stay mounted under managed protection.",
             "Workflow skills were installed into Claude's native .claude/skills/<skill>/SKILL.md layout and injected via AGENT_GUARD_SKILLS_DIR.",
         ],
     }
@@ -512,6 +513,7 @@ def install_codex(
             "Installed Codex hooks.json.",
             "Codex hook compatibility follows Claude-style lifecycle hooks, but tool-hook coverage may vary by version.",
             "Some Codex installations may also require enabling hooks in user config.",
+            "Session-start and status flows will auto-start agent-guard-fuse when the runtime binary is installed, so .agent/state.json and .agent/plan.yaml stay mounted under managed protection.",
             "Workflow skills were copied into a local agent-guard skills directory and injected via AGENT_GUARD_SKILLS_DIR.",
         ],
     }
@@ -586,6 +588,7 @@ def install_opencode(
             "Installed an OpenCode JS loader that forwards plugin events to the Python bridge.",
             "All policy logic remains in Python; the JS file only marshals plugin events.",
             "OpenCode final-response gating remains best-effort because its plugin lifecycle differs from Claude Code and Codex.",
+            "Session-start and status flows will auto-start agent-guard-fuse when the runtime binary is installed, so .agent/state.json and .agent/plan.yaml stay mounted under managed protection.",
             "Workflow skills were installed into OpenCode's native .opencode/skills/<skill>/SKILL.md layout and injected via AGENT_GUARD_SKILLS_DIR.",
         ],
     }

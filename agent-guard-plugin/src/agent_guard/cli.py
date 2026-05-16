@@ -18,6 +18,7 @@ from .application.use_cases import (
     record_command_execution,
     start_task,
 )
+from .fuse_integration import ensure_fuse_protection, fuse_state, stop_fuse_protection
 from .install import install_runtime, parse_flags, uninstall_runtime
 from .jobs import load_jobs
 from .plan import load_plan_summary
@@ -60,6 +61,9 @@ Commands:
   check-job-poll <job-id>           Check whether a job may be polled now.
   can-finalize                      Check whether finalization is allowed.
   next-step                         Show the next step derived from state and plan.
+  fuse-status                       Show current agent-guard-fuse protection status.
+  fuse-start                        Start agent-guard-fuse for this workspace when available.
+  fuse-stop                         Stop agent-guard-fuse for this workspace.
   install [options]                 Install runtime integrations for supported tools.
   uninstall [options]               Remove runtime integrations for supported tools.
   wizard [--workflow ID]            Run the interactive setup wizard.
@@ -107,6 +111,9 @@ COMMAND_HELP: dict[str, str] = {
     "check-job-poll": "Usage: agent-guard check-job-poll <job-id>\n\nCheck whether a job may be polled now.",
     "can-finalize": "Usage: agent-guard can-finalize\n\nCheck whether finalization is allowed.",
     "next-step": "Usage: agent-guard next-step\n\nShow the next step derived from state and plan.",
+    "fuse-status": "Usage: agent-guard fuse-status\n\nShow current agent-guard-fuse protection status for the workspace.",
+    "fuse-start": "Usage: agent-guard fuse-start\n\nStart agent-guard-fuse for the current workspace when available.",
+    "fuse-stop": "Usage: agent-guard fuse-stop\n\nStop agent-guard-fuse for the current workspace.",
     "install": (
         "Usage: agent-guard install [--runtime RUNTIME] [--scope SCOPE] [--match REGEX ...] [--exclude-match REGEX ...] [--interactive|-i]\n\n"
         "Install runtime integrations.\n\n"
@@ -195,6 +202,7 @@ def run_command(argv: list[str], cwd: Path) -> int:
                 {
                     "ok": True,
                     "state": state,
+                    "fuse": ensure_fuse_protection(cwd),
                     "jobs": load_jobs(cwd),
                     "plan": load_plan_summary(cwd),
                     "next_step": get_next_step(cwd, state),
@@ -274,6 +282,12 @@ def run_command(argv: list[str], cwd: Path) -> int:
             print_json(result, 0 if result["decision"] == "allow" else 1)
         elif command == "next-step":
             print_json(next_step(cwd))
+        elif command == "fuse-status":
+            print_json({"ok": True, "fuse": fuse_state(cwd)})
+        elif command == "fuse-start":
+            print_json({"ok": True, "fuse": ensure_fuse_protection(cwd)})
+        elif command == "fuse-stop":
+            print_json({"ok": True, "fuse": stop_fuse_protection(cwd)})
         elif command == "install":
             result = install_runtime(rest, cwd, Path(os.path.expanduser("~")), Path(__file__).resolve().parents[2])
             print_json({"ok": True, **result})
@@ -298,6 +312,7 @@ def run_command(argv: list[str], cwd: Path) -> int:
                         "Unknown command. Supported: init, start-task, status, session-start, "
                         "can-write, record-command, advance-stage, complete-step, ready-to-summarize, "
                         "mark-done, check-failure-loop, check-job-poll, can-finalize, next-step, "
+                        "fuse-status, fuse-start, fuse-stop, "
                         "reset-task, next-task, install, uninstall, wizard"
                     )
                 },
