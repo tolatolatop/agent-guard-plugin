@@ -17,7 +17,7 @@ from .helpers import make_temp_repo
 def test_idle_start_task_uses_canonical_entry_stage() -> None:
     """IDLE: start-task should use the canonical entry stage."""
     root_dir = make_temp_repo()
-    session = TaskSession(task_id=None, stage="IDLE", current_step=None)
+    session = TaskSession(task_id=None, workflow_id=None, stage="IDLE", current_step=None)
     repo = Mock()
     repo.load.return_value = session
     repo.save.side_effect = lambda updated: updated
@@ -133,7 +133,7 @@ def test_green_impl_post_command_skips_success_log() -> None:
 def test_review_complete_step_preserves_review_stage() -> None:
     """REVIEW: complete-step should keep the session in REVIEW."""
     root_dir = make_temp_repo()
-    session = TaskSession(task_id="password-reset", stage="REVIEW", current_step="review-001")
+    session = TaskSession(task_id="password-reset", workflow_id=None, stage="REVIEW", current_step="review-001")
 
     with (
         patch("agent_guard.transitions.load_task_session", return_value=session),
@@ -175,7 +175,7 @@ def test_verify_post_command_records_final_verification_log() -> None:
 def test_ready_to_summarize_mark_done_targets_completion_stage() -> None:
     """READY_TO_SUMMARIZE: mark-done should target the canonical completion stage."""
     root_dir = make_temp_repo()
-    session = TaskSession(task_id="password-reset", stage="READY_TO_SUMMARIZE", current_step=None, can_finalize=True)
+    session = TaskSession(task_id="password-reset", workflow_id=None, stage="READY_TO_SUMMARIZE", current_step=None, can_finalize=True)
 
     with (
         patch("agent_guard.transitions.load_task_session", return_value=session),

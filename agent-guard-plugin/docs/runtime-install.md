@@ -103,10 +103,12 @@ uv run agent-guard reset-task next-requirement
 Interactive wizard:
 
 - `uv run agent-guard wizard`
+- `uv run agent-guard wizard --workflow research`
 
 The wizard bootstraps a new task interactively:
 
 - ensures `.agent/` exists
+- can bind the task to a named workflow such as `research.workflow.yaml`
 - collects `task_id`, goal, stage, current step, and workflow context
 - writes `state.json`
 - can generate a starter `.agent/plan.yaml`
@@ -151,3 +153,9 @@ Reset is intentionally gated. It only succeeds when the current task is already 
 - `stage == READY_TO_SUMMARIZE` and `can_finalize == true`
 
 When reset succeeds, the plugin archives the current task under `.agent/archive/<timestamp>-<task-id>/` and then clears live jobs, failures, events, plan, and artifacts before initializing the next task in the workflow entry stage.
+
+Named workflows:
+
+- `agent-guard` still uses `.workflow.yaml` by default
+- `start-task --workflow research` binds the task to `research.workflow.yaml`
+- once bound, later stage, write, finalization, and session-start decisions continue using that workflow file

@@ -483,8 +483,8 @@ def test_load_workflow_spec_reports_friendly_message_for_invalid_yaml(monkeypatc
     workflow_file = tmp_path / ".workflow.yaml"
     workflow_file.write_text("workflow: [\n", encoding="utf-8")
     load_workflow_spec.cache_clear()
-    monkeypatch.setattr("agent_guard.workflow_spec.packaged_workflow_path", lambda: workflow_file)
-    monkeypatch.setattr("agent_guard.workflow_spec.source_workflow_path", lambda: workflow_file)
+    monkeypatch.setattr("agent_guard.workflow_spec.packaged_workflow_path", lambda workflow_id=None: workflow_file)
+    monkeypatch.setattr("agent_guard.workflow_spec.source_workflow_path", lambda workflow_id=None: workflow_file)
 
     try:
         load_workflow_spec()
@@ -502,8 +502,8 @@ def test_load_workflow_spec_reports_friendly_message_for_non_mapping(monkeypatch
     workflow_file = tmp_path / ".workflow.yaml"
     workflow_file.write_text("- bad\n", encoding="utf-8")
     load_workflow_spec.cache_clear()
-    monkeypatch.setattr("agent_guard.workflow_spec.packaged_workflow_path", lambda: workflow_file)
-    monkeypatch.setattr("agent_guard.workflow_spec.source_workflow_path", lambda: workflow_file)
+    monkeypatch.setattr("agent_guard.workflow_spec.packaged_workflow_path", lambda workflow_id=None: workflow_file)
+    monkeypatch.setattr("agent_guard.workflow_spec.source_workflow_path", lambda workflow_id=None: workflow_file)
 
     try:
         load_workflow_spec()

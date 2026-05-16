@@ -55,10 +55,10 @@ def matches_any(target_path: str, patterns: list[str] | tuple[str, ...]) -> bool
 class WorkflowPolicyService:
     """Policy service for write scope and path protection."""
 
-    def decide_write(self, session: TaskSession, target_path: str, stage_rule: dict[str, Any]) -> GuardDecision:
+    def decide_write(self, session: TaskSession, target_path: str, stage_rule: dict[str, Any], root_dir: Path | None = None) -> GuardDecision:
         """Decide whether the current session may write the target path."""
         normalized = normalize_path(target_path)
-        policy = path_policy()
+        policy = path_policy(root_dir, session.workflow_id)
         stage_write_policy = stage_rule.get("write_policy", {})
         writable_paths = [str(item) for item in stage_write_policy.get("writable_paths", [])]
         denied_paths = [str(item) for item in stage_write_policy.get("denied_paths", [])]
@@ -101,6 +101,7 @@ class StageExitPolicyService:
 
     def __init__(self, root_dir: Path):
         self.root_dir = root_dir
+        self.state_repo = StateRepository(root_dir)
 
     def _artifact_mtime_ns(self, artifact_path: str) -> int | None:
         candidate = self.root_dir / artifact_path
@@ -112,11 +113,12 @@ class StageExitPolicyService:
         """Return required-artifact exit failures for one stage."""
         from ..state import ensure_stage_artifact_snapshot, load_stage_artifact_snapshot
 
-        required_rules = stage_required_artifact_rules(stage)
+        session = self.state_repo.load() if hasattr(self, "state_repo") else StateRepository(self.root_dir).load()
+        required_rules = stage_required_artifact_rules(stage, self.root_dir, session.workflow_id)
         if not required_rules:
             return []
 
-        ensure_stage_artifact_snapshot(self.root_dir, stage)
+        ensure_stage_artifact_snapshot(self.root_dir, stage, session.workflow_id)
         snapshot = load_stage_artifact_snapshot(self.root_dir)
         entered_at = snapshot.get("entered_at") or "the current stage"
         recorded = snapshot.get("artifacts", {})
@@ -153,7 +155,8 @@ class FailurePolicyService:
     def latest_code_fingerprint(self) -> int:
         """Return a fingerprint of tracked code roots."""
         latest = 0
-        for entry_name in failure_policy()["fingerprint_roots"]:
+        session = self.state_repo.load()
+        for entry_name in failure_policy(self.root_dir, session.workflow_id)["fingerprint_roots"]:
             candidate = self.root_dir / entry_name
             if not candidate.exists():
                 continue
@@ -195,9 +198,9 @@ class FailurePolicyService:
             )
         self.failures_repo.save(failure)
 
-        expected_failure_stage = canonical_expected_failure_stage()
-        analysis_stage = canonical_failure_analysis_stage()
-        verification_stage = canonical_verification_stage()
+        expected_failure_stage = canonical_expected_failure_stage(self.root_dir, session.workflow_id)
+        analysis_stage = canonical_failure_analysis_stage(self.root_dir, session.workflow_id)
+        verification_stage = canonical_verification_stage(self.root_dir, session.workflow_id)
         expected_red_failure = session.stage == expected_failure_stage and exit_code != 0
         next_session = session
         if exit_code != 0 and not expected_red_failure and analysis_stage:
@@ -234,7 +237,8 @@ class FailurePolicyService:
         record = self.failures_repo.load()
         if record is None:
             return GuardDecision("allow", "No recorded failure loop.")
-        policy = failure_policy()
+        session = self.state_repo.load()
+        policy = failure_policy(self.root_dir, session.workflow_id)
         if record.repeat_count >= policy["repeat_threshold"] and record.code_changed_since_last_failure is False:
             return GuardDecision(
                 "block",
@@ -281,13 +285,13 @@ class FinalizationPolicyService:
 
     def evaluate(self, session: TaskSession) -> GuardDecision:
         """Evaluate the configured finalization policy."""
-        rules = finalization_policy()["required_rules"]
+        rules = finalization_policy(self.root_dir, session.workflow_id)["required_rules"]
         context = RuleContext(self.root_dir, session)
         reasons: list[str] = []
         for rule_name in rules:
             if evaluate_rule(rule_name, context):
                 continue
-            reasons.append(finalization_policy()["rule_messages"].get(rule_name, f"{rule_name} must pass"))
+            reasons.append(finalization_policy(self.root_dir, session.workflow_id)["rule_messages"].get(rule_name, f"{rule_name} must pass"))
 
         if reasons:
             return GuardDecision("block", reasons[0], reasons=reasons)

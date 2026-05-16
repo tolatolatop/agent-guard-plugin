@@ -73,8 +73,8 @@ DONE
 
 Use only these workflow commands during normal stage progression:
 
-- `agent-guard start-task <task-id>`
-  Starts a new task and moves `IDLE` into the workflow entry stage.
+- `agent-guard start-task <task-id> [--workflow ID]`
+  Starts a new task and moves `IDLE` into the selected workflow entry stage.
 - `agent-guard status`
   Shows the current task, stage, step, and plan summary.
 - `agent-guard session-start`
@@ -93,6 +93,7 @@ Use only these workflow commands during normal stage progression:
 Use them like this:
 
 - Use `start-task` once at task start.
+- Use `start-task --workflow research` when the task should bind to `research.workflow.yaml`.
 - Use `status`, `session-start`, and `next-step` to rehydrate workflow context before acting.
 - Prefer `complete-step` when a real planned step finished.
 - Use `advance-stage` for stage-only moves such as `CLARIFYING -> PLANNING` or `REVIEW -> GREEN_IMPL`.

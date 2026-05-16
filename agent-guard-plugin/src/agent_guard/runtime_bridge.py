@@ -120,11 +120,11 @@ def _extract_exit_code(payload: dict[str, Any]) -> int:
     return int(response.get("exit_code", response.get("exitCode", response.get("status", 0))) or 0)
 
 
-def _log_target_for_command(stage: str | None, exit_code: int) -> str | None:
+def _log_target_for_command(stage: str | None, exit_code: int, root_dir: Path | None = None, workflow_id: str | None = None) -> str | None:
     """Internal helper for log target for command."""
-    if stage == canonical_verification_stage():
+    if stage == canonical_verification_stage(root_dir, workflow_id):
         return ".agent/artifacts/final-verification.log"
-    if stage == canonical_expected_failure_stage() and exit_code != 0:
+    if stage == canonical_expected_failure_stage(root_dir, workflow_id) and exit_code != 0:
         return ".agent/artifacts/red-test.log"
     if exit_code != 0:
         return ".agent/artifacts/command-failure.log"
@@ -198,7 +198,8 @@ def _handle_post_command(cwd: Path, payload: dict[str, Any]) -> None:
     stdout = tool_response.get("stdout", tool_response.get("output", "")) if isinstance(tool_response, dict) else ""
     stderr = tool_response.get("stderr", tool_response.get("error", "")) if isinstance(tool_response, dict) else ""
     exit_code = _extract_exit_code(payload)
-    log_path = _log_target_for_command(state.get("stage"), exit_code)
+    workflow_id = str(state.get("workflow_id")) if isinstance(state.get("workflow_id"), str) else None
+    log_path = _log_target_for_command(state.get("stage"), exit_code, cwd, workflow_id)
     args = ["record-command", "--cmd", command, "--exit-code", str(exit_code)]
     if log_path:
         args.extend(["--log", _write_command_log(cwd, command, str(stdout or ""), str(stderr or ""), log_path)])
@@ -211,14 +212,15 @@ def _handle_stop(cwd: Path) -> None:
     """Internal helper for handle stop."""
     state = load_state(cwd)
     stage = state.get("stage")
-    forbid_display = stage_forbid_needs_human_display(str(stage)) if stage else None
+    workflow_id = str(state.get("workflow_id")) if isinstance(state.get("workflow_id"), str) else None
+    forbid_display = stage_forbid_needs_human_display(str(stage), cwd, workflow_id) if stage else None
     if forbid_display:
         # Stages with forbid_needs_human must keep progressing through the
         # workflow instead of ending the interaction with a final response.
         _fail(f"agent-guard blocked final response: {forbid_display}")
-    if stage and canonical_stage_stop_allowed(str(stage)):
+    if stage and canonical_stage_stop_allowed(str(stage), cwd, workflow_id):
         raise SystemExit(0)
-    ready_stage = canonical_completion_ready_stage()
+    ready_stage = canonical_completion_ready_stage(cwd, workflow_id)
     if stage != ready_stage and state.get("can_finalize") is not True:
         _fail(
             "agent-guard blocked final response: "

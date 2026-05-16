@@ -29,9 +29,9 @@ from .workflow_spec import (
 STAGE_TRANSITIONS = stage_transitions()
 
 
-def transition_conditions_for_stage(stage: str) -> dict[str, list[str]]:
+def transition_conditions_for_stage(stage: str, root_dir: Path | None = None, workflow_id: str | None = None) -> dict[str, list[str]]:
     """Transition conditions for stage."""
-    return stage_exit_conditions(stage)
+    return stage_exit_conditions(stage, root_dir, workflow_id)
 
 
 def automatic_transitions() -> list[str]:
@@ -61,14 +61,15 @@ def _has_running_jobs(root_dir: Path) -> bool:
     return any(job.get("status") == "running" for job in jobs.get("jobs", []))
 
 
-def _require_direct_transition(from_stage: str, to_stage: str) -> None:
+def _require_direct_transition(from_stage: str, to_stage: str, workflow_id: str | None = None) -> None:
     """Internal helper for require direct transition."""
-    if to_stage not in STAGE_TRANSITIONS:
+    transitions = stage_transitions(workflow_id=workflow_id)
+    if to_stage not in transitions:
         raise RuntimeError(f"Unknown target stage: {to_stage}")
-    completion_stage = canonical_completion_stage()
+    completion_stage = canonical_completion_stage(workflow_id=workflow_id)
     if from_stage == completion_stage:
         raise RuntimeError(f"{completion_stage} cannot transition anywhere. Use reset-task or next-task to start a new task.")
-    if to_stage not in STAGE_TRANSITIONS.get(from_stage, []):
+    if to_stage not in transitions.get(from_stage, []):
         raise RuntimeError(f"Illegal transition: {from_stage} -> {to_stage}")
 
 
@@ -81,21 +82,22 @@ def _guard_transition(
 ) -> None:
     """Internal helper for guard transition."""
     from_stage = str(state.get("stage"))
-    _require_direct_transition(from_stage, to_stage)
+    workflow_id = str(state.get("workflow_id")) if isinstance(state.get("workflow_id"), str) else None
+    _require_direct_transition(from_stage, to_stage, workflow_id)
     artifact_failures = StageExitPolicyService(root_dir).exit_failures(from_stage)
     if artifact_failures:
         raise RuntimeError(f"Leaving {from_stage} requires {'; '.join(artifact_failures)}")
 
     session = TaskSession.from_mapping(state)
     context = RuleContext(root_dir, session, command_name=command_name)
-    for condition in stage_exit_rule_conditions(from_stage):
+    for condition in stage_exit_rule_conditions(from_stage, root_dir, workflow_id):
         display = condition["display"]
         rule = condition.get("rule")
         if rule is None:
             continue
         if not evaluate_rule(rule, context, condition.get("value")):
             raise RuntimeError(display)
-    for condition in stage_entry_conditions(to_stage, from_stage):
+    for condition in stage_entry_conditions(to_stage, from_stage, root_dir, workflow_id):
         display = condition["display"]
         rule = condition.get("rule")
         if rule is None:
@@ -158,7 +160,7 @@ def advance_stage(
     save_task_session(root_dir, next_session)
     event = _append_transition_event(root_dir, "advance-stage", from_stage, to_stage, next_session, {"step": resolved_step})
     return {
-        "goal": stage_intent(to_stage)["goal"],
+        "goal": stage_intent(to_stage, root_dir, session.workflow_id)["goal"],
         "step_goal": _plan_step_goal(root_dir, str(resolved_step) if resolved_step else None),
         "state": next_session.to_mapping(),
         "event": event,
@@ -173,7 +175,7 @@ def complete_step(
     """Complete step."""
     session = load_task_session(root_dir)
     current_stage = session.stage
-    if current_stage not in set(complete_step_allowed_from_stages()):
+    if current_stage not in set(complete_step_allowed_from_stages(root_dir, session.workflow_id)):
         raise RuntimeError(f"complete-step is not allowed from stage {current_stage}.")
     update_plan_step_status(root_dir, step_id, "done")
 
@@ -192,7 +194,7 @@ def complete_step(
         {"completed_step": step_id, "next_step": next_step_id},
     )
     return {
-        "goal": stage_intent(current_stage)["goal"],
+        "goal": stage_intent(current_stage, root_dir, session.workflow_id)["goal"],
         "completed_step_goal": _plan_step_goal(root_dir, step_id),
         "next_step_goal": _plan_step_goal(root_dir, next_step_id),
         "state": next_session.to_mapping(),
@@ -204,7 +206,7 @@ def ready_to_summarize(root_dir: Path) -> dict[str, Any]:
     """Move workflow state so it is ready to summarize."""
     session = load_task_session(root_dir)
     from_stage = session.stage
-    target_stage = canonical_completion_ready_stage()
+    target_stage = canonical_completion_ready_stage(root_dir, session.workflow_id)
     _guard_transition(root_dir, session.to_mapping(), target_stage, "ready-to-summarize", None)
     next_session = session.mark_ready_to_summarize(target_stage)
     save_task_session(root_dir, next_session)
@@ -216,7 +218,7 @@ def mark_done(root_dir: Path) -> dict[str, Any]:
     """Mark done."""
     session = load_task_session(root_dir)
     from_stage = session.stage
-    target_stage = canonical_completion_stage()
+    target_stage = canonical_completion_stage(root_dir, session.workflow_id)
     _guard_transition(root_dir, session.to_mapping(), target_stage, "mark-done", None)
     next_session = session.mark_done(target_stage)
     save_task_session(root_dir, next_session)

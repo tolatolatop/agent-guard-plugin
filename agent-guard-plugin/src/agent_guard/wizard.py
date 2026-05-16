@@ -10,8 +10,6 @@ from .infrastructure.repositories import PlanRepository
 from .state import ensure_agent_files, save_state
 from .workflow_spec import wizard_defaults
 
-WIZARD_STAGES = wizard_defaults()["start_stages"]
-
 
 def slugify_task_id(value: str) -> str:
     """Slugify task id."""
@@ -33,14 +31,15 @@ def write_plan_template(
     return repository.file_path
 
 
-def run_wizard(root_dir: Path, input_stream: TextIO, output: TextIO) -> dict[str, Any]:
+def run_wizard(root_dir: Path, input_stream: TextIO, output: TextIO, workflow_id: str | None = None) -> dict[str, Any]:
     """Run wizard."""
     ensure_agent_files(root_dir)
+    stages = wizard_defaults(root_dir, workflow_id)["start_stages"]
 
     suggested_task = slugify_task_id(root_dir.name)
     task_id = slugify_task_id(prompt_text("Task id", input_stream, output, default=suggested_task))
     goal = prompt_text("Task goal", input_stream, output, default=f"Implement {task_id}")
-    stage = prompt_choice("Start stage", WIZARD_STAGES, input_stream, output, default="CLARIFYING")
+    stage = prompt_choice("Start stage", stages, input_stream, output, default=stages[0] if stages else "CLARIFYING")
     current_step = prompt_text("Current step id", input_stream, output, default="")
     create_plan = confirm_action("Create or replace .agent/plan.yaml?", input_stream, output)
 
@@ -48,6 +47,7 @@ def run_wizard(root_dir: Path, input_stream: TextIO, output: TextIO) -> dict[str
         root_dir,
         {
             "task_id": task_id,
+            "workflow_id": workflow_id,
             "stage": stage,
             "current_step": current_step or None,
             "can_finalize": False,

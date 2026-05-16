@@ -7,7 +7,6 @@ from typing import Any
 
 from .install import packaged_skills_dir
 from .transitions import (
-    STAGE_TRANSITIONS,
     transition_conditions_for_stage,
 )
 from .workflow_spec import (
@@ -15,6 +14,7 @@ from .workflow_spec import (
     global_gates,
     session_start_defaults,
     stage_policy_view,
+    stage_transitions,
     transition_graph_mermaid,
     workflow_metadata,
     workflow_policy_roles,
@@ -88,9 +88,9 @@ def discover_skills(base_dir: Path) -> list[dict[str, str]]:
     return [discovered[skill_id] for skill_id in sorted(discovered)]
 
 
-def get_stage_rules(stage: str) -> dict[str, Any]:
+def get_stage_rules(stage: str, root_dir: Path | None = None, workflow_id: str | None = None) -> dict[str, Any]:
     """Return stage rules."""
-    return stage_policy_view(stage)
+    return stage_policy_view(stage, root_dir, workflow_id)
 
 
 def _read_skill_body(file_path: Path) -> str:
@@ -104,9 +104,9 @@ def _read_skill_body(file_path: Path) -> str:
     return text.strip()
 
 
-def resolve_session_start_navigator(skill_catalog: list[dict[str, str]]) -> dict[str, str]:
+def resolve_session_start_navigator(skill_catalog: list[dict[str, str]], root_dir: Path | None = None, workflow_id: str | None = None) -> dict[str, str]:
     """Resolve the configured navigator skill from the discovered catalog."""
-    skill_id = session_start_defaults()["navigator_skill"]
+    skill_id = session_start_defaults(root_dir, workflow_id)["navigator_skill"]
     navigator_skill = next(
         (skill for skill in skill_catalog if skill.get("id") == skill_id),
         None,
@@ -134,21 +134,23 @@ def resolve_session_start_navigator(skill_catalog: list[dict[str, str]]) -> dict
     }
 
 
-def get_workflow_context(root_dir: Path, stage: str) -> dict[str, Any]:
+def get_workflow_context(root_dir: Path, stage: str, workflow_id: str | None = None) -> dict[str, Any]:
     """Return workflow context."""
-    rules = stage_policy_view(stage)
+    rules = stage_policy_view(stage, root_dir, workflow_id)
     base_dir = (
         Path(os.environ["AGENT_GUARD_SKILLS_DIR"])
         if os.environ.get("AGENT_GUARD_SKILLS_DIR")
         else packaged_skills_dir()
     )
     skill_catalog = discover_skills(base_dir)
-    navigator = resolve_session_start_navigator(skill_catalog)
+    navigator = resolve_session_start_navigator(skill_catalog, root_dir, workflow_id)
+    transitions = transition_graph_mermaid(root_dir, workflow_id)
+    stage_map = stage_transitions(root_dir, workflow_id)
     # This dictionary is the single payload used by session-start and related
     # reminders, so it keeps prompt generation and machine-readable state aligned.
     return {
-        "workflow_metadata": workflow_metadata(),
-        "policy_roles": workflow_policy_roles(),
+        "workflow_metadata": workflow_metadata(root_dir, workflow_id),
+        "policy_roles": workflow_policy_roles(root_dir, workflow_id),
         "stage_policy": rules,
         "soft_prompt": {
             "goal": rules["intent"]["goal"],
@@ -160,10 +162,10 @@ def get_workflow_context(root_dir: Path, stage: str) -> dict[str, Any]:
             "write_allow": rules["permissions"]["write"]["allow"],
             "write_deny": rules["permissions"]["write"]["deny"],
             "required_artifacts": rules["evidence"]["required"],
-            "transition_targets": STAGE_TRANSITIONS.get(stage, []),
-            "transition_conditions": transition_conditions_for_stage(stage),
+            "transition_targets": stage_map.get(stage, []),
+            "transition_conditions": transition_conditions_for_stage(stage, root_dir, workflow_id),
             "complete_step": rules["permissions"]["commands"]["complete_step"],
-            "global_gates": global_gates(),
+            "global_gates": global_gates(root_dir, workflow_id),
         },
         "current_stage_goal": rules["intent"]["goal"],
         "allowed_actions": rules["permissions"]["actions"]["allow"],
@@ -173,12 +175,12 @@ def get_workflow_context(root_dir: Path, stage: str) -> dict[str, Any]:
         "stage_display_artifacts": rules["evidence"]["display"],
         "stage_expected_artifacts": rules["evidence"]["expected"],
         "stage_required_artifacts": rules["evidence"]["required"],
-        "transitions_in": [source for source, targets in STAGE_TRANSITIONS.items() if stage in targets],
-        "transitions_out": STAGE_TRANSITIONS.get(stage, []),
-        "transition_conditions": transition_conditions_for_stage(stage),
-        "transition_graph_mermaid": transition_graph_mermaid(),
-        "complete_step_allowed_from_stages": complete_step_allowed_from_stages(),
-        "global_gates": global_gates(),
+        "transitions_in": [source for source, targets in stage_map.items() if stage in targets],
+        "transitions_out": stage_map.get(stage, []),
+        "transition_conditions": transition_conditions_for_stage(stage, root_dir, workflow_id),
+        "transition_graph_mermaid": transitions,
+        "complete_step_allowed_from_stages": complete_step_allowed_from_stages(root_dir, workflow_id),
+        "global_gates": global_gates(root_dir, workflow_id),
         "skill_catalog": skill_catalog,
         "session_start_navigator": navigator,
     }

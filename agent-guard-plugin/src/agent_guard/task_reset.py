@@ -72,11 +72,12 @@ def latest_archive(root_dir: Path) -> dict[str, Any] | None:
     }
 
 
-def _is_resettable_state(state: dict[str, Any]) -> bool:
+def _is_resettable_state(root_dir: Path, state: dict[str, Any]) -> bool:
     """Internal helper for is resettable state."""
-    if state.get("stage") == canonical_completion_stage():
+    workflow_id = str(state.get("workflow_id")) if isinstance(state.get("workflow_id"), str) else None
+    if state.get("stage") == canonical_completion_stage(root_dir, workflow_id):
         return True
-    return state.get("stage") == canonical_completion_ready_stage() and state.get("can_finalize") is True
+    return state.get("stage") == canonical_completion_ready_stage(root_dir, workflow_id) and state.get("can_finalize") is True
 
 
 def _snapshot_state(root_dir: Path) -> dict[str, Any]:
@@ -128,7 +129,7 @@ def archive_current_task(root_dir: Path) -> dict[str, Any]:
     }
 
 
-def _reset_runtime_files(root_dir: Path, new_task_id: str) -> dict[str, Any]:
+def _reset_runtime_files(root_dir: Path, new_task_id: str, workflow_id: str | None) -> dict[str, Any]:
     """Internal helper for reset runtime files."""
     live_artifacts = artifacts_dir(root_dir)
     if live_artifacts.exists():
@@ -149,25 +150,28 @@ def _reset_runtime_files(root_dir: Path, new_task_id: str) -> dict[str, Any]:
     new_state = {
         **DEFAULT_STATE,
         "task_id": new_task_id,
-        "stage": canonical_entry_stage(),
+        "workflow_id": workflow_id,
+        "stage": canonical_entry_stage(root_dir, workflow_id),
     }
     save_state(root_dir, new_state)
     return new_state
 
 
-def reset_task(root_dir: Path, new_task_id: str) -> dict[str, Any]:
+def reset_task(root_dir: Path, new_task_id: str, workflow_id: str | None = None) -> dict[str, Any]:
     """Reset task."""
     ensure_agent_files(root_dir)
     state = load_state(root_dir)
-    if not _is_resettable_state(state):
+    if not _is_resettable_state(root_dir, state):
+        current_workflow = str(state.get("workflow_id")) if isinstance(state.get("workflow_id"), str) else None
         raise RuntimeError(
             "reset-task is only allowed when the current task is complete. "
-            f"Move the state to {canonical_completion_stage()} or "
-            f"{canonical_completion_ready_stage()} with can_finalize=true first."
+            f"Move the state to {canonical_completion_stage(root_dir, current_workflow)} or "
+            f"{canonical_completion_ready_stage(root_dir, current_workflow)} with can_finalize=true first."
         )
 
     archive_result = archive_current_task(root_dir)
-    new_state = _reset_runtime_files(root_dir, new_task_id)
+    next_workflow = workflow_id or (str(state.get("workflow_id")) if isinstance(state.get("workflow_id"), str) else None)
+    new_state = _reset_runtime_files(root_dir, new_task_id, next_workflow)
     return {
         "archive_dir": archive_result["archive_dir"],
         "archived_task_id": archive_result["archived_task_id"],

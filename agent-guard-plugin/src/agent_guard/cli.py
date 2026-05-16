@@ -39,9 +39,12 @@ Minimal runtime guard CLI for coding-agent workflows.
 
 Commands:
   init                              Initialize .agent state files in the current repo.
-  start-task <task-id>              Start or register a task.
-  reset-task <task-id>              Archive completed task state and initialize a new task.
-  next-task <task-id>               Alias for reset-task.
+  start-task <task-id> [--workflow ID]
+                                    Start or register a task.
+  reset-task <task-id> [--workflow ID]
+                                    Archive completed task state and initialize a new task.
+  next-task <task-id> [--workflow ID]
+                                    Alias for reset-task.
   status                            Show current state, jobs, plan summary, and next step.
   session-start                     Emit a concise session reminder.
   can-write <path>                  Check whether a file write is allowed in the current stage.
@@ -59,7 +62,7 @@ Commands:
   next-step                         Show the next step derived from state and plan.
   install [options]                 Install runtime integrations for supported tools.
   uninstall [options]               Remove runtime integrations for supported tools.
-  wizard                            Run the interactive setup wizard.
+  wizard [--workflow ID]            Run the interactive setup wizard.
   help [command]                    Show general or command-specific help.
 
 Global options:
@@ -67,7 +70,7 @@ Global options:
 
 Examples:
   agent-guard init
-  agent-guard start-task password-reset
+  agent-guard start-task password-reset --workflow research
   agent-guard can-write tests/test_auth.py
   agent-guard record-command --cmd "pytest tests/test_auth.py" --exit-code 1 --log .agent/artifacts/red-test.log
   agent-guard install --runtime codex --scope project
@@ -78,9 +81,9 @@ Examples:
 
 COMMAND_HELP: dict[str, str] = {
     "init": "Usage: agent-guard init\n\nInitialize .agent state files in the current repository.",
-    "start-task": "Usage: agent-guard start-task <task-id>\n\nStart or register a task and move IDLE repositories into CLARIFYING.",
-    "reset-task": "Usage: agent-guard reset-task <task-id>\n\nArchive completed task state and initialize a new task.",
-    "next-task": "Usage: agent-guard next-task <task-id>\n\nAlias for reset-task.",
+    "start-task": "Usage: agent-guard start-task <task-id> [--workflow ID]\n\nStart or register a task and move IDLE repositories into the selected workflow entry stage.",
+    "reset-task": "Usage: agent-guard reset-task <task-id> [--workflow ID]\n\nArchive completed task state and initialize a new task.",
+    "next-task": "Usage: agent-guard next-task <task-id> [--workflow ID]\n\nAlias for reset-task.",
     "status": "Usage: agent-guard status\n\nShow current state, jobs, plan summary, and next step.",
     "session-start": "Usage: agent-guard session-start\n\nEmit a concise session reminder for hooks and agents.",
     "can-write": "Usage: agent-guard can-write <path>\n\nCheck whether a file write is allowed in the current stage.",
@@ -121,7 +124,7 @@ COMMAND_HELP: dict[str, str] = {
         "  -r, --runtime RUNTIME   Supported: claude-code, codex, opencode\n"
         "  -s, --scope SCOPE       Supported: project, user"
     ),
-    "wizard": "Usage: agent-guard wizard\n\nRun the interactive setup wizard.",
+    "wizard": "Usage: agent-guard wizard [--workflow ID]\n\nRun the interactive setup wizard.",
     "help": "Usage: agent-guard help [command]\n\nShow general or command-specific help.",
 }
 
@@ -172,10 +175,14 @@ def run_command(argv: list[str], cwd: Path) -> int:
             print_json(initialize_workspace(cwd))
         elif command == "start-task":
             task_id = ensure_path_arg(rest, "task-id")
-            print_json(start_task(cwd, task_id))
+            flags = parse_flags(rest[1:])
+            workflow_id = str(flags["workflow"]) if "workflow" in flags else None
+            print_json(start_task(cwd, task_id, workflow_id=workflow_id))
         elif command in {"reset-task", "next-task"}:
             task_id = ensure_path_arg(rest, "task-id")
-            result = reset_task(cwd, task_id)
+            flags = parse_flags(rest[1:])
+            workflow_id = str(flags["workflow"]) if "workflow" in flags else None
+            result = reset_task(cwd, task_id, workflow_id=workflow_id)
             print_json({"ok": True, **result})
         elif command == "status":
             state = load_state(cwd)
@@ -275,7 +282,9 @@ def run_command(argv: list[str], cwd: Path) -> int:
             )
             print_json({"ok": True, **result})
         elif command == "wizard":
-            result = run_wizard(cwd, sys.stdin, sys.stdout)
+            flags = parse_flags(rest)
+            workflow_id = str(flags["workflow"]) if "workflow" in flags else None
+            result = run_wizard(cwd, sys.stdin, sys.stdout, workflow_id=workflow_id)
             print_json(result)
         else:
             print_json(

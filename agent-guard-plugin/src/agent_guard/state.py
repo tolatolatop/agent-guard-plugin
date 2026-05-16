@@ -13,6 +13,7 @@ ARTIFACTS_DIR = f"{AGENT_DIR}/artifacts"
 
 DEFAULT_STATE: dict[str, Any] = {
     "task_id": None,
+    "workflow_id": None,
     "stage": "IDLE",
     "current_step": None,
     "can_finalize": False,
@@ -79,7 +80,7 @@ def _artifact_mtime_ns(root_dir: Path, artifact_path: str) -> int | None:
     return int(candidate.stat().st_mtime_ns)
 
 
-def record_stage_artifact_snapshot(root_dir: Path, stage: str) -> dict[str, Any]:
+def record_stage_artifact_snapshot(root_dir: Path, stage: str, workflow_id: str | None = None) -> dict[str, Any]:
     """Record stage entry time and required artifact mtimes for later exit checks."""
     from .workflow_spec import stage_required_artifacts
 
@@ -88,7 +89,7 @@ def record_stage_artifact_snapshot(root_dir: Path, stage: str) -> dict[str, Any]
         "entered_at": datetime.now(timezone.utc).isoformat(),
         "artifacts": {
             artifact_path: {"mtime_ns": _artifact_mtime_ns(root_dir, artifact_path)}
-            for artifact_path in stage_required_artifacts(stage)
+            for artifact_path in stage_required_artifacts(stage, root_dir, workflow_id)
         },
     }
     stage_artifacts_path(root_dir).write_text(json.dumps(snapshot, indent=2) + "\n", encoding="utf-8")
@@ -116,12 +117,12 @@ def load_stage_artifact_snapshot(root_dir: Path) -> dict[str, Any]:
     }
 
 
-def ensure_stage_artifact_snapshot(root_dir: Path, stage: str) -> dict[str, Any]:
+def ensure_stage_artifact_snapshot(root_dir: Path, stage: str, workflow_id: str | None = None) -> dict[str, Any]:
     """Ensure the snapshot file exists for the current stage."""
     current = load_stage_artifact_snapshot(root_dir)
     if current.get("stage") == stage and stage_artifacts_path(root_dir).exists():
         return current
-    return record_stage_artifact_snapshot(root_dir, stage)
+    return record_stage_artifact_snapshot(root_dir, stage, workflow_id)
 
 
 def _write_json_if_missing(file_path: Path, value: dict[str, Any]) -> None:
@@ -141,7 +142,7 @@ def ensure_agent_files(root_dir: Path) -> None:
     if not events_path(root_dir).exists():
         events_path(root_dir).write_text("", encoding="utf-8")
     if not stage_artifacts_path(root_dir).exists():
-        record_stage_artifact_snapshot(root_dir, str(DEFAULT_STATE["stage"]))
+        record_stage_artifact_snapshot(root_dir, str(DEFAULT_STATE["stage"]), None)
 
 
 def read_json(file_path: Path, label: str) -> dict[str, Any]:
@@ -173,6 +174,7 @@ def validate_state(state: dict[str, Any]) -> dict[str, Any]:
                 f"state.json appears damaged. Missing required key: {key}. "
                 "The current task cannot continue until .agent/state.json is repaired or restored."
             )
+    state.setdefault("workflow_id", None)
     state.pop("completed_steps", None)
     state.pop("remaining_steps", None)
     state.pop("allowed_paths", None)
@@ -212,7 +214,8 @@ def save_state(root_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
     file_path.write_text(json.dumps(validated, indent=2) + "\n", encoding="utf-8")
     current_stage = str(validated.get("stage") or "IDLE")
     if previous_stage != current_stage or not stage_artifacts_path(root_dir).exists():
-        record_stage_artifact_snapshot(root_dir, current_stage)
+        workflow_id = str(validated.get("workflow_id")) if isinstance(validated.get("workflow_id"), str) else None
+        record_stage_artifact_snapshot(root_dir, current_stage, workflow_id)
     return validated
 
 

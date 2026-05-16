@@ -65,6 +65,7 @@ def test_task_session_advance_clears_needs_human_after_escalation_stage() -> Non
     """Test that advancing from an escalation stage clears needs_human."""
     session = TaskSession(
         task_id="password-reset",
+        workflow_id=None,
         stage="NEEDS_HUMAN",
         current_step="green-001",
         needs_human=True,

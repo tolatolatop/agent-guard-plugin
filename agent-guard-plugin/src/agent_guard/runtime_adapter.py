@@ -21,7 +21,8 @@ def get_session_reminder(root_dir: Path) -> dict[str, Any]:
     state = load_state(root_dir)
     next_step = get_next_step(root_dir, state)
     stage = state.get("stage", "IDLE")
-    workflow_context = get_workflow_context(root_dir, stage)
+    workflow_id = str(state.get("workflow_id")) if isinstance(state.get("workflow_id"), str) else None
+    workflow_context = get_workflow_context(root_dir, stage, workflow_id)
     recent_archive = latest_archive(root_dir)
     navigator = workflow_context["session_start_navigator"]
     return {

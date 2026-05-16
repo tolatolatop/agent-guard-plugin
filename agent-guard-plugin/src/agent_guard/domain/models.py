@@ -43,6 +43,7 @@ class TaskSession:
     """Aggregate root for one guarded task session."""
 
     task_id: str | None
+    workflow_id: str | None
     stage: str
     current_step: str | None
     can_finalize: bool = False
@@ -54,6 +55,7 @@ class TaskSession:
         """Build a task session from stored state."""
         return cls(
             task_id=str(payload["task_id"]) if payload.get("task_id") is not None else None,
+            workflow_id=str(payload["workflow_id"]) if payload.get("workflow_id") is not None else None,
             stage=str(payload["stage"]),
             current_step=str(payload["current_step"]) if payload.get("current_step") is not None else None,
             can_finalize=bool(payload.get("can_finalize", False)),
@@ -65,6 +67,7 @@ class TaskSession:
         """Render to the persisted state format."""
         return {
             "task_id": self.task_id,
+            "workflow_id": self.workflow_id,
             "stage": self.stage,
             "current_step": self.current_step,
             "can_finalize": self.can_finalize,
@@ -72,10 +75,11 @@ class TaskSession:
             "needs_human": self.needs_human,
         }
 
-    def start(self, task_id: str, entry_stage: str = "CLARIFYING") -> "TaskSession":
+    def start(self, task_id: str, entry_stage: str = "CLARIFYING", workflow_id: str | None = None) -> "TaskSession":
         """Start or resume a task session."""
         next_stage = entry_stage if self.stage == "IDLE" else self.stage
-        return self.with_updates(task_id=task_id, stage=next_stage)
+        next_workflow = workflow_id if self.stage == "IDLE" else self.workflow_id
+        return self.with_updates(task_id=task_id, workflow_id=next_workflow, stage=next_stage)
 
     def with_updates(self, **changes: Any) -> "TaskSession":
         """Return a copy with selected updates."""
@@ -98,6 +102,7 @@ class TaskSession:
             next_needs_human = True
         return TaskSession(
             task_id=self.task_id,
+            workflow_id=self.workflow_id,
             stage=stage,
             current_step=current_step,
             can_finalize=next_can_finalize,

@@ -19,12 +19,19 @@ def initialize_workspace(root_dir: Path) -> dict[str, Any]:
     return {"ok": True, "agent_dir": str(root_dir / AGENT_DIR)}
 
 
-def start_task(root_dir: Path, task_id: str) -> dict[str, Any]:
+def start_task(root_dir: Path, task_id: str, workflow_id: str | None = None) -> dict[str, Any]:
     """Start or register a task session."""
     ensure_agent_files(root_dir)
     repo = StateRepository(root_dir)
     session = repo.load()
-    updated = repo.save(session.start(task_id, entry_stage=canonical_entry_stage()))
+    resolved_workflow = workflow_id or session.workflow_id
+    updated = repo.save(
+        session.start(
+            task_id,
+            entry_stage=canonical_entry_stage(root_dir, resolved_workflow),
+            workflow_id=resolved_workflow,
+        )
+    )
     return {"ok": True, "state": updated.to_mapping()}
 
 
@@ -36,7 +43,7 @@ def build_session_reminder(root_dir: Path) -> dict[str, Any]:
 def check_write_permission(root_dir: Path, target_path: str) -> dict[str, Any]:
     """Guard writes using the workflow policy service."""
     session = StateRepository(root_dir).load()
-    decision = WorkflowPolicyService().decide_write(session, target_path, stage_rule_for(session.stage))
+    decision = WorkflowPolicyService().decide_write(session, target_path, stage_rule_for(session.stage, root_dir, session.workflow_id), root_dir)
     return decision.to_mapping()
 
 

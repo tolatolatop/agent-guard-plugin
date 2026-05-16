@@ -536,6 +536,55 @@ def test_cli_failed_verify_requires_failure_analysis_then_allows_reentry() -> No
     assert code == 0
 
 
+def test_start_task_binds_named_repo_workflow() -> None:
+    """Test that start-task may bind a named repo-local workflow file."""
+    root_dir = make_temp_repo()
+    (root_dir / "research.workflow.yaml").write_text(
+        "version: 2\n"
+        "workflow:\n"
+        "  id: research\n"
+        "  title: Research Workflow\n"
+        "  entry: QUESTIONING\n"
+        "globals:\n"
+        "  protected: []\n"
+        "  sensitive: []\n"
+        "  failures: {}\n"
+        "  finalize:\n"
+        "    require: []\n"
+        "  wizard:\n"
+        "    start_stages:\n"
+        "      - QUESTIONING\n"
+        "  session_start:\n"
+        "    navigator_skill: using-workflow\n"
+        "  install:\n"
+        "    skills:\n"
+        "      match: []\n"
+        "      exclude_match: []\n"
+        "stages:\n"
+        "  QUESTIONING:\n"
+        "    goal: Frame the research question.\n"
+        "    plan: create\n"
+        "    allow:\n"
+        "      write: []\n"
+        "      actions: []\n"
+        "      stop: true\n"
+        "      human: true\n"
+        "    deny:\n"
+        "      write: []\n"
+        "      actions: []\n"
+        "    enter: []\n"
+        "    exit: []\n"
+        "    expect: []\n"
+        "    next: []\n",
+        encoding="utf-8",
+    )
+
+    code, payload = invoke_cli(root_dir, ["start-task", "market-scan", "--workflow", "research"])
+    assert code == 0
+    assert payload["state"]["workflow_id"] == "research"
+    assert payload["state"]["stage"] == "QUESTIONING"
+
+
 def test_failure_analysis_artifact_must_be_updated_in_current_stage() -> None:
     """Test that a stale failure-analysis artifact must be refreshed after entering analysis stage."""
     root_dir = make_temp_repo()
