@@ -1,11 +1,15 @@
 ---
 name: workflow-core
-description: Canonical workflow stages, legal transitions, and command rules for agent-guard.
+description: Coding workflow stages, legal transitions, and command rules for the default agent-guard workflow.
 ---
 
-# Core Workflow
+# Coding Workflow
 
-The current workflow DSL is stage-centered and uses:
+Use this skill only when the current task is bound to the default coding workflow, usually `workflow_id = default`.
+
+If the current task is bound to `research` or `docs`, do not use this skill as the source of stage truth. Use the matching workflow-specific skill instead.
+
+The workflow DSL is stage-centered and uses:
 
 - `goal`
 - `plan`
@@ -71,7 +75,7 @@ DONE
 
 ## Command Manual
 
-Use only these workflow commands during normal stage progression:
+Use these workflow commands during normal coding workflow progression:
 
 - `agent-guard start-task <task-id> [--workflow ID]`
   Starts a new task and moves `IDLE` into the selected workflow entry stage.
@@ -93,7 +97,6 @@ Use only these workflow commands during normal stage progression:
 Use them like this:
 
 - Use `start-task` once at task start.
-- Use `start-task --workflow research` when the task should bind to `workflows/research.workflow.yaml`.
 - Use `status`, `session-start`, and `next-step` to rehydrate workflow context before acting.
 - Prefer `complete-step` when a real planned step finished.
 - Use `advance-stage` for stage-only moves such as `CLARIFYING -> PLANNING` or `REVIEW -> GREEN_IMPL`.

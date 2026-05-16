@@ -12,9 +12,11 @@ Use this skill first at session start and any time the next action is unclear.
 Decision order:
 
 1. Read the current `.agent/state.json` summary from `session-start`.
-2. Identify the current `stage`, `current_step`, and `next_required_action`.
+2. Identify the current `workflow_id`, `stage`, `current_step`, and `next_required_action`.
 3. Route to the right specialist skill:
-   - `workflow-core.md` for stage rules and transitions
+   - `workflow-core.md` for the default coding workflow
+   - `research-workflow.md` for `workflow_id = research`
+   - `docs-workflow.md` for `workflow_id = docs`
    - `plan-yaml.md` when creating, reading, or updating `.agent/plan.yaml`
    - `failure-analysis.md` when blocked by repeated failures
    - `finalization-checklist.md` before claiming completion
@@ -23,6 +25,7 @@ Decision order:
 Core navigation rules:
 
 - Never skip required stage transitions.
+- Never assume the coding stage machine applies unless the bound workflow is the default coding workflow.
 - Never assume completion from intent alone; rely on artifacts and verification.
 - Use the current stage's `plan` mode to decide whether planning is denied, created, followed, advanced, or being closed out.
 - Prefer the smallest legal next step over broad changes.

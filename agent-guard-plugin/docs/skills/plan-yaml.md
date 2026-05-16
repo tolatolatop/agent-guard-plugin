@@ -29,7 +29,7 @@ What `plan.yaml` is not for:
 
 `plan.yaml` is a YAML mapping. The main field is `steps`, which must be a list.
 
-Each step is a mapping with exactly these practical fields:
+Each step should use these minimum practical fields:
 
 - `name`: stable step name such as `red-001` or `review-001`
 - `description`: one short sentence describing the concrete outcome
