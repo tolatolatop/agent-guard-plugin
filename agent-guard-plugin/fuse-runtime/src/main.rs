@@ -636,6 +636,30 @@ impl Filesystem for GuardFs {
         }
     }
 
+    fn mknod(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, mode: u32, _umask: u32, _rdev: u32, reply: ReplyEntry) {
+        debug_log(format!("mknod parent={parent} name={} mode={mode:o}", name.to_string_lossy()));
+        let Some(parent_rel) = self.rel_for_ino(parent) else {
+            reply.error(ENOENT);
+            return;
+        };
+        let child_rel = self.child_rel(&parent_rel, name);
+        if self.is_unlocked_for_write(&child_rel) {
+            reply.error(EACCES);
+            return;
+        }
+        let path = self.backing_path(&child_rel);
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        match OpenOptions::new().create(true).write(true).mode(mode).open(&path) {
+            Ok(_) => match self.file_attr_for_rel(&child_rel) {
+                Ok(attr) => reply.entry(&TTL, &attr, 0),
+                Err(code) => reply.error(code),
+            },
+            Err(_) => reply.error(EACCES),
+        }
+    }
+
     fn mkdir(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, mode: u32, _umask: u32, reply: ReplyEntry) {
         debug_log(format!("mkdir parent={parent} name={} mode={mode:o}", name.to_string_lossy()));
         let Some(parent_rel) = self.rel_for_ino(parent) else {
@@ -954,4 +978,5 @@ mod tests {
         );
         assert!(fs_view.managed_root().join("artifacts").is_dir());
     }
+
 }

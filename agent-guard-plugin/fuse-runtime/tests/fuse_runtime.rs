@@ -94,6 +94,15 @@ fn timed_write(path: &Path, data: &str) -> Output {
         .expect("run timed write")
 }
 
+fn timed_touch(path: &Path) -> Output {
+    Command::new("timeout")
+        .arg("2")
+        .arg("touch")
+        .arg(path)
+        .output()
+        .expect("run timed touch")
+}
+
 fn timed_delete(path: &Path) -> Output {
     Command::new("timeout")
         .arg("2")
@@ -237,6 +246,45 @@ fn mounted_runtime_allows_passthrough_directories_and_files_without_token() {
             .expect("read managed passthrough file"),
         "{\"event\":\"ok\"}\n"
     );
+
+    run_unmount(home.path(), root.path());
+    let status = child.wait().expect("wait on mount child");
+    assert!(status.success(), "mount child exited unsuccessfully: {status}");
+}
+
+#[test]
+fn mounted_runtime_allows_creating_new_unlocked_files_like_normal_fs() {
+    let (root, home, _public, _managed, mut child) = setup("state.json", "{\"stage\":\"IDLE\"}\n");
+    let mount_dir = root.path().join(".agent");
+
+    let root_file = mount_dir.join("task.md");
+    let root_create = timed_touch(&root_file);
+    assert!(
+        root_create.status.success(),
+        "root create failed: status={:?} stderr={}",
+        root_create.status.code(),
+        String::from_utf8_lossy(&root_create.stderr)
+    );
+    assert!(managed_path(home.path(), root.path(), "task.md").exists());
+
+    let artifacts_dir = mount_dir.join("artifacts");
+    let mkdir_result = timed_mkdir(&artifacts_dir);
+    assert!(
+        mkdir_result.status.success(),
+        "mkdir failed: status={:?} stderr={}",
+        mkdir_result.status.code(),
+        String::from_utf8_lossy(&mkdir_result.stderr)
+    );
+
+    let nested_file = artifacts_dir.join("review.md");
+    let nested_create = timed_touch(&nested_file);
+    assert!(
+        nested_create.status.success(),
+        "nested create failed: status={:?} stderr={}",
+        nested_create.status.code(),
+        String::from_utf8_lossy(&nested_create.stderr)
+    );
+    assert!(managed_path(home.path(), root.path(), "artifacts/review.md").exists());
 
     run_unmount(home.path(), root.path());
     let status = child.wait().expect("wait on mount child");
