@@ -46,7 +46,10 @@ Selective skill installation:
 - `--match REGEX` keeps only skills whose slug or filename matches the regex.
 - `--exclude-match REGEX` removes any matched skills after positive selection.
 - Both flags are repeatable, so you can build selection from multiple include and exclude groups.
-- If no CLI filters are passed, `agent-guard` may read default install filters from `workflows/default.workflow.yaml` under `globals.install.skills`.
+- If no CLI filters are passed, `agent-guard` reads default install filters from the current workflow context:
+  - the bound task workflow when `.agent/state.json` already names one
+  - otherwise the workflow selected with `--workflow ID`
+  - otherwise `workflows/default.workflow.yaml`
 - If workflow-provided filters match nothing, installation continues with the full skill bundle and adds a warning note instead of failing.
 
 Examples:
@@ -54,6 +57,7 @@ Examples:
 ```bash
 uv run install-agent-guard --runtime claude-code --scope project --match 'workflow|plan' --match review
 uv run install-agent-guard --runtime codex --scope project --match workflow --exclude-match finalization --exclude-match failure
+uv run install-agent-guard --runtime codex --scope project --workflow research
 ```
 
 Expected repo-local outputs:

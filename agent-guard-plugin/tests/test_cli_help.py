@@ -40,6 +40,15 @@ def test_subcommand_help_flag_prints_specific_usage() -> None:
     assert "Record command execution details" in output
 
 
+def test_install_help_mentions_workflow_context_defaults() -> None:
+    """Test that install help documents workflow-aware skill defaults."""
+    code, output = invoke_help(["install", "--help"])
+
+    assert code == 0
+    assert "--workflow ID" in output
+    assert "bound workflow" in output
+
+
 def test_help_command_supports_command_specific_help() -> None:
     """Test that help command supports command-specific help."""
     code, output = invoke_help(["help", "close-task"])

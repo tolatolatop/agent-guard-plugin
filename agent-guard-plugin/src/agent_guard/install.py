@@ -239,6 +239,9 @@ def selected_skill_sources(plugin_root: Path, include_matches: list[str] | None 
 def resolve_skill_filters(
     include_matches: list[str] | None = None,
     exclude_matches: list[str] | None = None,
+    *,
+    root_dir: Path | None = None,
+    workflow_id: str | None = None,
 ) -> tuple[list[str], list[str], str]:
     """Resolve install skill filters from CLI flags or workflow defaults."""
     cli_include = list(include_matches or [])
@@ -246,7 +249,7 @@ def resolve_skill_filters(
     if cli_include or cli_exclude:
         return cli_include, cli_exclude, "cli"
 
-    defaults = workflow_install_defaults()
+    defaults = workflow_install_defaults(root_dir, workflow_id)
     return list(defaults.get("skill_match", [])), list(defaults.get("skill_exclude_match", [])), "workflow"
 
 
@@ -268,9 +271,17 @@ def selected_skill_sources_with_fallback(
     plugin_root: Path,
     include_matches: list[str] | None = None,
     exclude_matches: list[str] | None = None,
+    *,
+    root_dir: Path | None = None,
+    workflow_id: str | None = None,
 ) -> tuple[list[Path], list[str]]:
     """Select skills, warning and falling back to full install for empty workflow defaults."""
-    resolved_include, resolved_exclude, source = resolve_skill_filters(include_matches, exclude_matches)
+    resolved_include, resolved_exclude, source = resolve_skill_filters(
+        include_matches,
+        exclude_matches,
+        root_dir=root_dir,
+        workflow_id=workflow_id,
+    )
     selected = selected_skill_sources(plugin_root, resolved_include, resolved_exclude)
     if selected or source != "workflow" or (not resolved_include and not resolved_exclude):
         return selected, []
@@ -282,11 +293,20 @@ def install_flat_skills_bundle(
     plugin_root: Path,
     include_matches: list[str] | None = None,
     exclude_matches: list[str] | None = None,
+    *,
+    root_dir: Path | None = None,
+    workflow_id: str | None = None,
 ) -> tuple[list[str], list[str]]:
     """Install skills bundle."""
     target_dir.mkdir(parents=True, exist_ok=True)
     written_files: list[str] = []
-    selected_sources, warnings = selected_skill_sources_with_fallback(plugin_root, include_matches, exclude_matches)
+    selected_sources, warnings = selected_skill_sources_with_fallback(
+        plugin_root,
+        include_matches,
+        exclude_matches,
+        root_dir=root_dir,
+        workflow_id=workflow_id,
+    )
     for source_file in selected_sources:
         target_file = target_dir / source_file.name
         shutil.copy2(source_file, target_file)
@@ -303,11 +323,19 @@ def install_native_skills_bundle(
     exclude_matches: list[str] | None = None,
     *,
     empty_error: str,
+    root_dir: Path | None = None,
+    workflow_id: str | None = None,
 ) -> tuple[list[str], list[str]]:
     """Install skills bundle in native <skill>/SKILL.md layout."""
     target_dir.mkdir(parents=True, exist_ok=True)
     written_files: list[str] = []
-    selected_sources, warnings = selected_skill_sources_with_fallback(plugin_root, include_matches, exclude_matches)
+    selected_sources, warnings = selected_skill_sources_with_fallback(
+        plugin_root,
+        include_matches,
+        exclude_matches,
+        root_dir=root_dir,
+        workflow_id=workflow_id,
+    )
     for source_file in selected_sources:
         legacy_target = target_dir / source_file.name
         if legacy_target.exists():
@@ -326,6 +354,9 @@ def install_claude_skills_bundle(
     plugin_root: Path,
     include_matches: list[str] | None = None,
     exclude_matches: list[str] | None = None,
+    *,
+    root_dir: Path | None = None,
+    workflow_id: str | None = None,
 ) -> tuple[list[str], list[str]]:
     """Install claude skills bundle."""
     return install_native_skills_bundle(
@@ -334,6 +365,8 @@ def install_claude_skills_bundle(
         include_matches,
         exclude_matches,
         empty_error="No Claude workflow skills were installed.",
+        root_dir=root_dir,
+        workflow_id=workflow_id,
     )
 
 
@@ -342,6 +375,9 @@ def install_opencode_skills_bundle(
     plugin_root: Path,
     include_matches: list[str] | None = None,
     exclude_matches: list[str] | None = None,
+    *,
+    root_dir: Path | None = None,
+    workflow_id: str | None = None,
 ) -> tuple[list[str], list[str]]:
     """Install opencode skills bundle."""
     return install_native_skills_bundle(
@@ -350,6 +386,8 @@ def install_opencode_skills_bundle(
         include_matches,
         exclude_matches,
         empty_error="No OpenCode workflow skills were installed.",
+        root_dir=root_dir,
+        workflow_id=workflow_id,
     )
 
 
@@ -452,13 +490,21 @@ def install_claude_code(
     plugin_root: Path,
     include_matches: list[str] | None = None,
     exclude_matches: list[str] | None = None,
+    workflow_id: str | None = None,
 ) -> dict[str, Any]:
     """Install claude code."""
     config_path = claude_config_file(scope, cwd, home_dir)
     config = read_json_if_exists(config_path, {})
     marker = "agent-guard-bridge"
     skills_dir = claude_skills_install_dir(scope, cwd, home_dir)
-    skill_files, selection_warnings = install_claude_skills_bundle(skills_dir, plugin_root, include_matches, exclude_matches)
+    skill_files, selection_warnings = install_claude_skills_bundle(
+        skills_dir,
+        plugin_root,
+        include_matches,
+        exclude_matches,
+        root_dir=cwd,
+        workflow_id=workflow_id,
+    )
     config["hooks"] = merge_claude_hooks(config.get("hooks", {}), build_claude_hooks(plugin_root, skills_dir), marker)
     write_json(config_path, config)
     return {
@@ -514,6 +560,7 @@ def install_codex(
     plugin_root: Path,
     include_matches: list[str] | None = None,
     exclude_matches: list[str] | None = None,
+    workflow_id: str | None = None,
 ) -> dict[str, Any]:
     """Install codex."""
     hooks_path = codex_hooks_file(scope, cwd, home_dir)
@@ -524,6 +571,8 @@ def install_codex(
         include_matches,
         exclude_matches,
         empty_error="No Codex workflow skills were installed.",
+        root_dir=cwd,
+        workflow_id=workflow_id,
     )
     legacy_skills_dir = shared_skills_install_dir(scope, cwd, home_dir)
     if legacy_skills_dir.exists():
@@ -597,12 +646,20 @@ def install_opencode(
     plugin_root: Path,
     include_matches: list[str] | None = None,
     exclude_matches: list[str] | None = None,
+    workflow_id: str | None = None,
 ) -> dict[str, Any]:
     """Install opencode."""
     plugin_path = opencode_plugin_file(scope, cwd, home_dir)
     plugin_path.parent.mkdir(parents=True, exist_ok=True)
     skills_dir = opencode_skills_install_dir(scope, cwd, home_dir)
-    skill_files, selection_warnings = install_opencode_skills_bundle(skills_dir, plugin_root, include_matches, exclude_matches)
+    skill_files, selection_warnings = install_opencode_skills_bundle(
+        skills_dir,
+        plugin_root,
+        include_matches,
+        exclude_matches,
+        root_dir=cwd,
+        workflow_id=workflow_id,
+    )
     plugin_path.write_text(build_opencode_plugin_source(plugin_root, skills_dir), encoding="utf-8")
     return {
         "runtime": "opencode",
@@ -645,13 +702,14 @@ def install_runtime(
     resolved_home = home_dir or Path(os.path.expanduser("~"))
     include_matches = [str(item) for item in flags.get("match", [])] if isinstance(flags.get("match"), list) else []
     exclude_matches = [str(item) for item in flags.get("exclude-match", [])] if isinstance(flags.get("exclude-match"), list) else []
+    workflow_id = str(flags["workflow"]) if "workflow" in flags else None
     run_wizard_after_install = bool(flags.get("wizard"))
     if runtime == "claude-code":
-        result = install_claude_code(cwd, resolved_home, str(scope), plugin_root, include_matches, exclude_matches)
+        result = install_claude_code(cwd, resolved_home, str(scope), plugin_root, include_matches, exclude_matches, workflow_id)
     elif runtime == "codex":
-        result = install_codex(cwd, resolved_home, str(scope), plugin_root, include_matches, exclude_matches)
+        result = install_codex(cwd, resolved_home, str(scope), plugin_root, include_matches, exclude_matches, workflow_id)
     else:
-        result = install_opencode(cwd, resolved_home, str(scope), plugin_root, include_matches, exclude_matches)
+        result = install_opencode(cwd, resolved_home, str(scope), plugin_root, include_matches, exclude_matches, workflow_id)
 
     if run_wizard_after_install:
         from .wizard import run_wizard

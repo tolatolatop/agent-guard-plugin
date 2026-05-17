@@ -207,7 +207,7 @@ def test_selected_skill_sources_with_workflow_defaults_fall_back_to_full_install
     """Test that empty workflow-driven selection only warns and falls back to full install."""
     monkeypatch.setattr(
         "agent_guard.install.workflow_install_defaults",
-        lambda: {"skill_match": ["definitely-no-such-skill"], "skill_exclude_match": []},
+        lambda root_dir=None, workflow_id=None: {"skill_match": ["definitely-no-such-skill"], "skill_exclude_match": []},
     )
 
     selected, warnings = selected_skill_sources_with_fallback(PLUGIN_ROOT)
@@ -222,9 +222,15 @@ def test_install_runtime_uses_workflow_defaults_when_cli_filters_are_absent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Test that workflow install defaults apply when install is called without explicit filters."""
+    calls: list[tuple[Path | None, str | None]] = []
+
+    def fake_defaults(root_dir: Path | None = None, workflow_id: str | None = None) -> dict[str, list[str]]:
+        calls.append((root_dir, workflow_id))
+        return {"skill_match": ["workflow-core"], "skill_exclude_match": []}
+
     monkeypatch.setattr(
         "agent_guard.install.workflow_install_defaults",
-        lambda: {"skill_match": ["workflow-core"], "skill_exclude_match": []},
+        fake_defaults,
     )
     root, home = make_dirs()
 
@@ -233,6 +239,26 @@ def test_install_runtime_uses_workflow_defaults_when_cli_filters_are_absent(
     assert (root / ".claude" / "skills" / "workflow-core" / "SKILL.md").exists()
     assert not (root / ".claude" / "skills" / "using-workflow" / "SKILL.md").exists()
     assert result["notes"][0] == "Installed Claude Code hooks into a settings JSON file."
+    assert calls == [(root, None)]
+
+
+def test_install_runtime_can_read_defaults_from_explicit_workflow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test that install_runtime forwards --workflow when resolving skill defaults."""
+    calls: list[tuple[Path | None, str | None]] = []
+
+    def fake_defaults(root_dir: Path | None = None, workflow_id: str | None = None) -> dict[str, list[str]]:
+        calls.append((root_dir, workflow_id))
+        return {"skill_match": ["workflow-core"], "skill_exclude_match": []}
+
+    monkeypatch.setattr("agent_guard.install.workflow_install_defaults", fake_defaults)
+    root, home = make_dirs()
+
+    install_runtime(["--runtime", "codex", "--scope", "project", "--workflow", "research"], root, home, PLUGIN_ROOT)
+
+    assert (root / ".codex" / "skills" / "workflow-core" / "SKILL.md").exists()
+    assert calls == [(root, "research")]
 
 
 def test_install_runtime_supports_interactive_prompts() -> None:

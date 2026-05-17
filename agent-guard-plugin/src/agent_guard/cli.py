@@ -117,14 +117,15 @@ COMMAND_HELP: dict[str, str] = {
     "can-finalize": "Usage: agent-guard can-finalize\n\nCheck whether finalization is allowed.",
     "next-step": "Usage: agent-guard next-step\n\nShow the next step derived from state and plan.",
     "install": (
-        "Usage: agent-guard install [--runtime RUNTIME] [--scope SCOPE] [--match REGEX ...] [--exclude-match REGEX ...] [--interactive|-i]\n\n"
+        "Usage: agent-guard install [--runtime RUNTIME] [--scope SCOPE] [--workflow ID] [--match REGEX ...] [--exclude-match REGEX ...] [--interactive|-i]\n\n"
         "Install runtime integrations.\n\n"
         "When --runtime or --scope are omitted, install will prompt only for the missing values.\n\n"
         "Use --wizard to enter the setup wizard immediately after install completes.\n\n"
-        "When --match/--exclude-match are omitted, install defaults may be read from workflows/default.workflow.yaml.\n\n"
+        "When --match/--exclude-match are omitted, install defaults may be read from the bound workflow, the selected --workflow, or workflows/default.workflow.yaml.\n\n"
         "Options:\n"
         "  -r, --runtime RUNTIME   Supported: claude-code, codex, opencode\n"
         "  -s, --scope SCOPE       Supported: project, user\n"
+        "      --workflow ID       Read install skill defaults from the selected workflow.\n"
         "  -i, --interactive      Prompt for runtime, scope, and skill filters.\n"
         "      --wizard            Run the setup wizard after install completes.\n"
         "      --match REGEX       Include only skills whose slug or filename match. Repeatable.\n"
