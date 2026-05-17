@@ -252,7 +252,7 @@ def test_install_runtime_supports_interactive_prompts() -> None:
     assert result["runtime"] == "codex"
     assert result["scope"] == "project"
     assert (root / ".codex" / "hooks.json").exists()
-    assert (root / ".agent-guard" / "skills" / "workflow-core.md").exists()
+    assert (root / ".codex" / "skills" / "workflow-core" / "SKILL.md").exists()
 
 
 def test_install_runtime_prompts_for_missing_runtime_and_scope() -> None:
@@ -382,8 +382,22 @@ def test_install_writes_codex_hooks_json() -> None:
     assert isinstance(hooks["hooks"]["SessionStart"], list)
     assert "pre-dispatch" in json.dumps(hooks)
     assert "AGENT_GUARD_SKILLS_DIR" in json.dumps(hooks)
-    assert (root / ".agent-guard" / "skills" / "workflow-core.md").exists()
+    assert (root / ".codex" / "skills" / "workflow-core" / "SKILL.md").exists()
     assert_dir_empty(home)
+
+
+def test_install_codex_removes_legacy_shared_skill_files() -> None:
+    """Test that install codex removes legacy shared skill files."""
+    root, home = make_dirs()
+    legacy_file = root / ".agent-guard" / "skills" / "using-workflow.md"
+    legacy_file.parent.mkdir(parents=True, exist_ok=True)
+    legacy_file.write_text("legacy\n", encoding="utf-8")
+
+    install_runtime(["--runtime", "codex", "--scope", "project"], root, home, PLUGIN_ROOT)
+
+    assert not legacy_file.exists()
+    assert not (root / ".agent-guard" / "skills").exists()
+    assert (root / ".codex" / "skills" / "using-workflow" / "SKILL.md").exists()
 
 
 def test_install_writes_opencode_loader() -> None:
@@ -438,7 +452,7 @@ def test_uninstall_codex_lists_and_removes_hooks_after_confirmation() -> None:
 
     assert result["cancelled"] is False
     assert not (root / ".codex" / "hooks.json").exists()
-    assert not (root / ".agent-guard" / "skills").exists()
+    assert not (root / ".codex" / "skills").exists()
     rendered = output.getvalue()
     assert "The following changes will be applied" in rendered
     assert ".codex/hooks.json" in rendered

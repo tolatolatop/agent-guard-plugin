@@ -149,6 +149,11 @@ def shared_skills_install_dir(scope: str, cwd: Path, home_dir: Path) -> Path:
     return cwd / ".agent-guard" / "skills" if scope == "project" else home_dir / ".agent-guard" / "skills"
 
 
+def codex_skills_install_dir(scope: str, cwd: Path, home_dir: Path) -> Path:
+    """Codex skills install dir."""
+    return cwd / ".codex" / "skills" if scope == "project" else home_dir / ".codex" / "skills"
+
+
 def claude_skills_install_dir(scope: str, cwd: Path, home_dir: Path) -> Path:
     """Claude skills install dir."""
     return cwd / ".claude" / "skills" if scope == "project" else home_dir / ".claude" / "skills"
@@ -272,7 +277,7 @@ def selected_skill_sources_with_fallback(
     return sorted(source_skills_dir(plugin_root).glob("*.md")), [install_selection_warning(source, resolved_include, resolved_exclude)]
 
 
-def install_skills_bundle(
+def install_flat_skills_bundle(
     target_dir: Path,
     plugin_root: Path,
     include_matches: list[str] | None = None,
@@ -291,13 +296,15 @@ def install_skills_bundle(
     return written_files, warnings
 
 
-def install_claude_skills_bundle(
+def install_native_skills_bundle(
     target_dir: Path,
     plugin_root: Path,
     include_matches: list[str] | None = None,
     exclude_matches: list[str] | None = None,
+    *,
+    empty_error: str,
 ) -> tuple[list[str], list[str]]:
-    """Install claude skills bundle."""
+    """Install skills bundle in native <skill>/SKILL.md layout."""
     target_dir.mkdir(parents=True, exist_ok=True)
     written_files: list[str] = []
     selected_sources, warnings = selected_skill_sources_with_fallback(plugin_root, include_matches, exclude_matches)
@@ -310,8 +317,24 @@ def install_claude_skills_bundle(
         shutil.copy2(source_file, target_file)
         written_files.append(str(target_file))
     if not written_files:
-        raise RuntimeError("No Claude workflow skills were installed.")
+        raise RuntimeError(empty_error)
     return written_files, warnings
+
+
+def install_claude_skills_bundle(
+    target_dir: Path,
+    plugin_root: Path,
+    include_matches: list[str] | None = None,
+    exclude_matches: list[str] | None = None,
+) -> tuple[list[str], list[str]]:
+    """Install claude skills bundle."""
+    return install_native_skills_bundle(
+        target_dir,
+        plugin_root,
+        include_matches,
+        exclude_matches,
+        empty_error="No Claude workflow skills were installed.",
+    )
 
 
 def install_opencode_skills_bundle(
@@ -321,20 +344,13 @@ def install_opencode_skills_bundle(
     exclude_matches: list[str] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Install opencode skills bundle."""
-    target_dir.mkdir(parents=True, exist_ok=True)
-    written_files: list[str] = []
-    selected_sources, warnings = selected_skill_sources_with_fallback(plugin_root, include_matches, exclude_matches)
-    for source_file in selected_sources:
-        legacy_target = target_dir / source_file.name
-        if legacy_target.exists():
-            legacy_target.unlink()
-        target_file = target_dir / skill_slug_from_source(source_file) / "SKILL.md"
-        target_file.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_file, target_file)
-        written_files.append(str(target_file))
-    if not written_files:
-        raise RuntimeError("No OpenCode workflow skills were installed.")
-    return written_files, warnings
+    return install_native_skills_bundle(
+        target_dir,
+        plugin_root,
+        include_matches,
+        exclude_matches,
+        empty_error="No OpenCode workflow skills were installed.",
+    )
 
 
 def uv_bridge_command(plugin_root: Path, action: str, skills_dir: Path) -> str:
@@ -501,8 +517,17 @@ def install_codex(
 ) -> dict[str, Any]:
     """Install codex."""
     hooks_path = codex_hooks_file(scope, cwd, home_dir)
-    skills_dir = shared_skills_install_dir(scope, cwd, home_dir)
-    skill_files, selection_warnings = install_skills_bundle(skills_dir, plugin_root, include_matches, exclude_matches)
+    skills_dir = codex_skills_install_dir(scope, cwd, home_dir)
+    skill_files, selection_warnings = install_native_skills_bundle(
+        skills_dir,
+        plugin_root,
+        include_matches,
+        exclude_matches,
+        empty_error="No Codex workflow skills were installed.",
+    )
+    legacy_skills_dir = shared_skills_install_dir(scope, cwd, home_dir)
+    if legacy_skills_dir.exists():
+        shutil.rmtree(legacy_skills_dir)
     write_json(hooks_path, build_codex_hooks(plugin_root, skills_dir))
     return {
         "runtime": "codex",
@@ -514,7 +539,7 @@ def install_codex(
             "Codex hook compatibility follows Claude-style lifecycle hooks, but tool-hook coverage may vary by version.",
             "Some Codex installations may also require enabling hooks in user config.",
             "Session-start and status flows will auto-start agent-guard-fuse when the runtime binary is installed, so .agent/state.json and .agent/plan.yaml stay mounted under managed protection.",
-            "Workflow skills were copied into a local agent-guard skills directory and injected via AGENT_GUARD_SKILLS_DIR.",
+            "Workflow skills were installed into Codex's native .codex/skills/<skill>/SKILL.md layout and injected via AGENT_GUARD_SKILLS_DIR.",
         ],
     }
 
@@ -828,7 +853,7 @@ def plan_uninstall_runtime(argv: list[str], cwd: Path, home_dir: Path | None) ->
         skills_dir = claude_skills_install_dir(str(scope), cwd, resolved_home)
     elif runtime == "codex":
         plan = plan_uninstall_codex(cwd, resolved_home, str(scope))
-        skills_dir = shared_skills_install_dir(str(scope), cwd, resolved_home)
+        skills_dir = codex_skills_install_dir(str(scope), cwd, resolved_home)
     else:
         plan = plan_uninstall_opencode(cwd, resolved_home, str(scope))
         skills_dir = opencode_skills_install_dir(str(scope), cwd, resolved_home)
@@ -840,6 +865,16 @@ def plan_uninstall_runtime(argv: list[str], cwd: Path, home_dir: Path | None) ->
                 "details": "Delete the installed workflow skill bundle.",
             }
         )
+    if runtime == "codex":
+        legacy_skills_dir = shared_skills_install_dir(str(scope), cwd, resolved_home)
+        if legacy_skills_dir.exists():
+            plan["changes"].append(
+                {
+                    "action": "delete-tree",
+                    "path": str(legacy_skills_dir),
+                    "details": "Delete the legacy agent-guard workflow skill bundle.",
+                }
+            )
     return plan
 
 
