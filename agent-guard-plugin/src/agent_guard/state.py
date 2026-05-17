@@ -6,10 +6,10 @@ import json
 from pathlib import Path
 from typing import Any, Callable
 
+from .artifact_patterns import artifact_pattern_mtime_ns
 from .domain.models import TaskSession
 from .managed_documents import (
     ManagedDocumentKind,
-    managed_document_backing_path,
     managed_document_path,
     sync_managed_document_protection,
     write_managed_document,
@@ -114,14 +114,7 @@ def agent_gitignore_path(root_dir: Path) -> Path:
 
 
 def _artifact_mtime_ns(root_dir: Path, artifact_path: str) -> int | None:
-    candidate = (
-        managed_document_backing_path(root_dir, artifact_path)
-        if artifact_path in {DEFAULT_STATE_RELATIVE, ".agent/plan.yaml"}
-        else root_dir / artifact_path
-    )
-    if not candidate.exists():
-        return None
-    return int(candidate.stat().st_mtime_ns)
+    return artifact_pattern_mtime_ns(root_dir, artifact_path)
 
 
 def record_stage_artifact_snapshot(root_dir: Path, stage: str, workflow_id: str | None = None) -> dict[str, Any]:

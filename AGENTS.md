@@ -208,6 +208,8 @@ Do not reintroduce dynamic write-scope behavior unless explicitly requested.
 
 Stage exit is controlled by `exit`.
 
+Stage entry is controlled by `enter`.
+
 Supported required-artifact forms:
 
 1. Simple path
@@ -226,11 +228,15 @@ exit:
     display: failure-analysis.md must start with the Failure Summary section.
 ```
 
+`path` may point to a single file, a directory, or a glob pattern such as `output/**` or `output/*/review.md`.
+
+For `enter`, path checks use the same file/directory/glob matching model. `enter` may also use `matches` for optional content validation. Pure `display` items in `enter` are prompt-only and do not block transitions by themselves.
+
 Exit behavior:
 
 - if a required artifact is missing: block
 - if it existed before stage entry but was not updated in the stage: block
-- if `matches` is configured and content does not match: block with configured `message`
+- if `matches` is configured and content does not match: block with configured `display`
 
 ## Finalization
 

@@ -1,7 +1,9 @@
 """Workflow transition commands and guard enforcement."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from .artifact_patterns import artifact_pattern_text_candidates, resolve_artifact_pattern
 from .domain.models import TaskSession
 from .domain.policies import StageExitPolicyService
 from .domain.rules import RuleContext, evaluate_rule
@@ -47,12 +49,12 @@ def automatic_transitions() -> list[str]:
         f"reset-task: archives a completed task and starts a new one in {canonical_entry_stage()}",
     ]
 
-def _require_direct_transition(from_stage: str, to_stage: str, workflow_id: str | None = None) -> None:
+def _require_direct_transition(root_dir: Path, from_stage: str, to_stage: str, workflow_id: str | None = None) -> None:
     """Internal helper for require direct transition."""
-    transitions = stage_transitions(workflow_id=workflow_id)
+    transitions = stage_transitions(root_dir, workflow_id)
     if to_stage not in transitions:
         raise RuntimeError(f"Unknown target stage: {to_stage}")
-    completion_stage = canonical_completion_stage(workflow_id=workflow_id)
+    completion_stage = canonical_completion_stage(root_dir, workflow_id)
     if from_stage == completion_stage:
         raise RuntimeError(f"{completion_stage} cannot transition anywhere. Use reset-task or next-task to start a new task.")
     allowed_targets = transitions.get(from_stage, [])
@@ -74,7 +76,7 @@ def _guard_transition(
     """Internal helper for guard transition."""
     from_stage = session.stage
     workflow_id = session.workflow_id
-    _require_direct_transition(from_stage, to_stage, workflow_id)
+    _require_direct_transition(root_dir, from_stage, to_stage, workflow_id)
     artifact_failures = StageExitPolicyService(root_dir).exit_failures(from_stage)
     if artifact_failures:
         raise RuntimeError(f"Leaving {from_stage} requires {'; '.join(artifact_failures)}")
@@ -90,14 +92,24 @@ def _guard_transition(
     for condition in stage_entry_conditions(to_stage, from_stage, root_dir, workflow_id):
         display = condition["display"]
         rule = condition.get("rule")
-        if rule is None:
+        if rule is not None:
+            if not evaluate_rule(rule, context, condition.get("value")):
+                if rule == "can_finalize_passes":
+                    result = can_finalize(root_dir)
+                    reasons = "; ".join(str(reason) for reason in result.get("reasons", []))
+                    raise RuntimeError(f"{display}: {reasons}" if reasons else display)
+                raise RuntimeError(display)
             continue
-        if not evaluate_rule(rule, context, condition.get("value")):
-            if rule == "can_finalize_passes":
-                result = can_finalize(root_dir)
-                reasons = "; ".join(str(reason) for reason in result.get("reasons", []))
-                raise RuntimeError(f"{display}: {reasons}" if reasons else display)
-            raise RuntimeError(display)
+        path = condition.get("path")
+        if path is not None:
+            candidates = resolve_artifact_pattern(root_dir, path)
+            if not candidates:
+                raise RuntimeError(display)
+            matches = condition.get("matches")
+            if matches is not None:
+                file_candidates = artifact_pattern_text_candidates(root_dir, path)
+                if not any(re.search(matches, candidate.read_text(encoding="utf-8"), re.MULTILINE) is not None for candidate in file_candidates):
+                    raise RuntimeError(display)
 
 
 def _append_transition_event(

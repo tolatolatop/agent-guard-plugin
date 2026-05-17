@@ -662,6 +662,163 @@ def test_start_task_rejects_rebinding_active_workflow_without_reset() -> None:
     assert load_state(root_dir)["workflow_id"] == "research"
 
 
+def test_entry_path_pattern_blocks_transition_until_match_exists() -> None:
+    """A target stage enter path may require a matching file, directory, or glob target."""
+    root_dir = make_temp_repo()
+    (root_dir / "workflows").mkdir()
+    (root_dir / "workflows" / "entry-pattern.workflow.yaml").write_text(
+        "version: 2\n"
+        "workflow:\n"
+        "  id: entry-pattern\n"
+        "  title: Entry Pattern Workflow\n"
+        "  entry: PREP\n"
+        "globals:\n"
+        "  protected: []\n"
+        "  sensitive: []\n"
+        "  failures: {}\n"
+        "  finalize:\n"
+        "    require: []\n"
+        "  wizard:\n"
+        "    start_stages:\n"
+        "      - PREP\n"
+        "  session_start:\n"
+        "    navigator_skill: using-workflow\n"
+        "  install:\n"
+        "    skills:\n"
+        "      match: []\n"
+        "      exclude_match: []\n"
+        "stages:\n"
+        "  PREP:\n"
+        "    goal: Prepare outputs.\n"
+        "    plan: deny\n"
+        "    allow:\n"
+        "      write:\n"
+        "        - output/**\n"
+        "      actions: []\n"
+        "      stop: true\n"
+        "      human: true\n"
+        "    deny:\n"
+        "      write: []\n"
+        "      actions: []\n"
+        "    enter: []\n"
+        "    exit: []\n"
+        "    expect: []\n"
+        "    next:\n"
+        "      - REVIEW_READY\n"
+        "  REVIEW_READY:\n"
+        "    goal: Review outputs.\n"
+        "    plan: deny\n"
+        "    allow:\n"
+        "      write: []\n"
+        "      actions: []\n"
+        "      stop: true\n"
+        "      human: true\n"
+        "    deny:\n"
+        "      write: []\n"
+        "      actions: []\n"
+        "    enter:\n"
+        "      - path: output/*/review.md\n"
+        "        display: nested review artifact must exist\n"
+        "    exit: []\n"
+        "    expect: []\n"
+        "    next: []\n",
+        encoding="utf-8",
+    )
+    invoke_cli(root_dir, ["start-task", "password-reset", "--workflow", "entry-pattern"])
+
+    code, payload = invoke_cli(root_dir, ["advance-stage", "--to", "REVIEW_READY"])
+    assert code == 1
+    assert payload["error"] == "nested review artifact must exist"
+
+    review_file = root_dir / "output" / "run-1" / "review.md"
+    review_file.parent.mkdir(parents=True, exist_ok=True)
+    review_file.write_text("# Review\n", encoding="utf-8")
+
+    code, payload = invoke_cli(root_dir, ["advance-stage", "--to", "REVIEW_READY"])
+    assert code == 0
+    assert payload["state"]["stage"] == "REVIEW_READY"
+
+
+def test_entry_path_matches_blocks_transition_until_content_matches() -> None:
+    """A target stage enter path may also enforce optional content matching."""
+    root_dir = make_temp_repo()
+    (root_dir / "workflows").mkdir()
+    (root_dir / "workflows" / "entry-matches.workflow.yaml").write_text(
+        "version: 2\n"
+        "workflow:\n"
+        "  id: entry-matches\n"
+        "  title: Entry Matches Workflow\n"
+        "  entry: PREP\n"
+        "globals:\n"
+        "  protected: []\n"
+        "  sensitive: []\n"
+        "  failures: {}\n"
+        "  finalize:\n"
+        "    require: []\n"
+        "  wizard:\n"
+        "    start_stages:\n"
+        "      - PREP\n"
+        "  session_start:\n"
+        "    navigator_skill: using-workflow\n"
+        "  install:\n"
+        "    skills:\n"
+        "      match: []\n"
+        "      exclude_match: []\n"
+        "stages:\n"
+        "  PREP:\n"
+        "    goal: Prepare outputs.\n"
+        "    plan: deny\n"
+        "    allow:\n"
+        "      write:\n"
+        "        - output/**\n"
+        "      actions: []\n"
+        "      stop: true\n"
+        "      human: true\n"
+        "    deny:\n"
+        "      write: []\n"
+        "      actions: []\n"
+        "    enter: []\n"
+        "    exit: []\n"
+        "    expect: []\n"
+        "    next:\n"
+        "      - VERIFIED_INPUT\n"
+        "  VERIFIED_INPUT:\n"
+        "    goal: Use validated artifact.\n"
+        "    plan: deny\n"
+        "    allow:\n"
+        "      write: []\n"
+        "      actions: []\n"
+        "      stop: true\n"
+        "      human: true\n"
+        "    deny:\n"
+        "      write: []\n"
+        "      actions: []\n"
+        "    enter:\n"
+        "      - path: output/**\n"
+        "        matches: '^# Ready'\n"
+        "        display: 'validated output must start with # Ready'\n"
+        "      - display: reminder only\n"
+        "    exit: []\n"
+        "    expect: []\n"
+        "    next: []\n",
+        encoding="utf-8",
+    )
+    invoke_cli(root_dir, ["start-task", "password-reset", "--workflow", "entry-matches"])
+
+    artifact = root_dir / "output" / "result.md"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text("wrong header\n", encoding="utf-8")
+
+    code, payload = invoke_cli(root_dir, ["advance-stage", "--to", "VERIFIED_INPUT"])
+    assert code == 1
+    assert payload["error"] == "validated output must start with # Ready"
+
+    artifact.write_text("# Ready\nok\n", encoding="utf-8")
+    code, payload = invoke_cli(root_dir, ["advance-stage", "--to", "VERIFIED_INPUT"])
+    assert code == 0
+    assert payload["state"]["stage"] == "VERIFIED_INPUT"
+
+
 def test_failure_analysis_artifact_must_be_updated_in_current_stage() -> None:
     """Test that a stale failure-analysis artifact must be refreshed after entering analysis stage."""
     root_dir = make_temp_repo()

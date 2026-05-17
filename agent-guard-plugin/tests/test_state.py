@@ -20,6 +20,42 @@ from agent_guard.state import (
 from .helpers import make_temp_repo
 
 
+def write_repo_workflow(root_dir, workflow_id: str, stages_yaml: str) -> None:
+    workflows_dir = root_dir / "workflows"
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+    (workflows_dir / f"{workflow_id}.workflow.yaml").write_text(
+        "version: 2\n"
+        "workflow:\n"
+        f"  id: {workflow_id}\n"
+        "  title: Pattern Workflow\n"
+        "  description: Pattern workflow for tests.\n"
+        "  entry: IDLE\n"
+        "globals:\n"
+        "  protected:\n"
+        "    - .agent/state.json\n"
+        "stages:\n"
+        "  IDLE:\n"
+        "    goal: Idle\n"
+        "    plan: deny\n"
+        "    allow:\n"
+        "      write:\n"
+        "        - .agent/**\n"
+        "      actions:\n"
+        "        - inspect state\n"
+        "      stop: true\n"
+        "      human: true\n"
+        "    deny:\n"
+        "      write: []\n"
+        "      actions: []\n"
+        "    enter: []\n"
+        "    exit: []\n"
+        "    expect: []\n"
+        "    next: []\n"
+        f"{stages_yaml}",
+        encoding="utf-8",
+    )
+
+
 def test_state_defaults_to_idle_when_agent_dir_is_missing() -> None:
     """Test that state defaults to idle when agent dir is missing."""
     root_dir = make_temp_repo()
@@ -219,3 +255,123 @@ def test_stage_exit_policy_service_reports_missing_stale_and_mismatched_artifact
     os.utime(analysis_artifact, ns=(fresh_mtime, fresh_mtime))
     failures = service.exit_failures("NEEDS_FAILURE_ANALYSIS")
     assert any("Failure Summary" in failure for failure in failures)
+
+
+def test_stage_exit_policy_supports_directory_artifact_patterns() -> None:
+    """A directory artifact should pass when any descendant updates after stage entry."""
+    root_dir = make_temp_repo()
+    write_repo_workflow(
+        root_dir,
+        "patterns",
+        "  DIR_OUTPUT:\n"
+        "    goal: Require output directory updates.\n"
+        "    plan: deny\n"
+        "    allow:\n"
+        "      write:\n"
+        "        - output/**\n"
+        "      actions:\n"
+        "        - write outputs\n"
+        "      stop: true\n"
+        "      human: true\n"
+        "    deny:\n"
+        "      write: []\n"
+        "      actions: []\n"
+        "    enter: []\n"
+        "    exit:\n"
+        "      - output\n"
+        "    expect: []\n"
+        "    next: []\n",
+    )
+    service = StageExitPolicyService(root_dir)
+    output_file = root_dir / "output" / "review.md"
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    output_file.write_text("before\n", encoding="utf-8")
+
+    save_state(root_dir, {**DEFAULT_STATE, "task_id": "password-reset", "workflow_id": "patterns", "stage": "DIR_OUTPUT"})
+    failures = service.exit_failures("DIR_OUTPUT")
+    assert any("output must be updated after entering DIR_OUTPUT" in failure for failure in failures)
+
+    output_file.write_text("after\n", encoding="utf-8")
+    fresh_mtime = output_file.stat().st_mtime_ns + 1_000_000
+    os.utime(output_file, ns=(fresh_mtime, fresh_mtime))
+    assert service.exit_failures("DIR_OUTPUT") == []
+
+
+def test_stage_exit_policy_supports_recursive_glob_artifact_patterns() -> None:
+    """A recursive glob artifact should pass when one matching descendant is created in-stage."""
+    root_dir = make_temp_repo()
+    write_repo_workflow(
+        root_dir,
+        "patterns",
+        "  GLOB_OUTPUT:\n"
+        "    goal: Require recursive output artifacts.\n"
+        "    plan: deny\n"
+        "    allow:\n"
+        "      write:\n"
+        "        - output/**\n"
+        "      actions:\n"
+        "        - write outputs\n"
+        "      stop: true\n"
+        "      human: true\n"
+        "    deny:\n"
+        "      write: []\n"
+        "      actions: []\n"
+        "    enter: []\n"
+        "    exit:\n"
+        "      - output/**\n"
+        "    expect: []\n"
+        "    next: []\n",
+    )
+    service = StageExitPolicyService(root_dir)
+
+    save_state(root_dir, {**DEFAULT_STATE, "task_id": "password-reset", "workflow_id": "patterns", "stage": "GLOB_OUTPUT"})
+    nested_output = root_dir / "output" / "nested" / "result.log"
+    nested_output.parent.mkdir(parents=True, exist_ok=True)
+    nested_output.write_text("ok\n", encoding="utf-8")
+
+    assert service.exit_failures("GLOB_OUTPUT") == []
+
+
+def test_stage_exit_policy_supports_nested_glob_regex_artifact_patterns() -> None:
+    """A nested glob artifact with content validation should match any matching file."""
+    root_dir = make_temp_repo()
+    write_repo_workflow(
+        root_dir,
+        "patterns",
+        "  NESTED_REVIEW:\n"
+        "    goal: Require nested review artifact.\n"
+        "    plan: deny\n"
+        "    allow:\n"
+        "      write:\n"
+        "        - output/**\n"
+        "      actions:\n"
+        "        - write outputs\n"
+        "      stop: true\n"
+        "      human: true\n"
+        "    deny:\n"
+        "      write: []\n"
+        "      actions: []\n"
+        "    enter: []\n"
+        "    exit:\n"
+        "      - path: output/*/review.md\n"
+        "        matches: '^# Review'\n"
+        "        display: 'review artifact must start with # Review.'\n"
+        "    expect: []\n"
+        "    next: []\n",
+    )
+    service = StageExitPolicyService(root_dir)
+
+    save_state(root_dir, {**DEFAULT_STATE, "task_id": "password-reset", "workflow_id": "patterns", "stage": "NESTED_REVIEW"})
+    review_file = root_dir / "output" / "run-1" / "review.md"
+    review_file.parent.mkdir(parents=True, exist_ok=True)
+    review_file.write_text("wrong header\n", encoding="utf-8")
+    bad_mtime = review_file.stat().st_mtime_ns + 1_000_000
+    os.utime(review_file, ns=(bad_mtime, bad_mtime))
+
+    failures = service.exit_failures("NESTED_REVIEW")
+    assert failures == ["review artifact must start with # Review."]
+
+    review_file.write_text("# Review\nok\n", encoding="utf-8")
+    good_mtime = review_file.stat().st_mtime_ns + 1_000_000
+    os.utime(review_file, ns=(good_mtime, good_mtime))
+    assert service.exit_failures("NESTED_REVIEW") == []

@@ -7,13 +7,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ..artifact_patterns import artifact_pattern_mtime_ns, artifact_pattern_text_candidates
 from .models import FailureRecord, GuardDecision, TaskSession, VerificationRecord
 from .rules import RuleContext, evaluate_rule
 from ..managed_documents import (
     ManagedDocumentKind,
     ManagedDocumentOperation,
     ManagedDocumentPolicyService,
-    managed_document_backing_path,
     managed_document_kind_for_path,
 )
 from ..events import append_event
@@ -203,14 +203,7 @@ class StageExitPolicyService:
         self.state_repo = StateRepository(root_dir)
 
     def _artifact_mtime_ns(self, artifact_path: str) -> int | None:
-        candidate = (
-            managed_document_backing_path(self.root_dir, artifact_path)
-            if managed_document_kind_for_path(artifact_path) is not None
-            else self.root_dir / artifact_path
-        )
-        if not candidate.exists():
-            return None
-        return int(candidate.stat().st_mtime_ns)
+        return artifact_pattern_mtime_ns(self.root_dir, artifact_path)
 
     def exit_failures(self, stage: str) -> list[str]:
         """Return required-artifact exit failures for one stage."""
@@ -241,8 +234,11 @@ class StageExitPolicyService:
                 continue
             matches = rule.get("matches")
             if matches:
-                contents = (self.root_dir / artifact_path).read_text(encoding="utf-8")
-                if re.search(matches, contents, re.MULTILINE) is None:
+                content_candidates = artifact_pattern_text_candidates(self.root_dir, artifact_path)
+                if not any(
+                    re.search(matches, candidate.read_text(encoding="utf-8"), re.MULTILINE) is not None
+                    for candidate in content_candidates
+                ):
                     failures.append(rule.get("display") or rule.get("message") or f"{artifact_path} does not match the required format.")
         return failures
 

@@ -368,9 +368,16 @@ def _normalize_entry_condition_from_canonical(stage_name: str, value: Any) -> di
     """Normalize one canonical enter-condition item into the flat internal form."""
     item = _normalize_canonical_check_item(value, f".workflow.yaml canonical stage {stage_name} enter")
     if isinstance(item, str):
-        return {"display": item}
+        return {"path": item, "display": f"{item} must exist"}
     if "path" in item:
-        return {"display": f"{item['path']} must exist"}
+        normalized = {
+            "path": str(item["path"]),
+            "display": str(item.get("display") or f"{item['path']} must exist"),
+        }
+        mapped_matches = item.get("matches")
+        if mapped_matches is not None:
+            normalized["matches"] = str(mapped_matches)
+        return normalized
     if "rule" in item:
         normalized = {"display": str(item.get("display") or item["rule"]), "rule": item["rule"]}
         mapped_value = item.get("value")
@@ -1117,16 +1124,31 @@ def _normalize_entry_condition(
     """Internal helper for normalize entry condition."""
     if not isinstance(item, dict):
         raise RuntimeError(f".workflow.yaml stage {stage} {label} condition must be a mapping.")
+    normalized: dict[str, str] = {}
+    path = item.get("path")
+    if path is not None:
+        if not isinstance(path, str) or not path.strip():
+            raise RuntimeError(f".workflow.yaml stage {stage} {label} condition path must be a non-empty string.")
+        normalized["path"] = path
     display = item.get("display")
+    if display is None and path is not None:
+        display = f"{path} must exist"
     if not isinstance(display, str) or not display.strip():
         raise RuntimeError(f".workflow.yaml stage {stage} {label} condition display must be a non-empty string.")
-    normalized = {"display": _render_condition_text(display, root_dir, workflow_id)}
+    normalized["display"] = _render_condition_text(display, root_dir, workflow_id)
     rule = item.get("rule")
     if rule is not None:
         normalized["rule"] = str(rule)
     value = item.get("value")
     if value is not None:
         normalized["value"] = str(value)
+    matches = item.get("matches")
+    if matches is not None:
+        if path is None:
+            raise RuntimeError(f".workflow.yaml stage {stage} {label} condition matches requires path.")
+        if not isinstance(matches, str) or not matches:
+            raise RuntimeError(f".workflow.yaml stage {stage} {label} condition matches must be a non-empty string.")
+        normalized["matches"] = matches
     return normalized
 
 

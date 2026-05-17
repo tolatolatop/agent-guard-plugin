@@ -27,6 +27,7 @@ from agent_guard.workflow_spec import (
     stage_policy_roles,
     stage_display_artifacts,
     stage_entry_conditions,
+    stage_entry_conditions_from_spec,
     stage_exit_conditions,
     stage_forbid_needs_human_display,
     transition_graph_mermaid,
@@ -104,6 +105,57 @@ def test_red_test_exit_conditions_include_pytest_command_requirement() -> None:
 def test_green_impl_entry_conditions_are_empty() -> None:
     """Test that green impl entry conditions are empty."""
     assert stage_entry_conditions("GREEN_IMPL", "RED_TEST") == []
+
+
+def test_stage_entry_conditions_preserve_path_based_checks() -> None:
+    """Path-based enter checks should stay machine-readable after normalization."""
+    spec = normalize_workflow_spec(
+        {
+            "version": 2,
+            "workflow": {"id": "entry-checks", "title": "Entry Checks", "entry": "PREP"},
+            "globals": {
+                "protected": [],
+                "sensitive": [],
+                "failures": {},
+                "finalize": {"require": []},
+                "wizard": {"start_stages": ["PREP"]},
+                "session_start": {"navigator_skill": "using-workflow"},
+                "install": {"skills": {"match": [], "exclude_match": []}},
+            },
+            "stages": {
+                "PREP": {
+                    "goal": "prepare",
+                    "plan": "deny",
+                    "allow": {"write": [], "actions": [], "stop": True, "human": True},
+                    "deny": {"write": [], "actions": []},
+                    "enter": [],
+                    "exit": [],
+                    "expect": [],
+                    "next": ["READY"],
+                },
+                "READY": {
+                    "goal": "ready",
+                    "plan": "deny",
+                    "allow": {"write": [], "actions": [], "stop": True, "human": True},
+                    "deny": {"write": [], "actions": []},
+                    "enter": [
+                        "output/**",
+                        {"path": "output/*/review.md", "matches": "^# Review", "display": "review must start with # Review"},
+                        {"display": "reminder only"},
+                    ],
+                    "exit": [],
+                    "expect": [],
+                    "next": [],
+                },
+            },
+        }
+    )
+
+    assert stage_entry_conditions_from_spec(spec, "READY") == [
+        {"path": "output/**", "display": "output/** must exist"},
+        {"path": "output/*/review.md", "matches": "^# Review", "display": "review must start with # Review"},
+        {"display": "reminder only"},
+    ]
 
 
 def test_planning_exit_conditions_include_required_plan_artifact() -> None:
@@ -473,15 +525,21 @@ def test_invalid_command_rule_regex_fails_workflow_validation() -> None:
         raise AssertionError("Expected invalid command regex to fail validation")
 
 
-def test_grouped_workflow_example_file_normalizes_and_validates() -> None:
-    """Test that the checked-in grouped workflow example stays parseable."""
-    example_path = Path(__file__).resolve().parents[1] / "docs" / "grouped-workflow.example.yaml"
+def test_workflow_example_file_normalizes_and_validates() -> None:
+    """Test that the checked-in workflow example stays parseable."""
+    example_path = Path(__file__).resolve().parents[1] / "docs" / "workflow.example.yaml"
     payload = yaml.safe_load(example_path.read_text(encoding="utf-8"))
     normalized = normalize_workflow_spec(payload)
 
-    assert normalized["metadata"]["id"] == "standard-ddd-example"
+    assert normalized["metadata"]["id"] == "standard-example"
     assert normalized["stages"]["REVIEW"]["artifacts_required"] == [{"path": ".agent/artifacts/review.md"}]
-    assert normalized["stages"]["READY_TO_SUMMARIZE"]["allowed_next_stages"] == ["DONE"]
+    assert normalized["stages"]["NEEDS_FAILURE_ANALYSIS"]["artifacts_required"] == [
+        {
+            "path": ".agent/artifacts/failure-analysis.md",
+            "matches": "^## Failure Summary",
+            "display": "failure-analysis.md must start with the Failure Summary section.",
+        }
+    ]
 
 
 def test_canonical_workflow_projects_legacy_grouped_dsl() -> None:

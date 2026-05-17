@@ -353,6 +353,22 @@ Stage-entry gates. Each item may be:
 
 Rule checks may also carry `value` when the built-in rule requires one.
 
+Path-based enter checks support:
+
+- one exact file
+- one directory
+- one glob pattern such as `output/**` or `output/*/review.md`
+
+Path objects may also carry optional content validation:
+
+```yaml
+- path: output/** 
+  matches: '^# Ready'
+  display: validated output must start with # Ready
+```
+
+If an item only contains `display`, it is treated as prompt text rather than a blocking machine check.
+
 ### `exit`
 
 Type: list
@@ -378,6 +394,7 @@ Hard stage-exit gates. Each item may be:
 
 Behavior:
 
+- `path` may refer to one file, one directory, or a glob pattern such as `output/**` or `output/*/review.md`
 - if a required artifact is missing, exit is blocked
 - if it existed before stage entry but was not updated during the stage, exit is blocked
 - if `matches` is configured and content does not match, exit is blocked with the configured `display`
