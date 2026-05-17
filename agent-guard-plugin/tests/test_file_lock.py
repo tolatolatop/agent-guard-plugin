@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from agent_guard.atomic_io import atomic_write_text
 from agent_guard.infrastructure.repositories import PlanRepository, StateRepository
 from agent_guard.state import DEFAULT_STATE, current_managed_state_dir, load_state, save_state
 from agent_guard_file_lock import (
@@ -298,6 +299,63 @@ def test_save_locks_persists_expected_wire_shape(
                 "managed": "/managed/repo",
                 "token": "token-a",
                 "files": ["plan.yaml"],
+            }
+        },
+    }
+
+
+def test_atomic_write_text_preserves_original_content_on_replace_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "state.json"
+    target.write_text('{"task_id":"safe"}\n', encoding="utf-8")
+
+    def fail_replace(src: str, dst: str) -> None:
+        raise OSError("boom")
+
+    monkeypatch.setattr("agent_guard.atomic_io.os.replace", fail_replace)
+
+    with pytest.raises(OSError):
+        atomic_write_text(target, '{"task_id":"new"}\n')
+
+    assert target.read_text(encoding="utf-8") == '{"task_id":"safe"}\n'
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["state.json"]
+
+
+def test_save_locks_preserves_original_content_on_atomic_replace_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock_path = tmp_path / "lock.json"
+    lock_path.write_text('{"version":3,"roots":{"/repo":{"managed":"/managed/repo","token":"safe","files":[]}}}\n', encoding="utf-8")
+    monkeypatch.setattr("agent_guard_file_lock.core.LOCK_FILE", lock_path)
+    monkeypatch.setattr("agent_guard_file_lock.core.LOCK_ROOT", tmp_path)
+
+    def fail_replace(src: str, dst: str) -> None:
+        raise OSError("boom")
+
+    monkeypatch.setattr("agent_guard.atomic_io.os.replace", fail_replace)
+
+    with pytest.raises(OSError):
+        save_locks(
+            {
+                "version": 3,
+                "roots": {
+                    "/repo": {
+                        "managed": "/managed/repo",
+                        "token": "new-token",
+                        "files": ["state.json"],
+                    }
+                },
+            }
+        )
+
+    assert json.loads(lock_path.read_text(encoding="utf-8")) == {
+        "version": 3,
+        "roots": {
+            "/repo": {
+                "managed": "/managed/repo",
+                "token": "safe",
+                "files": [],
             }
         },
     }

@@ -10,6 +10,8 @@ import secrets
 import shutil
 from typing import Any, Iterator
 
+from agent_guard.atomic_io import atomic_write_text
+
 LOCK_ROOT = Path.home() / ".agent-guard-fuse"
 LOCK_FILE = LOCK_ROOT / "lock.json"
 AGENT_DIR = ".agent"
@@ -88,7 +90,7 @@ def load_locks() -> dict[str, Any]:
 def save_locks(payload: dict[str, Any]) -> None:
     """Persist the global lock file."""
     LOCK_ROOT.mkdir(parents=True, exist_ok=True)
-    LOCK_FILE.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    atomic_write_text(LOCK_FILE, json.dumps(payload, indent=2) + "\n")
 
 
 def _managed_root_for(root_dir: str | Path) -> str:
@@ -242,7 +244,7 @@ def write(file_path: str, data: str | bytes, token: str) -> bool:
         if isinstance(data, bytes):
             target.write_bytes(data)
         else:
-            target.write_text(data, encoding="utf-8")
+            atomic_write_text(target, data)
     return True
 
 

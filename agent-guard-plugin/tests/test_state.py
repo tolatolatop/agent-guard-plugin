@@ -1,6 +1,8 @@
 """Tests for test state."""
 import os
 
+import pytest
+
 from agent_guard.domain.policies import StageExitPolicyService
 from agent_guard.jobs import load_jobs
 from agent_guard.state import (
@@ -130,6 +132,28 @@ def test_state_saves_and_reloads_updates() -> None:
     assert loaded["current_step"] == "red-001"
     assert loaded["state_id"] == saved["state_id"]
     assert managed_state_dir(saved["state_id"]).is_dir()
+
+
+def test_save_state_preserves_existing_state_when_atomic_replace_fails(
+    monkeypatch,
+) -> None:
+    """A failed atomic replace must leave the previous state.json intact."""
+    root_dir = make_temp_repo()
+    save_state(root_dir, {**DEFAULT_STATE, "task_id": "password-reset", "stage": "CLARIFYING"})
+
+    original_atomic_write = __import__("agent_guard.managed_documents", fromlist=["atomic_write_text"]).atomic_write_text
+
+    def fail_state_write(target, content, *, encoding="utf-8"):
+        if target.name == "state.json":
+            raise OSError("boom")
+        return original_atomic_write(target, content, encoding=encoding)
+
+    monkeypatch.setattr("agent_guard.managed_documents.atomic_write_text", fail_state_write)
+
+    with pytest.raises(OSError):
+        save_state(root_dir, {**DEFAULT_STATE, "task_id": "password-reset", "stage": "VERIFY"})
+
+    assert load_state(root_dir)["stage"] == "CLARIFYING"
 
 
 def test_state_loads_structured_task_session() -> None:

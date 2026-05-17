@@ -19,6 +19,7 @@ from agent_guard_file_lock import (
     write as lock_write,
 )
 
+from .atomic_io import atomic_write_text
 from .domain.models import TaskSession
 
 
@@ -191,10 +192,10 @@ def write_managed_document(
             release_token(root_dir, token)
         return public_target
 
-    managed_target.write_text(content, encoding="utf-8")
+    atomic_write_text(managed_target, content)
     public_target = public_file_path(root_dir, relative_path)
     public_target.parent.mkdir(parents=True, exist_ok=True)
-    public_target.write_text(content, encoding="utf-8")
+    atomic_write_text(public_target, content)
     return managed_target
 
 

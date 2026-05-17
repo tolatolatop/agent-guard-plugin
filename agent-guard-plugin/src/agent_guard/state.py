@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Callable
 
+from .atomic_io import atomic_write_text
 from .artifact_patterns import artifact_pattern_mtime_ns
 from .domain.models import TaskSession
 from .managed_documents import (
@@ -165,7 +166,7 @@ def ensure_stage_artifact_snapshot(root_dir: Path, stage: str, workflow_id: str 
 def _write_json_if_missing(file_path: Path, value: dict[str, Any]) -> None:
     """Internal helper for write json if missing."""
     if not file_path.exists():
-        file_path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+        atomic_write_text(file_path, json.dumps(value, indent=2) + "\n")
 
 
 def ensure_managed_state_dir(state_id: str | None, root_dir: Path | None = None) -> Path | None:
@@ -231,7 +232,7 @@ def _write_text(root_dir: Path, relative_path: str, content: str) -> Path:
         )
     target = root_dir / relative_path
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
+    atomic_write_text(target, content)
     return target
 
 
