@@ -259,7 +259,7 @@ stages:
     exit:
       - path: .agent/artifacts/failure-analysis.md
         matches: "^## Failure Summary"
-        message: failure-analysis.md must start with the Failure Summary section.
+        display: failure-analysis.md must start with the Failure Summary section.
     expect: []
     next:
       - DRAFT

@@ -243,7 +243,7 @@ class StageExitPolicyService:
             if matches:
                 contents = (self.root_dir / artifact_path).read_text(encoding="utf-8")
                 if re.search(matches, contents, re.MULTILINE) is None:
-                    failures.append(rule.get("message") or f"{artifact_path} does not match the required format.")
+                    failures.append(rule.get("display") or rule.get("message") or f"{artifact_path} does not match the required format.")
         return failures
 
 

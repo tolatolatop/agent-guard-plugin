@@ -203,11 +203,17 @@ def _normalize_required_artifact_entry(value: Any, label: str) -> dict[str, str]
         if not isinstance(matches, str) or not matches:
             raise RuntimeError(f"{label} item matches must be a non-empty string.")
         normalized["matches"] = matches
+    display = value.get("display")
+    if display is not None:
+        if not isinstance(display, str) or not display.strip():
+            raise RuntimeError(f"{label} item display must be a non-empty string.")
+        normalized["display"] = display
     message = value.get("message")
     if message is not None:
         if not isinstance(message, str) or not message.strip():
             raise RuntimeError(f"{label} item message must be a non-empty string.")
-        normalized["message"] = message
+        if "display" not in normalized:
+            normalized["display"] = message
     return normalized
 
 

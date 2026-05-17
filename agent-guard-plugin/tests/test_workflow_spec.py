@@ -160,7 +160,44 @@ def test_stage_required_artifact_rules_support_optional_regex_validation() -> No
         {
             "path": ".agent/artifacts/failure-analysis.md",
             "matches": "^## Failure Summary",
-            "message": "failure-analysis.md must start with the Failure Summary section.",
+            "display": "failure-analysis.md must start with the Failure Summary section.",
+        }
+    ]
+
+
+def test_required_artifact_message_is_accepted_as_legacy_display_alias() -> None:
+    """Test that legacy artifact message aliases normalize into display."""
+    spec = {
+        "version": 2,
+        "workflow": {"id": "legacy-message", "title": "Legacy Message", "entry": "REVIEW"},
+        "globals": {"protected": [], "sensitive": [], "failures": {}, "finalize": {"require": []}, "session_start": {}},
+        "stages": {
+            "REVIEW": {
+                "goal": "review",
+                "plan": "advance",
+                "allow": {"write": [], "actions": [], "stop": False, "human": False},
+                "deny": {"write": [], "actions": []},
+                "enter": [],
+                "exit": [
+                    {
+                        "path": ".agent/artifacts/review.md",
+                        "matches": "^# Review",
+                        "message": "review.md must start with a heading.",
+                    }
+                ],
+                "expect": [],
+                "next": [],
+            }
+        },
+    }
+
+    normalized = normalize_workflow_spec(spec)
+
+    assert normalized["stages"]["REVIEW"]["artifacts_required"] == [
+        {
+            "path": ".agent/artifacts/review.md",
+            "matches": "^# Review",
+            "display": "review.md must start with a heading.",
         }
     ]
 
@@ -467,7 +504,7 @@ def test_canonical_workflow_projects_legacy_grouped_dsl() -> None:
         {
             "path": ".agent/artifacts/failure-analysis.md",
             "matches": "^## Failure Summary",
-            "message": "failure-analysis.md must start with the Failure Summary section.",
+            "display": "failure-analysis.md must start with the Failure Summary section.",
         }
     ]
 
