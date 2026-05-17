@@ -1,5 +1,9 @@
 # DDD Design: File Write Policy In The Stage DSL
 
+This document is a design note about write-policy semantics, not the formal workflow file schema.
+
+For the supported authoring format, see [workflow-schema.md](./workflow-schema.md).
+
 ## Goal
 
 Refine file write control so it fits the latest DDD workflow DSL:

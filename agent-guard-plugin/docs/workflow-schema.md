@@ -1,64 +1,41 @@
 # Workflow Schema
 
-This document defines the workflow authoring schema that `agent-guard` should treat as the supported user-facing `.workflow.yaml` format.
+This document defines the supported user-facing `workflow.yaml` authoring format for `agent-guard`.
 
-It deliberately separates:
+Workflow authors should write workflow files in the grouped DSL used by the current Python implementation.
 
-- the author-facing workflow DSL
-- internal normalized runtime structures
-- compatibility layers for older workflow files
+## Where To Put A Workflow File
 
-The goal is to make workflow authoring stable and unambiguous.
-
-## Scope
-
-This document describes the schema that workflow authors should write in:
+Repository-local workflows:
 
 - `workflows/default.workflow.yaml`
 - `workflows/<workflow_id>.workflow.yaml`
-- repository-local workflow overrides
-- user-level workflow overrides
 
-It does not describe internal normalized structures such as:
+User-level overrides:
 
-- `entry_conditions`
-- `exit_conditions`
-- `write_policy`
-- `artifacts_required`
-- `path_policy`
-- `finalization_policy`
+- `~/.config/agent-guard/workflow/default.workflow.yaml`
+- `~/.config/agent-guard/workflow/<workflow_id>.workflow.yaml`
 
-Those are runtime projection structures, not the public authoring format.
+When a workflow id is requested, `agent-guard` checks user-level overrides first, then repository-local files, then bundled defaults.
 
-## Status
+## Supported File Shape
 
-The supported public schema is the stage-centered v2 DSL.
-
-Compatibility support may still exist in code for older grouped or normalized workflow documents, but those formats are not the intended long-term authoring interface and should not be documented as first-class workflow authoring options.
-
-## File Shape
-
-The supported workflow file shape is:
+The supported public schema is:
 
 ```yaml
-version: 2
-
 workflow:
-  id: default
-  title: Default Workflow
+  id: standard
+  title: Standard Workflow
   description: Reference workflow for agent-guard.
   entry: CLARIFYING
 
-global_gates:
-  - Do not modify .agent/state.json directly.
-
 globals:
-  protected:
-    - .agent/state.json
-
-  sensitive:
-    - .github/**
-    - Cargo.lock
+  paths:
+    protected:
+      - .agent/state.json
+    sensitive:
+      - .github/**
+      - Cargo.lock
 
   failures:
     repeat_threshold: 2
@@ -66,10 +43,10 @@ globals:
       - src
       - tests
 
-  finalize:
+  finalization:
     require:
-      - rule: no_running_jobs
-      - rule: can_finalize_flag
+      - no_running_jobs
+      - can_finalize_flag
     messages:
       no_running_jobs: running jobs still exist
       can_finalize_flag: state.can_finalize is not true
@@ -89,103 +66,108 @@ globals:
 
 stages:
   CLARIFYING:
-    goal: Resolve task intent before implementation.
-    plan: deny
-    allow:
+    intent:
+      goal: Resolve task intent before implementation.
+
+    permissions:
       write:
-        - .agent/**
+        allow:
+          - .agent/**
+        deny: []
       actions:
-        - clarify requirements
-      stop: true
-      human: true
-    deny:
-      write: []
-      actions:
-        - implement before requirements are clear
-    enter: []
-    exit: []
-    expect: []
-    next:
-      - PLANNING
+        allow:
+          - clarify requirements
+        deny:
+          - implement before requirements are clear
+      commands:
+        complete_step: deny
+      handoff:
+        human_stop: allow
+
+    transitions:
+      to:
+        - DESIGNING
+        - PLANNING
+      enter_when: []
+
+    evidence:
+      expected: []
+      required: []
 ```
 
 ## Top-Level Fields
 
-### `version`
-
-- Type: integer
-- Supported public value: `2`
-
-This identifies the author-facing schema generation.
-
 ### `workflow`
 
-- Type: mapping
-- Required fields:
-  - `id`: string
-  - `title`: string
-  - `description`: string
-  - `entry`: stage name
+Type: mapping
 
-This is workflow metadata plus the default workflow entry stage.
+Supported fields:
 
-### `global_gates`
+- `id`
+- `title`
+- `description`
+- `entry`
 
-- Type: list of strings
-
-These are human-readable global discipline rules shown to the agent/operator. They are guidance text, not independently executable rule definitions.
+`entry` must name one of the stages defined under `stages`.
 
 ### `globals`
 
-- Type: mapping
+Type: mapping
+
+Supported sections:
+
+- `paths`
+- `failures`
+- `finalization`
+- `wizard`
+- `session_start`
+- `install`
+
+### `stages`
+
+Type: mapping
+
+Each key is a stage name. Each stage supports:
+
+- `intent`
+- `permissions`
+- `transitions`
+- `evidence`
+
+## `globals`
+
+### `globals.paths`
+
+Type: mapping
 
 Supported fields:
 
 - `protected`
 - `sensitive`
-- `failures`
-- `finalize`
-- `wizard`
-- `session_start`
-- `install`
 
-## `globals`
+`protected` paths are never directly writable by the agent.
 
-### `globals.protected`
-
-- Type: list of path globs
-
-Paths managed by `agent-guard` and not directly writable through normal agent file edits.
+`sensitive` paths are blocked by default and require explicit stage write permission.
 
 Example:
 
 ```yaml
-protected:
-  - .agent/state.json
-```
-
-### `globals.sensitive`
-
-- Type: list of path globs
-
-Paths that require explicit stage write permission.
-
-Example:
-
-```yaml
-sensitive:
-  - .github/**
-  - infra/**
+paths:
+  protected:
+    - .agent/state.json
+  sensitive:
+    - .github/**
+    - Cargo.lock
 ```
 
 ### `globals.failures`
 
-- Type: mapping
+Type: mapping
 
 Supported fields:
 
-- `repeat_threshold`: integer
-- `fingerprint_roots`: list of directory roots
+- `repeat_threshold`
+- `fingerprint_roots`
 
 Example:
 
@@ -197,22 +179,24 @@ failures:
     - tests
 ```
 
-### `globals.finalize`
+### `globals.finalization`
 
-- Type: mapping
+Type: mapping
 
 Supported fields:
 
-- `require`: list of rule objects
-- `messages`: mapping of rule name -> failure message
+- `require`
+- `messages`
 
-`require` items should be rule mappings:
+`require` is a list of built-in finalization rule names.
+
+Example:
 
 ```yaml
-finalize:
+finalization:
   require:
-    - rule: no_running_jobs
-    - rule: can_finalize_flag
+    - no_running_jobs
+    - can_finalize_flag
   messages:
     no_running_jobs: running jobs still exist
     can_finalize_flag: state.can_finalize is not true
@@ -220,347 +204,185 @@ finalize:
 
 ### `globals.wizard`
 
-- Type: mapping
+Type: mapping
 
 Supported fields:
 
-- `start_stages`: list of stage names
+- `start_stages`
 
 ### `globals.session_start`
 
-- Type: mapping
+Type: mapping
 
 Supported fields:
 
-- `navigator_skill`: string
+- `navigator_skill`
 
-### `globals.install.skills`
+### `globals.install`
 
-- Type: mapping
+Type: mapping
 
 Supported fields:
 
-- `match`: list of regex strings
-- `exclude_match`: list of regex strings
+- `skills.match`
+- `skills.exclude_match`
 
-## `stages`
+## Stage Shape
 
-`stages` is a mapping from stage name to stage policy.
+Each stage must use the grouped layout:
 
-Each stage supports:
+```yaml
+SOME_STAGE:
+  intent:
+    goal: One clear sentence describing the stage objective.
 
-- `goal`
-- `plan`
-- `final`
-- `allow`
-- `deny`
-- `enter`
-- `exit`
-- `expect`
-- `next`
+  permissions:
+    write:
+      allow: []
+      deny: []
+    actions:
+      allow: []
+      deny: []
+    commands:
+      complete_step: allow | deny
+    handoff:
+      human_stop: allow | deny
+      deny_message: Optional message shown when human stop is blocked.
+
+  transitions:
+    to: []
+    enter_when: []
+
+  evidence:
+    expected: []
+    required: []
+```
 
 ## Stage Fields
 
-### `goal`
+### `intent.goal`
 
-- Type: string
+Type: string
 
-Human-readable description of the stage objective.
+Human-readable statement of the stage objective.
 
-### `plan`
+### `permissions.write.allow`
 
-- Type: string
-- Allowed values:
-  - `deny`
-  - `create`
-  - `follow`
-  - `advance`
-  - `complete`
+Type: list of path globs
 
-This is a workflow policy mode for `plan.yaml`, not just a display label.
+Paths the stage may write.
 
-Meaning:
+### `permissions.write.deny`
 
-- `deny`: plan edits are not part of this stage
-- `create`: the stage is allowed to create or define the plan
-- `follow`: the stage follows an existing plan without advancing plan step state
-- `advance`: the stage may advance plan step execution state
-- `complete`: the workflow is in completion-oriented plan semantics
+Type: list of path globs
 
-This field influences:
+Paths the stage must not write, even if a broader allow rule exists.
 
-- whether `plan.yaml` is directly writable
-- whether `plan.yaml` is expected/required by default
-- whether `complete-step` is allowed from the stage
+### `permissions.actions.allow`
 
-### `final`
+Type: list of strings
 
-- Type: boolean
-- Optional
+Actions the stage is intended to perform.
 
-Marks the workflow completion stage.
+### `permissions.actions.deny`
 
-### `allow`
+Type: list of strings
 
-- Type: mapping
+Actions the stage must avoid.
 
-Supported fields:
+### `permissions.commands.complete_step`
 
-- `write`: list of path globs
-- `actions`: list of strings
-- `stop`: boolean
-- `human`: boolean
+Type: `allow` or `deny`
 
-Example:
+Controls whether `complete-step` is allowed in the stage.
 
-```yaml
-allow:
-  write:
-    - tests/**
-  actions:
-    - write tests
-    - run targeted tests
-  stop: false
-  human: false
-```
+### `permissions.handoff.human_stop`
 
-### `deny`
+Type: `allow` or `deny`
 
-- Type: mapping
+Controls whether the stage may hand off to a human stop path.
 
-Supported fields:
+If it is `deny`, `deny_message` may be provided.
 
-- `write`: list of path globs
-- `actions`: list of strings
+### `transitions.to`
 
-Example:
+Type: list of stage names
+
+Legal next stages from the current stage.
+
+### `transitions.enter_when`
+
+Type: list
+
+Each item must be one of:
+
+1. A simple display string.
+2. A path check:
 
 ```yaml
-deny:
-  write:
-    - src/**
-  actions:
-    - write production code
+- path: .agent/plan.yaml
 ```
 
-### `enter`
-
-- Type: list
-
-This defines entry gates for the stage.
-
-Supported item forms:
-
-1. Rule condition
+3. A rule check:
 
 ```yaml
 - rule: active_task
   display: active task exists
 ```
 
-2. Path existence condition
+Rule checks may also carry `value` when the built-in rule requires one.
+
+### `evidence.expected`
+
+Type: list of paths
+
+Soft guidance only. Missing expected artifacts do not block stage exit.
+
+### `evidence.required`
+
+Type: list
+
+Supported required-artifact forms:
+
+1. Simple path
 
 ```yaml
-- path: .agent/artifacts/review.md
+required:
+  - .agent/artifacts/review.md
 ```
 
-3. Display-only note
+2. Path plus content gate
 
 ```yaml
-- display: can_finalize enabled only through ready-to-summarize
+required:
+  - path: .agent/artifacts/failure-analysis.md
+    matches: '^## Failure Summary'
+    display: failure-analysis.md must start with the Failure Summary section.
 ```
 
-`display` is the user-facing explanation shown when the rule is presented or fails.
+Behavior:
 
-### `exit`
+- if a required artifact is missing, exit is blocked
+- if it existed before stage entry but was not updated during the stage, exit is blocked
+- if `matches` is configured and content does not match, exit is blocked with the configured `display`
 
-- Type: list
+## Important Workflow Semantics
 
-This is a mixed stage-exit list. It currently supports both:
+- `evidence.required` is the hard stage-exit gate.
+- `evidence.expected` is prompt guidance only.
+- write control comes from `globals.paths` plus `permissions.write`.
+- `complete_step` permission is stage-controlled through `permissions.commands.complete_step`.
+- human handoff policy is stage-controlled through `permissions.handoff.human_stop`.
 
-1. Required artifact evidence
+## Notes On `.agent/state.json` And `.agent/plan.yaml`
 
-```yaml
-- .agent/artifacts/review.md
-```
+- `.agent/state.json` should be treated as a protected file and changed through `agent-guard` workflow commands.
+- `.agent/plan.yaml` is workflow-governed. Whether it may be updated depends on the active stage and workflow policy.
 
-or
+## Authoring Guidance
 
-```yaml
-- path: .agent/artifacts/failure-analysis.md
-  matches: '^## Failure Summary'
-  display: failure-analysis.md must start with the Failure Summary section.
-```
-
-2. Rule-based exit conditions
-
-```yaml
-- rule: command_succeeded
-  value: "(^|\\s)pytest(\\s|$)"
-  display: pytest must succeed during VERIFY
-```
-
-Important:
-
-- artifact entries are hard exit evidence
-- `matches` and artifact `display` belong only to artifact entries
-- rule entries use `display` as the surfaced failure message
-
-Current behavior note:
-
-- `exit` is a mixed field in the author DSL
-- internally it is projected into:
-  - required artifact evidence
-  - rule-based exit conditions
-
-That mixed shape is supported, but authors should use it carefully because it combines two different domain concepts in one list.
-
-### `expect`
-
-- Type: list of path strings
-
-These are expected artifacts, not hard gates.
-
-### `next`
-
-- Type: list of stage names
-
-These are the legal next stages.
-
-## Supported Rule Objects
-
-Where rule items are supported, the public shape is:
-
-```yaml
-- rule: rule_name
-  value: optional string
-  display: human-readable explanation
-```
-
-`display` should be treated as required for rule-based stage conditions, because it is the message surfaced to the user when a gate blocks.
-
-The allowed rule names come from built-in rule evaluation in code. Workflow authors should use only documented built-in rule names.
-
-## Supported Artifact Objects
-
-Artifact requirements support these forms:
-
-1. Simple path:
-
-```yaml
-- .agent/artifacts/review.md
-```
-
-2. Path with content requirement:
-
-```yaml
-- path: .agent/artifacts/failure-analysis.md
-  matches: '^## Failure Summary'
-  display: failure-analysis.md must start with the Failure Summary section.
-```
-
-Supported fields:
-
-- `path`
-- `matches`
-- `display`
-
-Compatibility-only input:
-
-- `message`
-
-Artifact validation text should use `display`. `message` is accepted only as a legacy alias.
-
-## Not Part Of The Public Authoring Schema
-
-The following fields may still appear in code or internal normalized structures, but they are not part of the supported author-facing workflow schema:
-
-- `metadata`
-- `entry_stage`
-- `protected_paths`
-- `path_policy`
-- `failure_policy`
-- `finalization_policy`
-- `wizard_defaults`
-- `session_start_defaults`
-- `install_defaults`
-- `entry_conditions`
-- `exit_conditions`
-- `write_policy`
-- `artifacts_expected`
-- `artifacts_required`
-
-Likewise, older grouped forms such as:
-
-- `globals.paths`
-- `globals.finalization`
-- `stages.*.intent`
-- `stages.*.permissions`
-- `stages.*.transitions`
-- `stages.*.evidence`
-
-should be treated as compatibility input only, not as the preferred workflow authoring format.
-
-## Semantics And Caveats
-
-### Clear semantics
-
-These concepts are reasonably clear and stable:
-
-- `workflow.entry`
-- `goal`
-- `allow.write`
-- `deny.write`
-- `allow.actions`
-- `deny.actions`
-- `expect`
-- `next`
-- `globals.failures`
-- `globals.finalize`
-
-### Mixed semantics
-
-These areas need care when authoring:
-
-#### `exit`
-
-`exit` mixes:
-
-- evidence requirements
-- rule-based transition guards
-
-That is convenient, but it is not conceptually pure. Authors should remember that:
-
-- path entries become required evidence
-- rule entries become machine-evaluated exit guards
-
-#### `display-only` condition items
-
-`enter` currently accepts `{display: ...}` without `rule` or `path`.
-
-This is best understood as explanatory prompt text, not a real machine-evaluated condition.
-
-Authors should not rely on `display`-only entries when they need a hard gate.
-
-## Recommended Authoring Rules
-
-When writing new workflows:
-
-1. Use only the v2 stage-centered schema documented here.
-2. Do not write internal normalized fields directly.
-3. Prefer rule objects with explicit `display` text for stage conditions.
-4. Use artifact objects only when you need `matches` or artifact `display`.
-5. Treat `expect` as soft evidence and `exit` artifact entries as hard evidence.
-6. Do not rely on compatibility-only grouped or flat workflow formats for new workflow files.
-
-## Future Cleanup Direction
-
-To keep the DSL clearer over time, the intended direction is:
-
-1. keep this v2 author schema as the only documented public schema
-2. reduce compatibility exposure of older grouped and flat formats
-3. eventually separate mixed `exit` semantics into distinct author concepts for:
-   - required evidence
-   - rule-based exit guards
-
-Until then, this document is the authoritative statement of the intended supported workflow authoring format.
+- Prefer repository-local files under `workflows/` for project-specific workflows.
+- Use user-level files under `~/.config/agent-guard/workflow/` only when you want cross-repository overrides.
+- Keep stage rules explicit and small.
+- Put hard evidence requirements in `evidence.required`.
+- Put human-readable stage intent in `intent.goal`.

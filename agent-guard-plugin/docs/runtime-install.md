@@ -80,8 +80,9 @@ Current guard mapping:
 Protected runtime files:
 
 - `.agent/state.json` is now a hard-protected file.
+- `.agent/plan.yaml` is workflow-governed and may only be updated when the active stage allows it.
 - Agents must not edit it directly.
-- State transitions should happen through `agent-guard` commands such as `start-task`, `reset-task`, and `record-command`.
+- State and plan changes should happen through `agent-guard` commands such as `start-task`, `complete-step`, `reset-task`, `next-task`, and `mark-done`.
 
 Known limitations:
 
@@ -146,6 +147,8 @@ Task reset workflow:
 
 - `uv run agent-guard reset-task <new-task-id>`
 - `uv run agent-guard next-task <new-task-id>`
+- `uv run agent-guard close-task`
+- `uv run agent-guard close-task --force`
 
 Reset is intentionally gated. It only succeeds when the current task is already complete:
 
@@ -153,6 +156,8 @@ Reset is intentionally gated. It only succeeds when the current task is already 
 - `stage == READY_TO_SUMMARIZE` and `can_finalize == true`
 
 When reset succeeds, the plugin archives the current task under `.agent/archive/<timestamp>-<task-id>/` and then clears live jobs, failures, events, plan, and artifacts before initializing the next task in the workflow entry stage.
+
+Use `close-task` when you want to end the current workspace task session cleanly without starting the next task immediately. It is allowed when the current task is complete or the workspace is idle. `--force` overrides that check.
 
 Named workflows:
 

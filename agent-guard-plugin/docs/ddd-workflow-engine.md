@@ -1,5 +1,9 @@
 # DDD Design: Workflow-Driven Engine DSL
 
+This document is a design note, not the source of truth for the current shipped workflow file format.
+
+For the supported authoring schema, see [workflow-schema.md](./workflow-schema.md).
+
 ## Goal
 
 Turn `agent-guard` into a workflow-driven engine whose execution semantics come from a stable DSL, not from scattered branch logic in hooks, CLI glue, or prompt assembly.
