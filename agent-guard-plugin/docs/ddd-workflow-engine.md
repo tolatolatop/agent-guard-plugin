@@ -10,7 +10,7 @@ Turn `agent-guard` into a workflow-driven engine whose execution semantics come 
 
 For a more explicit split between soft prompts, hard gates, state flow, and write control, see `docs/ddd-dsl-layers.md`.
 
-For a concrete workflow example aligned with the current standard workflow, see `docs/grouped-workflow.example.yaml`.
+For a concrete workflow example aligned with the current standard workflow, see `docs/workflow.example.yaml`.
 
 The workflow DSL should describe:
 
@@ -370,23 +370,6 @@ Top-level mapping:
 - `failure_policy` -> `globals.failures`
 - `finalization_policy` -> `globals.finalize`
 - `session_start_defaults` -> `globals.session_start`
-
-## Migration Guidance
-
-Migration should happen in two steps.
-
-### Step 1
-
-Keep runtime behavior the same, but update docs and internal adapters to think in:
-
-- `intent`
-- `permissions`
-- `transitions`
-- `evidence`
-
-### Step 2
-
-Keep compatibility projections only where runtime integrations still expect legacy field names.
 
 ## Test Expectations
 

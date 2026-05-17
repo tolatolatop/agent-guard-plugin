@@ -1,0 +1,163 @@
+version: 2
+
+workflow:
+  id: standard-example
+  title: Standard Workflow Example
+  description: Reference workflow for agent-guard.
+  entry: CLARIFYING
+
+global_gates:
+  - Do not write outside stage permissions.
+  - Do not retry identical failing commands without code changes or failure analysis.
+  - Do not claim completion unless can-finalize passes.
+  - Do not modify .agent/state.json directly; use agent-guard workflow commands to change task state.
+
+globals:
+  protected:
+    - .agent/state.json
+
+  sensitive:
+    - .github/**
+    - infra/**
+    - migrations/**
+    - package-lock.json
+    - pnpm-lock.yaml
+    - yarn.lock
+    - poetry.lock
+    - Cargo.lock
+
+  failures:
+    repeat_threshold: 2
+    fingerprint_roots:
+      - src
+      - tests
+
+  finalize:
+    require:
+      - rule: no_running_jobs
+      - rule: successful_last_verification
+      - rule: can_finalize_flag
+      - rule: all_plan_steps_terminal
+    messages:
+      no_running_jobs: running jobs still exist
+      successful_last_verification: last_verification.exit_code must be 0
+      can_finalize_flag: state.can_finalize is not true
+      all_plan_steps_terminal: all plan steps must be done or failed
+
+  wizard:
+    start_stages:
+      - CLARIFYING
+      - PLANNING
+      - RED_TEST
+      - GREEN_IMPL
+
+  session_start:
+    navigator_skill: using-workflow
+
+  install:
+    skills:
+      match: []
+      exclude_match: []
+
+stages:
+  IDLE:
+    goal: Load task state and determine the next concrete step.
+    plan: deny
+    allow:
+      write:
+        - .agent/**
+      actions:
+        - read .agent state
+        - inspect plan and job files
+        - explore repository directories and files in read-only mode
+        - start-task when task_id is unset
+      stop: true
+      human: true
+    deny:
+      write: []
+      actions:
+        - modify files before a task is started
+        - run implementation or verification work before a task is started
+        - claim work is complete
+        - skip state initialization
+    enter:
+      - rule: active_task
+        display: task_id must be set
+    exit: []
+    expect: []
+    next:
+      - CLARIFYING
+
+  PLANNING:
+    goal: Break work into explicit steps with clear success conditions and required evidence.
+    plan: create
+    allow:
+      write: []
+      actions:
+        - write or refine plan.yaml
+        - refine the next concrete workflow steps in .agent/plan.yaml
+      stop: true
+      human: true
+    deny:
+      write: []
+      actions:
+        - execute unplanned broad changes
+    enter:
+      - rule: active_task
+        display: active task exists
+    exit: []
+    expect: []
+    next:
+      - RED_TEST
+      - GREEN_IMPL
+
+  REVIEW:
+    goal: Review the diff and capture review evidence without changing code.
+    plan: advance
+    allow:
+      write:
+        - .agent/artifacts/review.md
+      actions:
+        - read diff
+        - read files
+        - write review artifact
+      stop: false
+      human: false
+    deny:
+      write: []
+      actions:
+        - modify source unless review findings create a new implementation step
+    enter: []
+    exit:
+      - .agent/artifacts/review.md
+    expect: []
+    next:
+      - VERIFY
+      - GREEN_IMPL
+
+  NEEDS_FAILURE_ANALYSIS:
+    goal: Explain repeated or blocked failures before work resumes.
+    plan: follow
+    allow:
+      write:
+        - .agent/artifacts/failure-analysis.md
+      actions:
+        - summarize repeated failures
+        - explain why the prior attempt failed
+        - record the next change in approach
+      stop: true
+      human: true
+    deny:
+      write: []
+      actions:
+        - retry the same fix without meaningful change
+    enter: []
+    exit:
+      - path: .agent/artifacts/failure-analysis.md
+        matches: '^## Failure Summary'
+        display: failure-analysis.md must start with the Failure Summary section.
+    expect: []
+    next:
+      - RED_TEST
+      - GREEN_IMPL
+      - NEEDS_HUMAN

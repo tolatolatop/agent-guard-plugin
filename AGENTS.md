@@ -30,10 +30,10 @@ Main package layout:
 agent-guard-plugin/
   pyproject.toml
   plugin.json
-  .workflow.yaml
   src/agent_guard/
   docs/
   tests/
+  workflows/
 ```
 
 Important source modules:
@@ -63,7 +63,7 @@ Do not reintroduce the old JavaScript-oriented layout from earlier planning note
    Repeating the same failure without meaningful change must stop progress.
 
 5. Workflow policy is declarative.
-   `.workflow.yaml` defines the workflow DSL; code evaluates built-in rules.
+   `workflows/*.workflow.yaml` defines the workflow DSL; code evaluates built-in rules.
 
 6. Keep the system small.
    Prefer explicit, testable behavior over broad abstraction.
@@ -97,19 +97,26 @@ Notes:
 
 ## Workflow Model
 
-The canonical workflow source is [`agent-guard-plugin/.workflow.yaml`](./agent-guard-plugin/.workflow.yaml).
+The canonical bundled workflow source lives under [`agent-guard-plugin/workflows/`](./agent-guard-plugin/workflows/).
 
-It uses a grouped DSL:
+It uses the stage-centered author DSL:
 
 - top level:
+  - `version`
   - `workflow`
+  - `global_gates`
   - `globals`
   - `stages`
 - per stage:
-  - `intent`
-  - `permissions`
-  - `transitions`
-  - `evidence`
+  - `goal`
+  - `plan`
+  - `final`
+  - `allow`
+  - `deny`
+  - `enter`
+  - `exit`
+  - `expect`
+  - `next`
 
 Important workflow rules:
 
@@ -123,9 +130,10 @@ Important workflow rules:
 
 Current global policy areas are:
 
-- `globals.paths`
+- `globals.protected`
+- `globals.sensitive`
 - `globals.failures`
-- `globals.finalization`
+- `globals.finalize`
 - `globals.wizard`
 - `globals.install`
 
@@ -179,13 +187,13 @@ Write control is intentionally minimal now.
 
 Global write policy:
 
-- `globals.paths.protected`
-- `globals.paths.sensitive`
+- `globals.protected`
+- `globals.sensitive`
 
 Per-stage write policy:
 
-- `permissions.write.allow`
-- `permissions.write.deny`
+- `allow.write`
+- `deny.write`
 
 Current behavior is workflow-driven and static:
 
@@ -198,24 +206,24 @@ Do not reintroduce dynamic write-scope behavior unless explicitly requested.
 
 ## Evidence and Exit Gates
 
-Stage exit is controlled by `evidence.required`.
+Stage exit is controlled by `exit`.
 
 Supported required-artifact forms:
 
 1. Simple path
 
 ```yaml
-required:
+exit:
   - .agent/artifacts/review.md
 ```
 
 2. Path plus content gate
 
 ```yaml
-required:
+exit:
   - path: .agent/artifacts/failure-analysis.md
     matches: '^## Failure Summary'
-    message: failure-analysis.md must start with the Failure Summary section.
+    display: failure-analysis.md must start with the Failure Summary section.
 ```
 
 Exit behavior:
@@ -228,7 +236,7 @@ Exit behavior:
 
 Task completion is separate from ordinary stage flow.
 
-Current finalization checks come from `globals.finalization.require` and built-in rules in code.
+Current finalization checks come from `globals.finalize.require` and built-in rules in code.
 
 Finalization should be treated as completion evidence, not as a place to enforce extra review content rules.
 
@@ -267,4 +275,4 @@ uv run pytest -q tests/test_install.py
 - Do not bypass workflow commands for stage progression.
 - Do not claim completion without satisfying workflow evidence and finalization gates.
 - Do not reintroduce outdated concepts such as dynamic path scopes or review.json.
-- Keep docs aligned with the current grouped DSL and Python implementation.
+- Keep docs aligned with the current stage-centered workflow DSL and Python implementation.

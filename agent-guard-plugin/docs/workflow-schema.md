@@ -2,7 +2,7 @@
 
 This document defines the supported user-facing `workflow.yaml` authoring format for `agent-guard`.
 
-Workflow authors should write workflow files in the grouped DSL used by the current Python implementation.
+Workflow authors should write workflow files in the stage-centered author DSL used by the bundled workflows and current Python implementation.
 
 ## Where To Put A Workflow File
 
@@ -23,42 +23,41 @@ When a workflow id is requested, `agent-guard` checks user-level overrides first
 The supported public schema is:
 
 ```yaml
+version: 2
+
 workflow:
   id: standard
   title: Standard Workflow
   description: Reference workflow for agent-guard.
   entry: CLARIFYING
 
-globals:
-  paths:
-    protected:
-      - .agent/state.json
-    sensitive:
-      - .github/**
-      - Cargo.lock
+global_gates:
+  - Do not write outside stage permissions.
 
+globals:
+  protected:
+    - .agent/state.json
+  sensitive:
+    - .github/**
+    - Cargo.lock
   failures:
     repeat_threshold: 2
     fingerprint_roots:
       - src
       - tests
-
-  finalization:
+  finalize:
     require:
-      - no_running_jobs
-      - can_finalize_flag
+      - rule: no_running_jobs
+      - rule: can_finalize_flag
     messages:
       no_running_jobs: running jobs still exist
       can_finalize_flag: state.can_finalize is not true
-
   wizard:
     start_stages:
       - CLARIFYING
       - PLANNING
-
   session_start:
     navigator_skill: using-workflow
-
   install:
     skills:
       match: []
@@ -66,36 +65,36 @@ globals:
 
 stages:
   CLARIFYING:
-    intent:
-      goal: Resolve task intent before implementation.
-
-    permissions:
+    goal: Resolve task intent before implementation.
+    plan: deny
+    allow:
       write:
-        allow:
-          - .agent/**
-        deny: []
+        - .agent/**
       actions:
-        allow:
-          - clarify requirements
-        deny:
-          - implement before requirements are clear
-      commands:
-        complete_step: deny
-      handoff:
-        human_stop: allow
-
-    transitions:
-      to:
-        - DESIGNING
-        - PLANNING
-      enter_when: []
-
-    evidence:
-      expected: []
-      required: []
+        - clarify requirements
+      stop: true
+      human: true
+    deny:
+      write: []
+      actions:
+        - implement before requirements are clear
+    enter: []
+    exit: []
+    expect: []
+    next:
+      - DESIGNING
+      - PLANNING
 ```
 
+For a full example, see [workflow.example.yaml](./workflow.example.yaml).
+
 ## Top-Level Fields
+
+### `version`
+
+Type: integer
+
+Current bundled workflows use `version: 2`.
 
 ### `workflow`
 
@@ -110,15 +109,22 @@ Supported fields:
 
 `entry` must name one of the stages defined under `stages`.
 
+### `global_gates`
+
+Type: list of strings
+
+High-level guardrail text surfaced in workflow guidance.
+
 ### `globals`
 
 Type: mapping
 
 Supported sections:
 
-- `paths`
+- `protected`
+- `sensitive`
 - `failures`
-- `finalization`
+- `finalize`
 - `wizard`
 - `session_start`
 - `install`
@@ -129,35 +135,43 @@ Type: mapping
 
 Each key is a stage name. Each stage supports:
 
-- `intent`
-- `permissions`
-- `transitions`
-- `evidence`
+- `goal`
+- `plan`
+- `final`
+- `allow`
+- `deny`
+- `enter`
+- `exit`
+- `expect`
+- `next`
 
 ## `globals`
 
-### `globals.paths`
+### `globals.protected`
 
-Type: mapping
+Type: list of path globs
 
-Supported fields:
-
-- `protected`
-- `sensitive`
-
-`protected` paths are never directly writable by the agent.
-
-`sensitive` paths are blocked by default and require explicit stage write permission.
+Protected paths are never directly writable by the agent.
 
 Example:
 
 ```yaml
-paths:
-  protected:
-    - .agent/state.json
-  sensitive:
-    - .github/**
-    - Cargo.lock
+protected:
+  - .agent/state.json
+```
+
+### `globals.sensitive`
+
+Type: list of path globs
+
+Sensitive paths are blocked by default and require explicit stage write permission.
+
+Example:
+
+```yaml
+sensitive:
+  - .github/**
+  - Cargo.lock
 ```
 
 ### `globals.failures`
@@ -179,7 +193,7 @@ failures:
     - tests
 ```
 
-### `globals.finalization`
+### `globals.finalize`
 
 Type: mapping
 
@@ -188,15 +202,15 @@ Supported fields:
 - `require`
 - `messages`
 
-`require` is a list of built-in finalization rule names.
+`require` is a list of built-in finalization rules. A rule can be written as a string or as an object with `rule`.
 
 Example:
 
 ```yaml
-finalization:
+finalize:
   require:
-    - no_running_jobs
-    - can_finalize_flag
+    - rule: no_running_jobs
+    - rule: can_finalize_flag
   messages:
     no_running_jobs: running jobs still exist
     can_finalize_flag: state.can_finalize is not true
@@ -229,101 +243,108 @@ Supported fields:
 
 ## Stage Shape
 
-Each stage must use the grouped layout:
+Each stage must use the stage-centered layout:
 
 ```yaml
 SOME_STAGE:
-  intent:
-    goal: One clear sentence describing the stage objective.
+  goal: One clear sentence describing the stage objective.
+  plan: deny | create | follow | advance | complete
+  final: false
 
-  permissions:
-    write:
-      allow: []
-      deny: []
-    actions:
-      allow: []
-      deny: []
-    commands:
-      complete_step: allow | deny
-    handoff:
-      human_stop: allow | deny
-      deny_message: Optional message shown when human stop is blocked.
+  allow:
+    write: []
+    actions: []
+    stop: true
+    human: true
 
-  transitions:
-    to: []
-    enter_when: []
+  deny:
+    write: []
+    actions: []
 
-  evidence:
-    expected: []
-    required: []
+  enter: []
+  exit: []
+  expect: []
+  next: []
 ```
 
 ## Stage Fields
 
-### `intent.goal`
+### `goal`
 
 Type: string
 
 Human-readable statement of the stage objective.
 
-### `permissions.write.allow`
+### `plan`
+
+Type: string
+
+Allowed values:
+
+- `deny`
+- `create`
+- `follow`
+- `advance`
+- `complete`
+
+This field controls how the stage relates to `.agent/plan.yaml` and step progression.
+
+### `final`
+
+Type: boolean
+
+Optional marker for a final stage.
+
+### `allow.write`
 
 Type: list of path globs
 
 Paths the stage may write.
 
-### `permissions.write.deny`
-
-Type: list of path globs
-
-Paths the stage must not write, even if a broader allow rule exists.
-
-### `permissions.actions.allow`
+### `allow.actions`
 
 Type: list of strings
 
 Actions the stage is intended to perform.
 
-### `permissions.actions.deny`
+### `allow.stop`
+
+Type: boolean
+
+Controls whether the stage may stop naturally.
+
+### `allow.human`
+
+Type: boolean
+
+Controls whether the stage may hand off to a human stop path.
+
+### `deny.write`
+
+Type: list of path globs
+
+Paths the stage must not write, even if a broader allow rule exists.
+
+### `deny.actions`
 
 Type: list of strings
 
 Actions the stage must avoid.
 
-### `permissions.commands.complete_step`
-
-Type: `allow` or `deny`
-
-Controls whether `complete-step` is allowed in the stage.
-
-### `permissions.handoff.human_stop`
-
-Type: `allow` or `deny`
-
-Controls whether the stage may hand off to a human stop path.
-
-If it is `deny`, `deny_message` may be provided.
-
-### `transitions.to`
-
-Type: list of stage names
-
-Legal next stages from the current stage.
-
-### `transitions.enter_when`
+### `enter`
 
 Type: list
 
-Each item must be one of:
+Stage-entry gates. Each item may be:
 
-1. A simple display string.
-2. A path check:
+1. A simple path string.
+2. A path object:
 
 ```yaml
 - path: .agent/plan.yaml
 ```
 
-3. A rule check:
+3. A rule object:
 
 ```yaml
 - rule: active_task
@@ -332,32 +353,27 @@ Each item must be one of:
 
 Rule checks may also carry `value` when the built-in rule requires one.
 
-### `evidence.expected`
-
-Type: list of paths
-
-Soft guidance only. Missing expected artifacts do not block stage exit.
-
-### `evidence.required`
+### `exit`
 
 Type: list
 
-Supported required-artifact forms:
+Hard stage-exit gates. Each item may be:
 
-1. Simple path
+1. A simple required artifact path.
+2. A path object with optional content validation:
 
 ```yaml
-required:
-  - .agent/artifacts/review.md
+- path: .agent/artifacts/failure-analysis.md
+  matches: '^## Failure Summary'
+  display: failure-analysis.md must start with the Failure Summary section.
 ```
 
-2. Path plus content gate
+3. A rule object:
 
 ```yaml
-required:
-  - path: .agent/artifacts/failure-analysis.md
-    matches: '^## Failure Summary'
-    display: failure-analysis.md must start with the Failure Summary section.
+- rule: command_ran
+  value: "(^|\\s)pytest(\\s|$)"
+  display: must run pytest during VERIFY
 ```
 
 Behavior:
@@ -366,13 +382,25 @@ Behavior:
 - if it existed before stage entry but was not updated during the stage, exit is blocked
 - if `matches` is configured and content does not match, exit is blocked with the configured `display`
 
+### `expect`
+
+Type: list of paths
+
+Soft guidance only. Missing expected artifacts do not block stage exit.
+
+### `next`
+
+Type: list of stage names
+
+Legal next stages from the current stage.
+
 ## Important Workflow Semantics
 
-- `evidence.required` is the hard stage-exit gate.
-- `evidence.expected` is prompt guidance only.
-- write control comes from `globals.paths` plus `permissions.write`.
-- `complete_step` permission is stage-controlled through `permissions.commands.complete_step`.
-- human handoff policy is stage-controlled through `permissions.handoff.human_stop`.
+- `exit` is the hard stage-exit gate.
+- `expect` is prompt guidance only.
+- write control comes from `globals.protected`, `globals.sensitive`, `allow.write`, and `deny.write`.
+- `plan: create` is the stage mode that opens normal plan authoring.
+- `plan: advance` enables `complete-step`.
 
 ## Notes On `.agent/state.json` And `.agent/plan.yaml`
 
@@ -384,5 +412,6 @@ Behavior:
 - Prefer repository-local files under `workflows/` for project-specific workflows.
 - Use user-level files under `~/.config/agent-guard/workflow/` only when you want cross-repository overrides.
 - Keep stage rules explicit and small.
-- Put hard evidence requirements in `evidence.required`.
-- Put human-readable stage intent in `intent.goal`.
+- Put hard evidence requirements in `exit`.
+- Put soft guidance artifacts in `expect`.
+- Keep stage intent in `goal`.
