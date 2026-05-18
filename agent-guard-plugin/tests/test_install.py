@@ -47,6 +47,7 @@ def test_install_writes_claude_code_project_settings_with_hook_commands() -> Non
     assert len(config["hooks"]["PreToolUse"]) >= 1
     assert "agent-guard-bridge" in json.dumps(config)
     assert "AGENT_GUARD_SKILLS_DIR" in json.dumps(config)
+    assert "hook-launch-errors.jsonl" in json.dumps(config)
     assert config["hooks"]["SessionStart"][0]["matcher"] == "startup|clear|compact"
     assert config["hooks"]["SessionStart"][0]["hooks"][0]["async"] is False
     assert (root / ".claude" / "skills" / "using-workflow" / "SKILL.md").exists()
@@ -408,6 +409,7 @@ def test_install_writes_codex_hooks_json() -> None:
     assert isinstance(hooks["hooks"]["SessionStart"], list)
     assert "pre-dispatch" in json.dumps(hooks)
     assert "AGENT_GUARD_SKILLS_DIR" in json.dumps(hooks)
+    assert "hook-launch-errors.jsonl" in json.dumps(hooks)
     assert (root / ".codex" / "skills" / "workflow-core" / "SKILL.md").exists()
     assert_dir_empty(home)
 
@@ -437,6 +439,7 @@ def test_install_writes_opencode_loader() -> None:
     assert '"tool.execute.before"' in source
     assert "agent-guard-bridge" in source
     assert "AGENT_GUARD_SKILLS_DIR" in source
+    assert "hook-launch-errors.jsonl" in source
     assert (root / ".opencode" / "skills" / "finalization-checklist" / "SKILL.md").exists()
     assert_dir_empty(home)
 

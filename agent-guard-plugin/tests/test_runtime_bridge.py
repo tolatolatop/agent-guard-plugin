@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 
+import agent_guard.runtime_bridge as runtime_bridge
 from agent_guard.state import save_state
 
 from .helpers import make_temp_repo, runtime_test_env
@@ -20,6 +21,21 @@ def run_bridge(root_dir, action, payload):
         check=False,
         env=runtime_test_env(),
     )
+
+
+def test_load_stdin_json_returns_empty_for_tty(monkeypatch) -> None:
+    """Test that tty stdin does not block bridge payload loading."""
+
+    class FakeStdin:
+        def isatty(self) -> bool:
+            return True
+
+        def read(self) -> str:
+            raise AssertionError("read() should not be called for TTY stdin")
+
+    monkeypatch.setattr(runtime_bridge.sys, "stdin", FakeStdin())
+
+    assert runtime_bridge._load_stdin_json() == {}
 
 
 def test_bridge_blocks_forbidden_write() -> None:
@@ -41,6 +57,14 @@ def test_bridge_blocks_forbidden_write() -> None:
     assert result.returncode == 2
     assert "denied during RED_TEST" in result.stderr
     assert "Allowed write paths" in result.stderr
+
+    hook_error_log = root_dir / ".agent" / "artifacts" / "hook-errors.jsonl"
+    assert hook_error_log.exists()
+    entries = [json.loads(line) for line in hook_error_log.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert entries[-1]["type"] == "hook_error"
+    assert entries[-1]["category"] == "hook-rejection"
+    assert entries[-1]["action"] == "pre-write"
+    assert entries[-1]["payload"]["tool_input"]["file_path"] == "src/app.py"
 
 
 def test_bridge_allows_absolute_agent_plan_write_within_repo() -> None:

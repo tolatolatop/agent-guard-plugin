@@ -3,13 +3,15 @@ from __future__ import annotations
 
 import json
 import sys
+import traceback
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 from typing import Any
 
 from .cli import run_command
-from .state import artifacts_dir, load_state
+from .events import append_event
+from .state import artifacts_dir, ensure_agent_files, load_state
 from .workflow_spec import (
     canonical_completion_ready_stage,
     canonical_expected_failure_stage,
@@ -21,7 +23,15 @@ from .workflow_spec import (
 
 def _load_stdin_json() -> dict[str, Any]:
     """Internal helper for load stdin json."""
-    raw = sys.stdin.read().strip()
+    try:
+        if sys.stdin.isatty():
+            return {}
+    except Exception:
+        pass
+    try:
+        raw = sys.stdin.read().strip()
+    except OSError:
+        return {}
     if not raw:
         return {}
     try:
@@ -62,8 +72,64 @@ def _cli_json(args: list[str], cwd: Path) -> tuple[int, dict[str, Any]]:
     return exit_code, payload
 
 
-def _fail(reason: str) -> None:
+def _truncate_for_log(value: Any, *, max_string: int = 500, max_items: int = 20, depth: int = 0) -> Any:
+    """Return a compact JSON-safe payload preview for hook diagnostics."""
+    if depth >= 4:
+        return "<max-depth>"
+    if isinstance(value, str):
+        return value if len(value) <= max_string else value[: max_string - 20] + "...<truncated>"
+    if isinstance(value, dict):
+        items = list(value.items())
+        preview = {
+            str(key): _truncate_for_log(item, max_string=max_string, max_items=max_items, depth=depth + 1)
+            for key, item in items[:max_items]
+        }
+        if len(items) > max_items:
+            preview["<truncated_keys>"] = len(items) - max_items
+        return preview
+    if isinstance(value, list):
+        preview = [
+            _truncate_for_log(item, max_string=max_string, max_items=max_items, depth=depth + 1)
+            for item in value[:max_items]
+        ]
+        if len(value) > max_items:
+            preview.append(f"<truncated_items:{len(value) - max_items}>")
+        return preview
+    return value
+
+
+def _record_hook_error(
+    cwd: Path,
+    action: str,
+    reason: str,
+    *,
+    payload: dict[str, Any] | None = None,
+    exit_code: int = 2,
+    category: str = "hook-rejection",
+    traceback_text: str | None = None,
+) -> None:
+    """Persist hook failures so generic runtime hook errors can be debugged later."""
+    ensure_agent_files(cwd)
+    event = append_event(
+        cwd,
+        {
+            "type": "hook_error",
+            "category": category,
+            "action": action,
+            "exit_code": exit_code,
+            "reason": reason,
+            "payload": _truncate_for_log(payload or {}),
+            "traceback": traceback_text,
+        },
+    )
+    log_path = artifacts_dir(cwd) / "hook-errors.jsonl"
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(event) + "\n")
+
+
+def _fail(cwd: Path, action: str, reason: str, payload: dict[str, Any] | None = None) -> None:
     """Internal helper for fail."""
+    _record_hook_error(cwd, action, reason, payload=payload)
     sys.stderr.write(reason + "\n")
     raise SystemExit(2)
 
@@ -142,11 +208,11 @@ def _write_command_log(root_dir: Path, command: str, stdout: str, stderr: str, l
     return log_path.relative_to(root_dir).as_posix()
 
 
-def _handle_session_start(cwd: Path) -> None:
+def _handle_session_start(cwd: Path, action: str = "session-start") -> None:
     """Internal helper for handle session start."""
     code, payload = _cli_json(["session-start"], cwd)
     if code != 0:
-        _fail(str(payload.get("error", "session-start failed")))
+        _fail(cwd, action, str(payload.get("error", "session-start failed")), payload)
     prompt_block = payload.get("prompt_block")
     if isinstance(prompt_block, str) and prompt_block.strip():
         _print_json(
@@ -161,7 +227,7 @@ def _handle_session_start(cwd: Path) -> None:
     _print_json(payload, 0)
 
 
-def _handle_pre_write(cwd: Path, payload: dict[str, Any]) -> None:
+def _handle_pre_write(cwd: Path, payload: dict[str, Any], action: str = "pre-write") -> None:
     """Internal helper for handle pre write."""
     target_path = _extract_path(payload)
     if not target_path:
@@ -178,26 +244,26 @@ def _handle_pre_write(cwd: Path, payload: dict[str, Any]) -> None:
             fallback = str(result.get("reason") or result.get("error") or "write blocked")
             if stage and "does not allow agent writes" not in fallback:
                 fallback = f"{fallback} Current stage {stage} does not allow agent writes."
-        _fail(str(result.get("display_reason") or fallback))
+        _fail(cwd, action, str(result.get("display_reason") or fallback), payload)
 
 
-def _handle_pre_command(cwd: Path) -> None:
+def _handle_pre_command(cwd: Path, payload: dict[str, Any] | None = None, action: str = "pre-command") -> None:
     """Internal helper for handle pre command."""
     code, result = _cli_json(["check-failure-loop"], cwd)
     if code != 0:
-        _fail(str(result.get("reason") or result.get("error") or "command blocked"))
+        _fail(cwd, action, str(result.get("reason") or result.get("error") or "command blocked"), payload)
 
 
 def _handle_pre_dispatch(cwd: Path, payload: dict[str, Any]) -> None:
     """Internal helper for handle pre dispatch."""
     if _extract_path(payload):
-        _handle_pre_write(cwd, payload)
+        _handle_pre_write(cwd, payload, action="pre-dispatch")
         return
     if _extract_command(payload):
-        _handle_pre_command(cwd)
+        _handle_pre_command(cwd, payload, action="pre-dispatch")
 
 
-def _handle_post_command(cwd: Path, payload: dict[str, Any]) -> None:
+def _handle_post_command(cwd: Path, payload: dict[str, Any], action: str = "post-command") -> None:
     """Internal helper for handle post command."""
     command = _extract_command(payload)
     if not command:
@@ -214,10 +280,10 @@ def _handle_post_command(cwd: Path, payload: dict[str, Any]) -> None:
         args.extend(["--log", _write_command_log(cwd, command, str(stdout or ""), str(stderr or ""), log_path)])
     code, result = _cli_json(args, cwd)
     if code != 0:
-        _fail(str(result.get("error", "record-command failed")))
+        _fail(cwd, action, str(result.get("error", "record-command failed")), payload)
 
 
-def _handle_stop(cwd: Path) -> None:
+def _handle_stop(cwd: Path, action: str = "stop") -> None:
     """Internal helper for handle stop."""
     state = load_state(cwd)
     stage = state.get("stage")
@@ -226,19 +292,22 @@ def _handle_stop(cwd: Path) -> None:
     if forbid_display:
         # Stages with forbid_needs_human must keep progressing through the
         # workflow instead of ending the interaction with a final response.
-        _fail(f"agent-guard blocked final response: {forbid_display}")
+        _fail(cwd, action, f"agent-guard blocked final response: {forbid_display}", {"state": state})
     if stage and canonical_stage_stop_allowed(str(stage), cwd, workflow_id):
         raise SystemExit(0)
     ready_stage = canonical_completion_ready_stage(cwd, workflow_id)
     if stage != ready_stage and state.get("can_finalize") is not True:
         _fail(
+            cwd,
+            action,
             "agent-guard blocked final response: "
-            f"stage {stage} is still active. Reach the completion-ready stage {ready_stage}, or move to an allowed stop stage first."
+            f"stage {stage} is still active. Reach the completion-ready stage {ready_stage}, or move to an allowed stop stage first.",
+            {"state": state},
         )
     code, payload = _cli_json(["can-finalize"], cwd)
     if code != 0:
         reasons = payload.get("reasons") or [payload.get("reason") or payload.get("error") or "finalization blocked"]
-        _fail("agent-guard blocked finalization: " + "; ".join(str(reason) for reason in reasons))
+        _fail(cwd, action, "agent-guard blocked finalization: " + "; ".join(str(reason) for reason in reasons), payload)
 
 
 def _handle_opencode_before(cwd: Path, payload: dict[str, Any]) -> None:
@@ -247,10 +316,10 @@ def _handle_opencode_before(cwd: Path, payload: dict[str, Any]) -> None:
     args = payload.get("args", {})
     tool_payload = {"tool_input": args if isinstance(args, dict) else {}}
     if tool in {"write", "edit", "patch"}:
-        _handle_pre_write(cwd, tool_payload)
+        _handle_pre_write(cwd, tool_payload, action="opencode-before")
         return
     if tool == "bash":
-        _handle_pre_command(cwd)
+        _handle_pre_command(cwd, tool_payload, action="opencode-before")
 
 
 def _handle_opencode_after(cwd: Path, payload: dict[str, Any]) -> None:
@@ -266,7 +335,7 @@ def _handle_opencode_after(cwd: Path, payload: dict[str, Any]) -> None:
         "tool_input": args,
         "tool_response": output_payload if isinstance(output_payload, dict) else {},
     }
-    _handle_post_command(cwd, bridge_payload)
+    _handle_post_command(cwd, bridge_payload, action="opencode-after")
 
 
 def main() -> None:
@@ -275,33 +344,49 @@ def main() -> None:
     cwd = Path.cwd()
     payload = _load_stdin_json()
 
-    if action == "session-start":
-        _handle_session_start(cwd)
-    elif action == "pre-write":
-        _handle_pre_write(cwd, payload)
-    elif action == "pre-command":
-        _handle_pre_command(cwd)
-    elif action == "pre-dispatch":
-        _handle_pre_dispatch(cwd, payload)
-    elif action == "post-command":
-        _handle_post_command(cwd, payload)
-    elif action == "stop":
-        _handle_stop(cwd)
-    elif action == "opencode-event":
-        event_action = payload.get("action")
-        event_payload = payload.get("payload", {})
-        if not isinstance(event_payload, dict):
-            event_payload = {}
-        if event_action == "session-start":
-            _handle_session_start(cwd)
-        elif event_action == "opencode-before":
-            _handle_opencode_before(cwd, event_payload)
-        elif event_action == "opencode-after":
-            _handle_opencode_after(cwd, event_payload)
+    try:
+        if action == "session-start":
+            _handle_session_start(cwd, action="session-start")
+        elif action == "pre-write":
+            _handle_pre_write(cwd, payload, action="pre-write")
+        elif action == "pre-command":
+            _handle_pre_command(cwd, payload, action="pre-command")
+        elif action == "pre-dispatch":
+            _handle_pre_dispatch(cwd, payload)
+        elif action == "post-command":
+            _handle_post_command(cwd, payload, action="post-command")
+        elif action == "stop":
+            _handle_stop(cwd, action="stop")
+        elif action == "opencode-event":
+            event_action = payload.get("action")
+            event_payload = payload.get("payload", {})
+            if not isinstance(event_payload, dict):
+                event_payload = {}
+            if event_action == "session-start":
+                _handle_session_start(cwd, action="opencode-event:session-start")
+            elif event_action == "opencode-before":
+                _handle_opencode_before(cwd, event_payload)
+            elif event_action == "opencode-after":
+                _handle_opencode_after(cwd, event_payload)
+            else:
+                _print_json({"error": f"Unknown OpenCode event action: {event_action}"}, 1)
         else:
-            _print_json({"error": f"Unknown OpenCode event action: {event_action}"}, 1)
-    else:
-        _print_json({"error": f"Unknown bridge action: {action}"}, 1)
+            _print_json({"error": f"Unknown bridge action: {action}"}, 1)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        traceback_text = traceback.format_exc()
+        _record_hook_error(
+            cwd,
+            str(action or "<missing-action>"),
+            str(exc),
+            payload=payload,
+            exit_code=2,
+            category="hook-exception",
+            traceback_text=traceback_text,
+        )
+        sys.stderr.write(f"agent-guard hook crashed during {action}: {exc}\n")
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

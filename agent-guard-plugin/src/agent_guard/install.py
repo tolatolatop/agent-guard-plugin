@@ -391,12 +391,33 @@ def install_opencode_skills_bundle(
     )
 
 
+def hook_launch_fallback_script(command: str, action: str) -> str:
+    """Wrap bridge launch so pre-Python failures still leave a durable breadcrumb."""
+    hook_log = ".agent/artifacts/hook-launch-errors.jsonl"
+    script = " ; ".join(
+        [
+            command,
+            'code=$?',
+            'if [ "$code" -ne 0 ]; then',
+            'mkdir -p .agent/artifacts 2>/dev/null || true',
+            (
+                "printf '{\"type\":\"hook_launch_error\",\"action\":\"%s\",\"exit_code\":%s,\"ts\":\"%s\"}\\n' "
+                f"{shlex.quote(action)} \"$code\" \"$(date -Iseconds)\" >> {shlex.quote(hook_log)}"
+            ),
+            'fi',
+            'exit "$code"',
+        ]
+    )
+    return shell_command("sh", "-lc", script)
+
+
 def uv_bridge_command(plugin_root: Path, action: str, skills_dir: Path) -> str:
     """Uv bridge command."""
+    bridge_command = shell_command("uv", "run", "--project", str(plugin_root), "agent-guard-bridge", action)
     return " ".join(
         [
             shell_assignment("AGENT_GUARD_SKILLS_DIR", str(skills_dir)),
-            shell_command("uv", "run", "--project", str(plugin_root), "agent-guard-bridge", action),
+            hook_launch_fallback_script(bridge_command, action),
         ]
     )
 
