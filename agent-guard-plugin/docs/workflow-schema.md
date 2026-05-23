@@ -414,6 +414,7 @@ Legal next stages from the current stage.
 ## Important Workflow Semantics
 
 - `exit` is the hard stage-exit gate.
+- `agent-guard verify [--auto-ready] -- <command>` is the preferred CLI path for verification stages: it runs the command, writes `.agent/artifacts/final-verification.log`, records `last_verification`, and can run `ready-to-summarize` after success.
 - `expect` is prompt guidance only.
 - write control comes from `globals.protected`, `globals.sensitive`, `allow.write`, and `deny.write`.
 - `plan: create` is the stage mode that opens normal plan authoring.

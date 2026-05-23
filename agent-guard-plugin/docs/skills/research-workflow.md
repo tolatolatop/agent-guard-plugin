@@ -58,8 +58,10 @@ DONE
   Moves between research stages without implicitly completing a plan step.
 - `agent-guard complete-step <step-id> [--next-step <step-id>]`
   Legal only in stages using `plan: advance`.
+- `agent-guard verify [--auto-ready] -- <command>`
+  Runs validation in `VALIDATE`, writes `.agent/artifacts/final-verification.log`, and records `last_verification`. With `--auto-ready`, successful validation also moves `VALIDATE` into `READY_TO_DELIVER`.
 - `agent-guard ready-to-summarize`
-  Moves `VALIDATE` into `READY_TO_DELIVER` when the workflow allows it.
+  Moves `VALIDATE` into `READY_TO_DELIVER` when the workflow allows it. Prefer `verify --auto-ready -- <command>` for normal validation.
 - `agent-guard mark-done`
   Moves `READY_TO_DELIVER` into `DONE`.
 

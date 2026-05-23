@@ -89,8 +89,10 @@ Use these workflow commands during normal coding workflow progression:
   Moves to another stage without marking a plan step complete.
 - `agent-guard complete-step <step-id> [--next-step <step-id>]`
   Marks the current workflow step complete without advancing to the next stage. This is only legal when the current stage uses `plan: advance`.
+- `agent-guard verify [--auto-ready] -- <command>`
+  Runs a verification command while in `VERIFY`, writes `.agent/artifacts/final-verification.log`, and updates `last_verification`. With `--auto-ready`, a successful command also moves `VERIFY` into `READY_TO_SUMMARIZE`.
 - `agent-guard ready-to-summarize`
-  Moves `VERIFY` into `READY_TO_SUMMARIZE` when verification is complete.
+  Moves `VERIFY` into `READY_TO_SUMMARIZE` when verification is complete. Prefer `verify --auto-ready -- <command>` for normal final checks.
 - `agent-guard mark-done`
   Moves `READY_TO_SUMMARIZE` into `DONE`.
 
@@ -100,7 +102,8 @@ Use them like this:
 - Use `status`, `session-start`, and `next-step` to rehydrate workflow context before acting.
 - Prefer `complete-step` when a real planned step finished.
 - Use `advance-stage` for stage-only moves such as `CLARIFYING -> PLANNING` or `REVIEW -> GREEN_IMPL`.
-- Use `ready-to-summarize` only after `VERIFY` is satisfied.
+- In `VERIFY`, prefer `agent-guard verify --auto-ready -- pytest -q` over manually running `pytest` plus `record-command` plus `ready-to-summarize`.
+- Use `ready-to-summarize` only after `VERIFY` is satisfied when you did not use `verify --auto-ready`.
 - Use `mark-done` only from `READY_TO_SUMMARIZE`.
 
 ## Transition Rules
@@ -110,7 +113,8 @@ Use them like this:
 - `GREEN_IMPL` must pass through `REVIEW` before entering `VERIFY`.
 - `REVIEW -> VERIFY` requires `.agent/artifacts/review.md`.
 - `VERIFY -> READY_TO_SUMMARIZE` requires `.agent/artifacts/final-verification.log`.
-- `VERIFY -> READY_TO_SUMMARIZE` requires the explicit `ready-to-summarize` command.
+- `VERIFY -> READY_TO_SUMMARIZE` requires verification command evidence from the active stage. The convenience command `agent-guard verify --auto-ready -- pytest -q` produces this evidence and runs `ready-to-summarize` on success.
+- `VERIFY -> READY_TO_SUMMARIZE` can still be done manually with `ready-to-summarize` after command evidence exists.
 - `VERIFY` may return to `RED_TEST`, `GREEN_IMPL`, or `NEEDS_FAILURE_ANALYSIS`.
 - `NEEDS_FAILURE_ANALYSIS` cannot exit until `.agent/artifacts/failure-analysis.md` exists.
 - `READY_TO_SUMMARIZE -> DONE` requires `.agent/artifacts/summary.md`.

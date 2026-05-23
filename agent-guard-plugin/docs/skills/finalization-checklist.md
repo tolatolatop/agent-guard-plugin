@@ -12,6 +12,15 @@ Completion requires:
 - no running jobs remain
 - `can-finalize` passes
 - if `plan.yaml` exists, every step status is `done` or `failed`
+- for workflows with a verification gate, `last_verification.exit_code` must be `0`
+
+Preferred verification shortcut:
+
+```bash
+agent-guard verify --auto-ready -- pytest -q
+```
+
+This runs the command, writes `.agent/artifacts/final-verification.log`, updates `last_verification`, and moves to the completion-ready stage when the command succeeds. Use manual `record-command` only for hook internals or exceptional recovery.
 
 Completion evidence should include:
 

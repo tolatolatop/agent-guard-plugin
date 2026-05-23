@@ -78,7 +78,8 @@ Current guard mapping:
 - session bootstrap: `session-start`
 - write policy gate: `can-write`
 - repeated failure gate: `check-failure-loop`
-- command recording: `record-command`
+- command recording: `record-command` for runtime hooks and advanced recovery
+- verification shortcut: `verify --auto-ready -- <command>`
 - finalization gate: `can-finalize`
 
 Protected runtime files:

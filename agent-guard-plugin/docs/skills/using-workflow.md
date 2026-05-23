@@ -30,4 +30,5 @@ Core navigation rules:
 - Use the current stage's `plan` mode to decide whether planning is denied, created, followed, advanced, or being closed out.
 - Prefer the smallest legal next step over broad changes.
 - Treat hard CLI gates as authoritative even if the model believes a shortcut is safe.
+- Use `agent-guard verify --auto-ready -- <verification-command>` as the preferred way to produce final verification evidence in a verification stage; do not hand-write `last_verification`.
 - If the next legal step requires creating or updating an artifact, explicitly state the allowed modification scope or directory before writing it.

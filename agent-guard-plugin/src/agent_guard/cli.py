@@ -31,6 +31,7 @@ from .transitions import (
     mark_done,
     ready_to_summarize,
 )
+from .verification import run_verification_command
 from .wizard import run_wizard
 
 
@@ -53,6 +54,7 @@ Commands:
   can-write <path>                  Check whether a file write is allowed in the current stage.
   record-command --cmd CMD --exit-code CODE [--log PATH]
                                     Record command execution details.
+  verify [--auto-ready] -- CMD ...  Run a verification command and record final verification.
   advance-stage --to STAGE [--step STEP_ID]
                                     Move the workflow to a new stage.
   complete-step <step-id> [--next-step STEP_ID]
@@ -76,6 +78,7 @@ Examples:
   agent-guard start-task password-reset --workflow research
   agent-guard can-write tests/test_auth.py
   agent-guard record-command --cmd "pytest tests/test_auth.py" --exit-code 1 --log .agent/artifacts/red-test.log
+  agent-guard verify --auto-ready -- pytest -q
   agent-guard install
   agent-guard install --runtime codex
   agent-guard install --runtime codex --wizard
@@ -101,6 +104,12 @@ COMMAND_HELP: dict[str, str] = {
     "record-command": (
         "Usage: agent-guard record-command --cmd CMD --exit-code CODE [--log PATH]\n\n"
         "Record command execution details, exit code, and optional log path."
+    ),
+    "verify": (
+        "Usage: agent-guard verify [--auto-ready] -- CMD ...\n\n"
+        "Run a verification command in the workflow verification stage, write "
+        ".agent/artifacts/final-verification.log, and update last_verification. "
+        "With --auto-ready, successful verification also runs ready-to-summarize."
     ),
     "advance-stage": (
         "Usage: agent-guard advance-stage --to STAGE [--step STEP_ID]\n\n"
@@ -238,6 +247,9 @@ def run_command(argv: list[str], cwd: Path) -> int:
                 str(flags["log"]) if "log" in flags else None,
             )
             print_json({"ok": True, **result})
+        elif command == "verify":
+            exit_code, result = run_verification_command(cwd, rest)
+            print_json(result, 0 if exit_code == 0 else exit_code)
         elif command == "advance-stage":
             flags = parse_flags(rest)
             if "to" not in flags:
@@ -310,7 +322,7 @@ def run_command(argv: list[str], cwd: Path) -> int:
                 {
                     "error": (
                         "Unknown command. Supported: init, start-task, status, session-start, "
-                        "can-write, record-command, advance-stage, complete-step, ready-to-summarize, "
+                        "can-write, record-command, verify, advance-stage, complete-step, ready-to-summarize, "
                         "mark-done, check-failure-loop, check-job-poll, can-finalize, next-step, close-task, "
                         "reset-task, next-task, install, uninstall, wizard"
                     )

@@ -86,7 +86,7 @@ def test_designing_stop_blocks_with_stage_message() -> None:
             _handle_stop(root_dir)
 
     fail.assert_called_once()
-    assert "Current stage does not allow human intervention" in fail.call_args.args[0]
+    assert "Current stage does not allow human intervention" in fail.call_args.args[2]
 
 
 def test_planning_stop_allows_without_finalize_check() -> None:

@@ -28,6 +28,7 @@ def test_top_level_help_flag_prints_command_overview() -> None:
     assert "Usage: agent-guard <command> [options]" in output
     assert "close-task [--force]" in output
     assert "record-command --cmd CMD --exit-code CODE [--log PATH]" in output
+    assert "verify [--auto-ready] -- CMD ..." in output
     assert "help [command]" in output
 
 
@@ -38,6 +39,15 @@ def test_subcommand_help_flag_prints_specific_usage() -> None:
     assert code == 0
     assert "Usage: agent-guard record-command --cmd CMD --exit-code CODE [--log PATH]" in output
     assert "Record command execution details" in output
+
+
+def test_verify_help_prints_specific_usage() -> None:
+    """Test that verify help documents the convenience command."""
+    code, output = invoke_help(["verify", "--help"])
+
+    assert code == 0
+    assert "Usage: agent-guard verify [--auto-ready] -- CMD ..." in output
+    assert "last_verification" in output
 
 
 def test_install_help_mentions_workflow_context_defaults() -> None:
