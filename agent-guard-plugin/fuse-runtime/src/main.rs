@@ -183,6 +183,18 @@ impl GuardFs {
         ino
     }
 
+    fn remap_rename_ino(&mut self, old_rel: &Path, new_rel: &Path) {
+        let Some(old_ino) = self.rel_to_ino.remove(old_rel) else {
+            return;
+        };
+        if let Some(replaced_ino) = self.rel_to_ino.remove(new_rel) {
+            self.ino_to_rel.remove(&replaced_ino);
+        }
+        let new_rel_buf = new_rel.to_path_buf();
+        self.rel_to_ino.insert(new_rel_buf.clone(), old_ino);
+        self.ino_to_rel.insert(old_ino, new_rel_buf);
+    }
+
     fn backing_path(&self, rel: &Path) -> PathBuf {
         if rel.as_os_str().is_empty() {
             self.managed_root()
@@ -756,7 +768,10 @@ impl Filesystem for GuardFs {
             return;
         }
         match fs::rename(self.backing_path(&old_rel), self.backing_path(&new_rel)) {
-            Ok(_) => reply.ok(),
+            Ok(_) => {
+                self.remap_rename_ino(&old_rel, &new_rel);
+                reply.ok()
+            }
             Err(_) => reply.error(ENOENT),
         }
     }
