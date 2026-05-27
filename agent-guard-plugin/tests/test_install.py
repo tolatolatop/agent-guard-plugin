@@ -12,6 +12,7 @@ from agent_guard.install import (
     install_runtime,
     packaged_skills_dir,
     parse_flags,
+    plan_uninstall_runtime,
     selected_skill_sources,
     selected_skill_sources_with_fallback,
     source_skills_dir,
@@ -435,6 +436,7 @@ def test_install_writes_opencode_loader() -> None:
     source = plugin_path.read_text(encoding="utf-8")
 
     assert '"tool.execute.before"' in source
+    assert '"tool.execute.before": async (input, output)' in source
     assert "agent-guard-bridge" in source
     assert "AGENT_GUARD_SKILLS_DIR" in source
     assert (root / ".opencode" / "skills" / "finalization-checklist" / "SKILL.md").exists()
@@ -500,6 +502,17 @@ def test_uninstall_can_be_cancelled() -> None:
     assert result["cancelled"] is True
     assert (root / ".opencode" / "plugins" / "agent-guard.js").exists()
     assert (root / ".opencode" / "skills" / "using-workflow" / "SKILL.md").exists()
+
+
+def test_uninstall_opencode_lists_skills_bundle_once() -> None:
+    """Test that opencode uninstall plan does not duplicate the skills bundle."""
+    root, home = make_dirs()
+    install_runtime(["--runtime", "opencode", "--scope", "project"], root, home, PLUGIN_ROOT)
+
+    result = plan_uninstall_runtime(["--runtime", "opencode", "--scope", "project"], root, home)
+    skill_changes = [change for change in result["changes"] if change["path"].endswith(".opencode/skills")]
+
+    assert len(skill_changes) == 1
 
 
 def test_uninstall_claude_removes_skills_bundle_after_confirmation() -> None:

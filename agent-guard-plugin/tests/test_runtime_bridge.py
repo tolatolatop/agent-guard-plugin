@@ -90,6 +90,68 @@ def test_bridge_allows_absolute_agent_plan_write_within_repo() -> None:
     assert result.returncode == 0
 
 
+def test_opencode_before_reads_tool_args_from_output_payload() -> None:
+    """Test that opencode before hook reads current args from output payload."""
+    root_dir = make_temp_repo()
+    save_state(
+        root_dir,
+        {
+            "task_id": "password-reset",
+            "stage": "RED_TEST",
+            "current_step": "red-001",
+            "can_finalize": False,
+            "last_verification": None,
+            "needs_human": False,
+        },
+    )
+
+    result = run_bridge(
+        root_dir,
+        "opencode-event",
+        {
+            "action": "opencode-before",
+            "payload": {
+                "input": {"tool": "edit"},
+                "output": {"args": {"file_path": "src/app.py"}},
+            },
+        },
+    )
+
+    assert result.returncode == 2
+    assert "denied during RED_TEST" in result.stderr
+
+
+def test_opencode_before_treats_apply_patch_as_write_tool() -> None:
+    """Test that opencode apply_patch tool is gated as a write."""
+    root_dir = make_temp_repo()
+    save_state(
+        root_dir,
+        {
+            "task_id": "password-reset",
+            "stage": "RED_TEST",
+            "current_step": "red-001",
+            "can_finalize": False,
+            "last_verification": None,
+            "needs_human": False,
+        },
+    )
+
+    result = run_bridge(
+        root_dir,
+        "opencode-event",
+        {
+            "action": "opencode-before",
+            "payload": {
+                "input": {"tool": "apply_patch"},
+                "output": {"args": {"patchText": "*** Begin Patch\n*** Update File: src/app.py\n@@\n*** End Patch\n"}},
+            },
+        },
+    )
+
+    assert result.returncode == 2
+    assert "denied during RED_TEST" in result.stderr
+
+
 def test_bridge_records_final_verification_log_only_for_verify() -> None:
     """Test that bridge records final verification log only for verify."""
     root_dir = make_temp_repo()
@@ -112,6 +174,42 @@ def test_bridge_records_final_verification_log_only_for_verify() -> None:
     )
     assert result.returncode == 0
     assert (root_dir / ".agent" / "artifacts" / "final-verification.log").exists()
+
+
+def test_opencode_after_reads_bash_command_from_output_args() -> None:
+    """Test that opencode after hook records bash commands from output args."""
+    root_dir = make_temp_repo()
+    save_state(
+        root_dir,
+        {
+            "task_id": "password-reset",
+            "stage": "VERIFY",
+            "current_step": "verify-001",
+            "can_finalize": False,
+            "last_verification": None,
+            "needs_human": False,
+        },
+    )
+
+    result = run_bridge(
+        root_dir,
+        "opencode-event",
+        {
+            "action": "opencode-after",
+            "payload": {
+                "input": {"tool": "bash"},
+                "output": {
+                    "args": {"command": "pytest"},
+                    "result": {"exit_code": 0, "stdout": "ok"},
+                },
+            },
+        },
+    )
+
+    assert result.returncode == 0
+    assert "command: pytest" in (root_dir / ".agent" / "artifacts" / "final-verification.log").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_bridge_does_not_write_success_log_outside_verify() -> None:

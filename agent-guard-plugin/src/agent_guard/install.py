@@ -628,8 +628,8 @@ export const AgentGuardPlugin = async () => {{
     "session.created": async () => {{
       runBridge({{ action: "session-start", payload: {{}} }})
     }},
-    "tool.execute.before": async (input) => {{
-      runBridge({{ action: "opencode-before", payload: input }})
+    "tool.execute.before": async (input, output) => {{
+      runBridge({{ action: "opencode-before", payload: {{ input, output }} }})
     }},
     "tool.execute.after": async (input, output) => {{
       runBridge({{ action: "opencode-after", payload: {{ input, output }} }})
@@ -869,7 +869,6 @@ def plan_uninstall_codex(cwd: Path, home_dir: Path, scope: str) -> dict[str, Any
 def plan_uninstall_opencode(cwd: Path, home_dir: Path, scope: str) -> dict[str, Any]:
     """Plan uninstall opencode."""
     plugin_path = opencode_plugin_file(scope, cwd, home_dir)
-    skills_dir = opencode_skills_install_dir(scope, cwd, home_dir)
     changes: list[dict[str, str]] = []
 
     if plugin_path.exists():
@@ -878,15 +877,6 @@ def plan_uninstall_opencode(cwd: Path, home_dir: Path, scope: str) -> dict[str, 
                 "action": "delete",
                 "path": str(plugin_path),
                 "details": "Delete the generated OpenCode agent-guard loader.",
-            }
-        )
-
-    if skills_dir.exists():
-        changes.append(
-            {
-                "action": "delete-tree",
-                "path": str(skills_dir),
-                "details": "Delete the installed workflow skill bundle.",
             }
         )
 

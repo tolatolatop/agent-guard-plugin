@@ -178,6 +178,23 @@ def _extract_command(payload: dict[str, Any]) -> str | None:
     return cmd if isinstance(cmd, str) else None
 
 
+def _extract_apply_patch_paths(args: dict[str, Any]) -> list[str]:
+    """Extract project-relative paths from OpenCode apply_patch text."""
+    patch_text = args.get("patchText")
+    if not isinstance(patch_text, str):
+        return []
+
+    paths: list[str] = []
+    for line in patch_text.splitlines():
+        for marker in ("*** Add File: ", "*** Update File: ", "*** Delete File: ", "*** Move to: "):
+            if line.startswith(marker):
+                path = line.removeprefix(marker).strip()
+                if path:
+                    paths.append(path)
+                break
+    return paths
+
+
 def _extract_exit_code(payload: dict[str, Any]) -> int:
     """Internal helper for extract exit code."""
     response = payload.get("tool_response", {})
@@ -312,9 +329,23 @@ def _handle_stop(cwd: Path, action: str = "stop") -> None:
 
 def _handle_opencode_before(cwd: Path, payload: dict[str, Any]) -> None:
     """Internal helper for handle opencode before."""
-    tool = payload.get("tool")
-    args = payload.get("args", {})
+    input_payload = payload.get("input")
+    output_payload = payload.get("output")
+    if isinstance(input_payload, dict):
+        tool = input_payload.get("tool")
+        if isinstance(output_payload, dict) and isinstance(output_payload.get("args"), dict):
+            args = output_payload.get("args", {})
+        else:
+            args = input_payload.get("args", {})
+    else:
+        tool = payload.get("tool")
+        args = payload.get("args", {})
     tool_payload = {"tool_input": args if isinstance(args, dict) else {}}
+    if tool == "apply_patch":
+        patch_paths = _extract_apply_patch_paths(tool_payload["tool_input"])
+        for path in patch_paths:
+            _handle_pre_write(cwd, {"tool_input": {"file_path": path}}, action="opencode-before")
+        return
     if tool in {"write", "edit", "patch"}:
         _handle_pre_write(cwd, tool_payload, action="opencode-before")
         return
@@ -328,12 +359,17 @@ def _handle_opencode_after(cwd: Path, payload: dict[str, Any]) -> None:
     output_payload = payload.get("output", {})
     if not isinstance(input_payload, dict) or input_payload.get("tool") != "bash":
         raise SystemExit(0)
-    args = input_payload.get("args", {})
+    if isinstance(output_payload, dict) and isinstance(output_payload.get("args"), dict):
+        args = output_payload.get("args", {})
+        tool_response = output_payload.get("result", output_payload)
+    else:
+        args = input_payload.get("args", {})
+        tool_response = output_payload
     if not isinstance(args, dict):
         args = {}
     bridge_payload = {
         "tool_input": args,
-        "tool_response": output_payload if isinstance(output_payload, dict) else {},
+        "tool_response": tool_response if isinstance(tool_response, dict) else {},
     }
     _handle_post_command(cwd, bridge_payload, action="opencode-after")
 
