@@ -623,10 +623,23 @@ function runBridge(payload) {{
   return parsed
 }}
 
+function sessionContextFrom(result) {{
+  return result?.hookSpecificOutput?.additionalContext || result?.prompt_block || ""
+}}
+
 export const AgentGuardPlugin = async () => {{
   return {{
-    "session.created": async () => {{
-      runBridge({{ action: "session-start", payload: {{}} }})
+    event: async (input) => {{
+      if (input?.event?.type === "session.created") {{
+        runBridge({{ action: "session-start", payload: {{}} }})
+      }}
+    }},
+    "experimental.chat.system.transform": async (_input, output) => {{
+      const context = sessionContextFrom(runBridge({{ action: "session-start", payload: {{}} }}))
+      if (context) {{
+        output.system ||= []
+        output.system.push(context)
+      }}
     }},
     "tool.execute.before": async (input, output) => {{
       runBridge({{ action: "opencode-before", payload: {{ input, output }} }})

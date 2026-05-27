@@ -437,6 +437,10 @@ def test_install_writes_opencode_loader() -> None:
 
     assert '"tool.execute.before"' in source
     assert '"tool.execute.before": async (input, output)' in source
+    assert "event: async (input)" in source
+    assert 'input?.event?.type === "session.created"' in source
+    assert '"experimental.chat.system.transform"' in source
+    assert "output.system.push(context)" in source
     assert "agent-guard-bridge" in source
     assert "AGENT_GUARD_SKILLS_DIR" in source
     assert (root / ".opencode" / "skills" / "finalization-checklist" / "SKILL.md").exists()
@@ -462,6 +466,15 @@ def test_opencode_loader_stays_thin() -> None:
     assert "check-failure-loop" not in source
     assert "can-write" not in source
     assert "record-command" not in source
+
+
+def test_opencode_loader_uses_system_transform_for_session_context() -> None:
+    """Test that opencode loader injects session context into the system prompt."""
+    source = build_opencode_plugin_source(PLUGIN_ROOT, PLUGIN_ROOT / ".agent-guard" / "skills")
+
+    assert '"session.created": async' not in source
+    assert "hookSpecificOutput?.additionalContext" in source
+    assert "output.system ||=" in source
 
 
 def test_uninstall_codex_lists_and_removes_hooks_after_confirmation() -> None:

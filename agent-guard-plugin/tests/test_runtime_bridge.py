@@ -212,6 +212,39 @@ def test_opencode_after_reads_bash_command_from_output_args() -> None:
     )
 
 
+def test_opencode_after_reads_bash_command_from_input_args() -> None:
+    """Test that opencode after hook supports the documented input args shape."""
+    root_dir = make_temp_repo()
+    save_state(
+        root_dir,
+        {
+            "task_id": "password-reset",
+            "stage": "VERIFY",
+            "current_step": "verify-001",
+            "can_finalize": False,
+            "last_verification": None,
+            "needs_human": False,
+        },
+    )
+
+    result = run_bridge(
+        root_dir,
+        "opencode-event",
+        {
+            "action": "opencode-after",
+            "payload": {
+                "input": {"tool": "bash", "args": {"command": "pytest -q"}},
+                "output": {"output": "ok", "metadata": {"exit_code": 0}},
+            },
+        },
+    )
+
+    assert result.returncode == 0
+    assert "command: pytest -q" in (root_dir / ".agent" / "artifacts" / "final-verification.log").read_text(
+        encoding="utf-8"
+    )
+
+
 def test_bridge_does_not_write_success_log_outside_verify() -> None:
     """Test that bridge does not write success log outside verify."""
     root_dir = make_temp_repo()
