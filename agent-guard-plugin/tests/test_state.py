@@ -321,6 +321,45 @@ def test_stage_exit_policy_supports_directory_artifact_patterns() -> None:
     assert service.exit_failures("DIR_OUTPUT") == []
 
 
+def test_stage_exit_policy_skips_broken_symlinks_in_directory_artifacts() -> None:
+    """A broken symlink inside a directory artifact should not crash stage exit checks."""
+    root_dir = make_temp_repo()
+    write_repo_workflow(
+        root_dir,
+        "patterns",
+        "  DIR_OUTPUT:\n"
+        "    goal: Require output directory updates.\n"
+        "    plan: deny\n"
+        "    allow:\n"
+        "      write:\n"
+        "        - output/**\n"
+        "      actions:\n"
+        "        - write outputs\n"
+        "      stop: true\n"
+        "      human: true\n"
+        "    deny:\n"
+        "      write: []\n"
+        "      actions: []\n"
+        "    enter: []\n"
+        "    exit:\n"
+        "      - output\n"
+        "    expect: []\n"
+        "    next: []\n",
+    )
+    service = StageExitPolicyService(root_dir)
+    output_dir = root_dir / "output"
+    output_dir.mkdir()
+    output_file = output_dir / "review.md"
+    output_file.write_text("after\n", encoding="utf-8")
+    (output_dir / "broken-link").symlink_to("missing-target")
+
+    save_state(root_dir, {**DEFAULT_STATE, "task_id": "password-reset", "workflow_id": "patterns", "stage": "DIR_OUTPUT"})
+    fresh_mtime = output_file.stat().st_mtime_ns + 1_000_000
+    os.utime(output_file, ns=(fresh_mtime, fresh_mtime))
+
+    assert service.exit_failures("DIR_OUTPUT") == []
+
+
 def test_stage_exit_policy_supports_recursive_glob_artifact_patterns() -> None:
     """A recursive glob artifact should pass when one matching descendant is created in-stage."""
     root_dir = make_temp_repo()

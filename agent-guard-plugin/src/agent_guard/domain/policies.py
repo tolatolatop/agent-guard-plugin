@@ -260,7 +260,14 @@ class FailurePolicyService:
             if not candidate.exists():
                 continue
             for item in [candidate, *candidate.rglob("*")]:
-                latest = max(latest, int(item.stat().st_mtime_ns))
+                try:
+                    latest = max(latest, int(item.stat().st_mtime_ns))
+                except OSError:
+                    # Broken symlinks (and files that disappear during a scan)
+                    # are not useful for the code-change fingerprint.  Hooks
+                    # should keep processing the remaining tree instead of
+                    # crashing on one invalid directory entry.
+                    continue
         return latest
 
     def hash_failure(self, command: str, exit_code: int, log_path: Path | None) -> str:

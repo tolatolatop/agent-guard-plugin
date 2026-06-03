@@ -45,12 +45,21 @@ def resolve_artifact_pattern(root_dir: Path, artifact_path: str) -> list[Path]:
     return [deduped[key] for key in sorted(deduped)]
 
 
+def _safe_mtime_ns(path: Path) -> int | None:
+    """Return a path mtime, skipping broken symlinks or vanished files."""
+    try:
+        return int(path.stat().st_mtime_ns)
+    except OSError:
+        return None
+
+
 def artifact_pattern_mtime_ns(root_dir: Path, artifact_path: str) -> int | None:
     """Return the latest mtime across all concrete paths resolved from one artifact pattern."""
     resolved = resolve_artifact_pattern(root_dir, artifact_path)
-    if not resolved:
+    mtimes = [mtime for path in resolved if (mtime := _safe_mtime_ns(path)) is not None]
+    if not mtimes:
         return None
-    return max(int(path.stat().st_mtime_ns) for path in resolved)
+    return max(mtimes)
 
 
 def artifact_pattern_text_candidates(root_dir: Path, artifact_path: str) -> list[Path]:

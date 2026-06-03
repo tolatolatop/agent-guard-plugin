@@ -92,6 +92,21 @@ def test_success_command_without_log_only_records_event() -> None:
     assert "log_path" not in result["event"]
 
 
+def test_failed_command_fingerprint_skips_broken_symlinks() -> None:
+    """Broken symlinks under fingerprint roots should not crash hook handling."""
+    root_dir = make_temp_repo()
+    write_state(root_dir, stage="GREEN_IMPL")
+    (root_dir / "src").mkdir()
+    (root_dir / "src" / "broken-link").symlink_to("missing-target")
+    log_path = ".agent/artifacts/green-test.log"
+    (root_dir / log_path).write_text("boom\n", encoding="utf-8")
+
+    result = record_command_result(root_dir, "pytest", 1, log_path)
+
+    assert result["failure"]["command"] == "pytest"
+    assert load_state(root_dir)["stage"] == "NEEDS_FAILURE_ANALYSIS"
+
+
 def test_task_session_advance_clears_needs_human_after_escalation_stage() -> None:
     """Test that advancing from an escalation stage clears needs_human."""
     session = TaskSession(
