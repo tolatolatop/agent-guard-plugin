@@ -7,6 +7,8 @@ import tomllib
 import pytest
 
 from agent_guard.install import (
+    _CLAUDE_PLUGIN_NAME,
+    _CLAUDE_SKILLS_DIR_PLUGIN_ID,
     build_opencode_plugin_source,
     install_claude_skills_bundle,
     install_runtime,
@@ -36,6 +38,16 @@ def assert_dir_empty(path: Path) -> None:
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 
 
+def claude_plugin_skill(root: Path, skill_id: str) -> Path:
+    """Return installed Claude plugin skill path."""
+    return root / ".claude" / "skills" / _CLAUDE_PLUGIN_NAME / "skills" / skill_id / "SKILL.md"
+
+
+def claude_plugin_manifest(root: Path) -> Path:
+    """Return installed Claude plugin manifest path."""
+    return root / ".claude" / "skills" / _CLAUDE_PLUGIN_NAME / ".claude-plugin" / "plugin.json"
+
+
 def test_install_writes_claude_code_project_settings_with_hook_commands() -> None:
     """Test that install writes claude code project settings with hook commands."""
     root, home = make_dirs()
@@ -50,9 +62,50 @@ def test_install_writes_claude_code_project_settings_with_hook_commands() -> Non
     assert "AGENT_GUARD_SKILLS_DIR" in json.dumps(config)
     assert config["hooks"]["SessionStart"][0]["matcher"] == "startup|clear|compact"
     assert config["hooks"]["SessionStart"][0]["hooks"][0]["async"] is False
-    assert (root / ".claude" / "skills" / "using-workflow" / "SKILL.md").exists()
-    assert (root / ".claude" / "skills" / "workflow-core" / "SKILL.md").exists()
-    assert_dir_empty(home)
+    assert config["enabledPlugins"][_CLAUDE_SKILLS_DIR_PLUGIN_ID] is True
+    manifest = json.loads(claude_plugin_manifest(root).read_text(encoding="utf-8"))
+    assert manifest["name"] == _CLAUDE_PLUGIN_NAME
+    assert claude_plugin_skill(root, "using-workflow").exists()
+    assert claude_plugin_skill(root, "workflow-core").exists()
+    global_config = json.loads((home / ".claude.json").read_text(encoding="utf-8"))
+    project_config = global_config["projects"][str(root)]
+    assert project_config["hasTrustDialogAccepted"] is True
+    assert project_config["projectOnboardingSeenCount"] == 1
+
+
+def test_install_claude_project_preserves_existing_global_project_state() -> None:
+    """Test that project-scope install activates trust without replacing project state."""
+    root, home = make_dirs()
+    global_config_path = home / ".claude.json"
+    global_config_path.write_text(
+        json.dumps(
+            {
+                "projects": {
+                    str(root): {
+                        "allowedTools": ["Bash(pytest)"],
+                        "hasTrustDialogAccepted": False,
+                        "projectOnboardingSeenCount": 3,
+                    },
+                    "/other/project": {"hasTrustDialogAccepted": False},
+                },
+                "theme": "dark",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = install_runtime(["--runtime", "claude-code", "--scope", "project"], root, home, PLUGIN_ROOT)
+
+    global_config = json.loads(global_config_path.read_text(encoding="utf-8"))
+    project_config = global_config["projects"][str(root)]
+    assert project_config["allowedTools"] == ["Bash(pytest)"]
+    assert project_config["hasTrustDialogAccepted"] is True
+    assert project_config["projectOnboardingSeenCount"] == 3
+    assert global_config["projects"]["/other/project"]["hasTrustDialogAccepted"] is False
+    assert global_config["theme"] == "dark"
+    assert str(global_config_path) in result["files_written"]
 
 
 def test_install_claude_removes_legacy_flat_skill_files() -> None:
@@ -65,7 +118,37 @@ def test_install_claude_removes_legacy_flat_skill_files() -> None:
     install_runtime(["--runtime", "claude-code", "--scope", "project"], root, home, PLUGIN_ROOT)
 
     assert not legacy_file.exists()
-    assert (root / ".claude" / "skills" / "using-workflow" / "SKILL.md").exists()
+    assert claude_plugin_skill(root, "using-workflow").exists()
+
+
+def test_install_claude_removes_legacy_native_skill_dirs() -> None:
+    """Test that install claude removes legacy standalone native skill dirs."""
+    root, home = make_dirs()
+    legacy_file = root / ".claude" / "skills" / "using-workflow" / "SKILL.md"
+    legacy_file.parent.mkdir(parents=True, exist_ok=True)
+    legacy_file.write_text("legacy\n", encoding="utf-8")
+
+    install_runtime(["--runtime", "claude-code", "--scope", "project"], root, home, PLUGIN_ROOT)
+
+    assert not legacy_file.exists()
+    assert claude_plugin_skill(root, "using-workflow").exists()
+
+
+def test_install_claude_preserves_existing_enabled_plugins() -> None:
+    """Test that install claude preserves existing enabled plugin settings."""
+    root, home = make_dirs()
+    config_path = root / ".claude" / "settings.local.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps({"enabledPlugins": {"formatter@team-tools": True}}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    install_runtime(["--runtime", "claude-code", "--scope", "project"], root, home, PLUGIN_ROOT)
+
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    assert config["enabledPlugins"]["formatter@team-tools"] is True
+    assert config["enabledPlugins"][_CLAUDE_SKILLS_DIR_PLUGIN_ID] is True
 
 
 def test_source_skills_dir_prefers_packaged_bundle_when_plugin_root_has_no_docs() -> None:
@@ -121,8 +204,8 @@ def test_install_claude_skills_bundle_succeeds_without_plugin_docs() -> None:
 
     result = install_runtime(["--runtime", "claude-code", "--scope", "project"], root, home, fake_plugin_root)
 
-    assert (root / ".claude" / "skills" / "using-workflow" / "SKILL.md").exists()
-    assert any(path.endswith("/.claude/skills/using-workflow/SKILL.md") for path in result["files_written"])
+    assert claude_plugin_skill(root, "using-workflow").exists()
+    assert str(claude_plugin_skill(root, "using-workflow")) in result["files_written"]
 
 
 def test_install_claude_skills_bundle_errors_when_no_sources_exist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -184,8 +267,8 @@ def test_install_runtime_supports_selective_skill_installation() -> None:
         PLUGIN_ROOT,
     )
 
-    assert (root / ".claude" / "skills" / "workflow-core" / "SKILL.md").exists()
-    assert not (root / ".claude" / "skills" / "using-workflow" / "SKILL.md").exists()
+    assert claude_plugin_skill(root, "workflow-core").exists()
+    assert not claude_plugin_skill(root, "using-workflow").exists()
     assert any(path.endswith("/workflow-core/SKILL.md") for path in result["files_written"])
 
 
@@ -237,8 +320,8 @@ def test_install_runtime_uses_workflow_defaults_when_cli_filters_are_absent(
 
     result = install_runtime(["--runtime", "claude-code", "--scope", "project"], root, home, PLUGIN_ROOT)
 
-    assert (root / ".claude" / "skills" / "workflow-core" / "SKILL.md").exists()
-    assert not (root / ".claude" / "skills" / "using-workflow" / "SKILL.md").exists()
+    assert claude_plugin_skill(root, "workflow-core").exists()
+    assert not claude_plugin_skill(root, "using-workflow").exists()
     assert result["notes"][0] == "Installed Claude Code hooks into a settings JSON file."
     assert calls == [(root, None)]
 
@@ -359,8 +442,8 @@ def test_install_runtime_interactive_filters_override_workflow_defaults(
     )
 
     assert result["runtime"] == "claude-code"
-    assert (root / ".claude" / "skills" / "workflow-core" / "SKILL.md").exists()
-    assert not (root / ".claude" / "skills" / "using-workflow" / "SKILL.md").exists()
+    assert claude_plugin_skill(root, "workflow-core").exists()
+    assert not claude_plugin_skill(root, "using-workflow").exists()
 
 
 def test_install_runtime_can_enter_wizard_after_install(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -542,4 +625,8 @@ def test_uninstall_claude_removes_skills_bundle_after_confirmation() -> None:
     )
 
     assert result["cancelled"] is False
-    assert not (root / ".claude" / "skills").exists()
+    assert not (root / ".claude" / "skills" / _CLAUDE_PLUGIN_NAME).exists()
+    config_path = root / ".claude" / "settings.local.json"
+    if config_path.exists():
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        assert _CLAUDE_SKILLS_DIR_PLUGIN_ID not in config.get("enabledPlugins", {})

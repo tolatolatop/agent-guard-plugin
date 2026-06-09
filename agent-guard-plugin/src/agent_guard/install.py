@@ -15,6 +15,12 @@ from .workflow_spec import install_defaults as workflow_install_defaults
 
 SUPPORTED_RUNTIMES = ("claude-code", "codex", "opencode")
 SUPPORTED_SCOPES = ("project", "user")
+_CLAUDE_PLUGIN_NAME = "r2c"
+_CLAUDE_PLUGIN_DISPLAY_NAME = "R2C Agent Guard"
+_CLAUDE_SKILLS_DIR_MARKETPLACE = "skills-dir"
+_CLAUDE_SKILLS_DIR_PLUGIN_ID = f"{_CLAUDE_PLUGIN_NAME}@{_CLAUDE_SKILLS_DIR_MARKETPLACE}"
+_CLAUDE_PLUGIN_RELATIVE_DIR = f".claude/skills/{_CLAUDE_PLUGIN_NAME}"
+_CLAUDE_PLUGIN_SKILLS_RELATIVE_DIR = f"{_CLAUDE_PLUGIN_RELATIVE_DIR}/skills"
 SHORT_FLAG_ALIASES = {
     "-i": "interactive",
     "-r": "runtime",
@@ -156,7 +162,13 @@ def codex_skills_install_dir(scope: str, cwd: Path, home_dir: Path) -> Path:
 
 def claude_skills_install_dir(scope: str, cwd: Path, home_dir: Path) -> Path:
     """Claude skills install dir."""
-    return cwd / ".claude" / "skills" if scope == "project" else home_dir / ".claude" / "skills"
+    return claude_plugin_install_dir(scope, cwd, home_dir) / "skills"
+
+
+def claude_plugin_install_dir(scope: str, cwd: Path, home_dir: Path) -> Path:
+    """Claude skills-directory plugin install dir."""
+    skills_root = cwd / ".claude" / "skills" if scope == "project" else home_dir / ".claude" / "skills"
+    return skills_root / _CLAUDE_PLUGIN_NAME
 
 
 def opencode_skills_install_dir(scope: str, cwd: Path, home_dir: Path) -> Path:
@@ -370,6 +382,66 @@ def install_claude_skills_bundle(
     )
 
 
+def install_claude_plugin_manifest(plugin_dir: Path) -> str:
+    """Install the Claude skills-directory plugin manifest."""
+    manifest_path = plugin_dir / ".claude-plugin" / "plugin.json"
+    write_json(
+        manifest_path,
+        {
+            "name": _CLAUDE_PLUGIN_NAME,
+            "displayName": _CLAUDE_PLUGIN_DISPLAY_NAME,
+            "version": "1.0.0",
+            "description": "Workflow guard skills for agent-guard.",
+        },
+    )
+    return str(manifest_path)
+
+
+def enable_claude_skills_dir_plugin(config: dict[str, Any]) -> dict[str, Any]:
+    """Enable the local Claude skills-directory plugin."""
+    next_config = dict(config)
+    enabled_plugins = next_config.get("enabledPlugins")
+    if not isinstance(enabled_plugins, dict):
+        enabled_plugins = {}
+    else:
+        enabled_plugins = dict(enabled_plugins)
+    enabled_plugins[_CLAUDE_SKILLS_DIR_PLUGIN_ID] = True
+    next_config["enabledPlugins"] = enabled_plugins
+    return next_config
+
+
+def disable_claude_skills_dir_plugin(config: dict[str, Any]) -> dict[str, Any]:
+    """Remove the local Claude skills-directory plugin enablement."""
+    next_config = dict(config)
+    enabled_plugins = next_config.get("enabledPlugins")
+    if not isinstance(enabled_plugins, dict):
+        return next_config
+    cleaned_plugins = dict(enabled_plugins)
+    cleaned_plugins.pop(_CLAUDE_SKILLS_DIR_PLUGIN_ID, None)
+    if cleaned_plugins:
+        next_config["enabledPlugins"] = cleaned_plugins
+    else:
+        next_config.pop("enabledPlugins", None)
+    return next_config
+
+
+def remove_legacy_claude_standalone_skills(skills_root: Path, plugin_root: Path, source_root: Path) -> None:
+    """Remove old standalone Claude skill copies managed by agent-guard."""
+    if not skills_root.exists():
+        return
+    for source_file in sorted(source_skills_dir(source_root).glob("*.md")):
+        skill_id = skill_slug_from_source(source_file)
+        legacy_flat = skills_root / f"{skill_id}.md"
+        if legacy_flat.exists():
+            legacy_flat.unlink()
+        legacy_native = skills_root / skill_id
+        if legacy_native == plugin_root:
+            continue
+        legacy_skill = legacy_native / "SKILL.md"
+        if legacy_skill.exists():
+            shutil.rmtree(legacy_native)
+
+
 def install_opencode_skills_bundle(
     target_dir: Path,
     plugin_root: Path,
@@ -404,6 +476,11 @@ def uv_bridge_command(plugin_root: Path, action: str, skills_dir: Path) -> str:
 def claude_config_file(scope: str, cwd: Path, home_dir: Path) -> Path:
     """Claude config file."""
     return cwd / ".claude" / "settings.local.json" if scope == "project" else home_dir / ".claude" / "settings.json"
+
+
+def claude_global_config_file(home_dir: Path) -> Path:
+    """Claude global state config file."""
+    return home_dir / ".claude.json"
 
 
 def codex_hooks_file(scope: str, cwd: Path, home_dir: Path) -> Path:
@@ -483,6 +560,32 @@ def merge_claude_hooks(existing_hooks: dict[str, Any], new_hooks: dict[str, Any]
     return merged
 
 
+def activate_claude_project_plugin(cwd: Path, home_dir: Path) -> str:
+    """Mark the project as trusted so Claude can load project-scope directory plugins."""
+    config_path = claude_global_config_file(home_dir)
+    config = read_json_if_exists(config_path, {})
+    projects = config.get("projects")
+    if not isinstance(projects, dict):
+        projects = {}
+    else:
+        projects = dict(projects)
+
+    project_key = str(cwd)
+    project_config = projects.get(project_key)
+    if not isinstance(project_config, dict):
+        project_config = {}
+    else:
+        project_config = dict(project_config)
+    project_config["hasTrustDialogAccepted"] = True
+
+    seen_count = project_config.get("projectOnboardingSeenCount")
+    project_config["projectOnboardingSeenCount"] = max(seen_count if isinstance(seen_count, int) else 0, 1)
+    projects[project_key] = project_config
+    config["projects"] = projects
+    write_json(config_path, config)
+    return str(config_path)
+
+
 def install_claude_code(
     cwd: Path,
     home_dir: Path,
@@ -496,7 +599,9 @@ def install_claude_code(
     config_path = claude_config_file(scope, cwd, home_dir)
     config = read_json_if_exists(config_path, {})
     marker = "agent-guard-bridge"
+    claude_plugin_dir = claude_plugin_install_dir(scope, cwd, home_dir)
     skills_dir = claude_skills_install_dir(scope, cwd, home_dir)
+    remove_legacy_claude_standalone_skills(claude_plugin_dir.parent, claude_plugin_dir, plugin_root)
     skill_files, selection_warnings = install_claude_skills_bundle(
         skills_dir,
         plugin_root,
@@ -505,18 +610,27 @@ def install_claude_code(
         root_dir=cwd,
         workflow_id=workflow_id,
     )
+    manifest_file = install_claude_plugin_manifest(claude_plugin_dir)
     config["hooks"] = merge_claude_hooks(config.get("hooks", {}), build_claude_hooks(plugin_root, skills_dir), marker)
+    config = enable_claude_skills_dir_plugin(config)
     write_json(config_path, config)
+    activated_file = activate_claude_project_plugin(cwd, home_dir) if scope == "project" else None
     return {
         "runtime": "claude-code",
         "scope": scope,
-        "files_written": [str(config_path), *skill_files],
+        "files_written": [str(config_path), *([activated_file] if activated_file else []), manifest_file, *skill_files],
         "notes": [
             *selection_warnings,
             "Installed Claude Code hooks into a settings JSON file.",
             "Claude Code passes hook payloads over stdin and can block PreToolUse or Stop hooks with exit code 2.",
             "Session-start and status flows will auto-start agent-guard-fuse when the runtime binary is installed, so .agent/state.json and .agent/plan.yaml stay mounted under managed protection.",
-            "Workflow skills were installed into Claude's native .claude/skills/<skill>/SKILL.md layout and injected via AGENT_GUARD_SKILLS_DIR.",
+            f"Enabled the local Claude skills-directory plugin as {_CLAUDE_SKILLS_DIR_PLUGIN_ID}.",
+            *(
+                ["Marked the project trusted in Claude's global state so project-scope directory plugins load immediately."]
+                if activated_file
+                else []
+            ),
+            f"Workflow skills were installed into Claude's {_CLAUDE_PLUGIN_NAME} skills-directory plugin at {_CLAUDE_PLUGIN_SKILLS_RELATIVE_DIR}/<skill>/SKILL.md and injected via AGENT_GUARD_SKILLS_DIR.",
         ],
     }
 
@@ -798,13 +912,15 @@ def plan_uninstall_claude_code(cwd: Path, home_dir: Path, scope: str) -> dict[st
     config = read_json_if_exists(config_path, {})
     hooks = config.get("hooks", {})
     if not isinstance(hooks, dict):
-        return _build_plan_result("claude-code", scope, [])
+        hooks = {}
 
     cleaned_hooks, removed = _remove_marked_hook_entries(hooks, "agent-guard-bridge")
-    if removed == 0:
+    cleaned_enabled_plugins = disable_claude_skills_dir_plugin(config)
+    plugin_enablement_removed = cleaned_enabled_plugins != config
+    if removed == 0 and not plugin_enablement_removed:
         return _build_plan_result("claude-code", scope, [])
 
-    next_config = dict(config)
+    next_config = dict(cleaned_enabled_plugins)
     if cleaned_hooks:
         next_config["hooks"] = cleaned_hooks
     else:
@@ -911,7 +1027,7 @@ def plan_uninstall_runtime(argv: list[str], cwd: Path, home_dir: Path | None) ->
     resolved_home = home_dir or Path(os.path.expanduser("~"))
     if runtime == "claude-code":
         plan = plan_uninstall_claude_code(cwd, resolved_home, str(scope))
-        skills_dir = claude_skills_install_dir(str(scope), cwd, resolved_home)
+        skills_dir = claude_plugin_install_dir(str(scope), cwd, resolved_home)
     elif runtime == "codex":
         plan = plan_uninstall_codex(cwd, resolved_home, str(scope))
         skills_dir = codex_skills_install_dir(str(scope), cwd, resolved_home)
@@ -977,7 +1093,7 @@ def apply_uninstall_plan(plan: dict[str, Any], cwd: Path, home_dir: Path | None)
                 target_path = claude_config_file(scope, cwd, resolved_home)
                 config = read_json_if_exists(target_path, {})
                 cleaned_hooks, _ = _remove_marked_hook_entries(config.get("hooks", {}), "agent-guard-bridge")
-                next_config = dict(config)
+                next_config = disable_claude_skills_dir_plugin(config)
                 if cleaned_hooks:
                     next_config["hooks"] = cleaned_hooks
                 else:
