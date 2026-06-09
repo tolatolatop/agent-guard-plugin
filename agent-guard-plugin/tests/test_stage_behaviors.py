@@ -203,12 +203,14 @@ def test_ready_to_summarize_mark_done_targets_completion_stage() -> None:
         patch("agent_guard.transitions.save_task_session") as save_session,
         patch("agent_guard.transitions._append_transition_event", return_value={"hook": "WorkflowTransition"}),
         patch("agent_guard.transitions.canonical_completion_stage", return_value="DONE"),
+        patch("agent_guard.transitions._next_stages", return_value=[]),
     ):
         result = mark_done(root_dir)
 
     guard.assert_called_once_with(root_dir, session, "DONE", "mark-done", None)
     assert save_session.call_args.args[1].stage == "DONE"
     assert result["state"]["stage"] == "DONE"
+    assert result["next_stages"] == []
 
 
 def test_needs_failure_analysis_exit_guard_checks_artifacts() -> None:

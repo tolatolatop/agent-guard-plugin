@@ -74,3 +74,11 @@ def test_missing_command_prints_help_and_exits_nonzero() -> None:
 
     assert code == 1
     assert "Usage: agent-guard <command> [options]" in output
+
+
+def test_json_command_output_is_single_line() -> None:
+    """Test that JSON CLI output stays shell-friendly on one line."""
+    code, output = invoke_help(["init"])
+
+    assert code == 0
+    assert len(output.splitlines()) == 1

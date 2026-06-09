@@ -155,7 +155,7 @@ COMMAND_HELP: dict[str, str] = {
 
 def print_json(data: dict[str, Any], exit_code: int = 0) -> None:
     """Print json."""
-    sys.stdout.write(json.dumps(data, indent=2) + "\n")
+    sys.stdout.write(json.dumps(data, separators=(",", ":")) + "\n")
     raise SystemExit(exit_code)
 
 

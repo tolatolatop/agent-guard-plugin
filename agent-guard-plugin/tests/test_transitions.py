@@ -38,6 +38,7 @@ def test_advance_stage_allows_legal_transition_and_blocks_illegal_transition() -
 
     result = advance_stage(root_dir, "PLANNING")
     assert result["state"]["stage"] == "PLANNING"
+    assert result["next_stages"] == ["RED_TEST", "GREEN_IMPL"]
 
     try:
         advance_stage(root_dir, "DONE")
@@ -78,6 +79,7 @@ def test_complete_step_updates_current_step_for_next_execution_step() -> None:
     state = result["state"]
     assert state["current_step"] == "green-001"
     assert state["stage"] == "RED_TEST"
+    assert result["next_stages"] == ["GREEN_IMPL", "NEEDS_FAILURE_ANALYSIS"]
     assert plan_steps(root_dir)[0]["status"] == "done"
 
 
@@ -509,6 +511,18 @@ def test_cli_representative_flow_from_start_to_done() -> None:
     )
     assert invoke_cli(root_dir, ["mark-done"])[0] == 0
     assert load_state(root_dir)["stage"] == "DONE"
+
+
+def test_transition_cli_outputs_next_stages() -> None:
+    """Test that transition CLI responses include legal next stages."""
+    root_dir = make_temp_repo()
+    write_state(root_dir, task_id="password-reset", stage="CLARIFYING")
+
+    code, payload = invoke_cli(root_dir, ["advance-stage", "--to", "PLANNING"])
+
+    assert code == 0
+    assert payload["state"]["stage"] == "PLANNING"
+    assert payload["next_stages"] == ["RED_TEST", "GREEN_IMPL"]
 
 
 def test_cli_failed_verify_requires_failure_analysis_then_allows_reentry() -> None:

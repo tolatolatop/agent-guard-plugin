@@ -143,6 +143,11 @@ def _plan_step_goal(root_dir: Path, step_id: str | None) -> str | None:
     return None
 
 
+def _next_stages(root_dir: Path, stage: str, workflow_id: str | None = None) -> list[str]:
+    """Return legal next stages from the given stage."""
+    return list(stage_transitions(root_dir, workflow_id).get(stage, []))
+
+
 def advance_stage(
     root_dir: Path,
     to_stage: str,
@@ -164,6 +169,7 @@ def advance_stage(
     return {
         "goal": stage_intent(to_stage, root_dir, session.workflow_id)["goal"],
         "step_goal": _plan_step_goal(root_dir, str(resolved_step) if resolved_step else None),
+        "next_stages": _next_stages(root_dir, next_session.stage, next_session.workflow_id),
         "state": next_session.to_mapping(),
         "event": event,
     }
@@ -199,6 +205,7 @@ def complete_step(
         "goal": stage_intent(current_stage, root_dir, session.workflow_id)["goal"],
         "completed_step_goal": _plan_step_goal(root_dir, step_id),
         "next_step_goal": _plan_step_goal(root_dir, next_step_id),
+        "next_stages": _next_stages(root_dir, next_session.stage, next_session.workflow_id),
         "state": next_session.to_mapping(),
         "event": event,
     }
@@ -213,7 +220,11 @@ def ready_to_summarize(root_dir: Path) -> dict[str, Any]:
     next_session = session.mark_ready_to_summarize(target_stage)
     save_task_session(root_dir, next_session)
     event = _append_transition_event(root_dir, "ready-to-summarize", from_stage, target_stage, next_session)
-    return {"state": next_session.to_mapping(), "event": event}
+    return {
+        "next_stages": _next_stages(root_dir, next_session.stage, next_session.workflow_id),
+        "state": next_session.to_mapping(),
+        "event": event,
+    }
 
 
 def mark_done(root_dir: Path) -> dict[str, Any]:
@@ -225,4 +236,8 @@ def mark_done(root_dir: Path) -> dict[str, Any]:
     next_session = session.mark_done(target_stage)
     save_task_session(root_dir, next_session)
     event = _append_transition_event(root_dir, "mark-done", from_stage, target_stage, next_session)
-    return {"state": next_session.to_mapping(), "event": event}
+    return {
+        "next_stages": _next_stages(root_dir, next_session.stage, next_session.workflow_id),
+        "state": next_session.to_mapping(),
+        "event": event,
+    }
