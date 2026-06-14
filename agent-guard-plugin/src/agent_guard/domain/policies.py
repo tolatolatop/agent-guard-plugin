@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..artifact_patterns import artifact_pattern_mtime_ns, artifact_pattern_text_candidates
+from ..artifact_patterns import artifact_pattern_mtime_candidates, artifact_pattern_mtime_ns
 from .models import FailureRecord, GuardDecision, TaskSession, VerificationRecord
 from .rules import RuleContext, evaluate_rule
 from ..managed_documents import (
@@ -234,7 +234,15 @@ class StageExitPolicyService:
                 continue
             matches = rule.get("matches")
             if matches:
-                content_candidates = artifact_pattern_text_candidates(self.root_dir, artifact_path)
+                # Content checks must apply to the same concrete artifact that
+                # satisfied freshness. For a glob, an old matching file plus a
+                # fresh non-matching file is still not valid evidence.
+                fresh_candidates = [
+                    candidate
+                    for candidate, mtime in artifact_pattern_mtime_candidates(self.root_dir, artifact_path)
+                    if previous_mtime is None or int(mtime) > int(previous_mtime)
+                ]
+                content_candidates = [candidate for candidate in fresh_candidates if candidate.is_file()]
                 if not any(
                     re.search(matches, candidate.read_text(encoding="utf-8"), re.MULTILINE) is not None
                     for candidate in content_candidates

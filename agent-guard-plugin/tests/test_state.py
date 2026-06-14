@@ -438,3 +438,52 @@ def test_stage_exit_policy_supports_nested_glob_regex_artifact_patterns() -> Non
     good_mtime = review_file.stat().st_mtime_ns + 1_000_000
     os.utime(review_file, ns=(good_mtime, good_mtime))
     assert service.exit_failures("NESTED_REVIEW") == []
+
+
+def test_stage_exit_policy_requires_fresh_glob_candidate_to_match_regex() -> None:
+    """A stale matching glob file should not validate a fresh non-matching file."""
+    root_dir = make_temp_repo()
+    write_repo_workflow(
+        root_dir,
+        "patterns",
+        "  NESTED_REVIEW:\n"
+        "    goal: Require nested review artifact.\n"
+        "    plan: deny\n"
+        "    allow:\n"
+        "      write:\n"
+        "        - output/**\n"
+        "      actions:\n"
+        "        - write outputs\n"
+        "      stop: true\n"
+        "      human: true\n"
+        "    deny:\n"
+        "      write: []\n"
+        "      actions: []\n"
+        "    enter: []\n"
+        "    exit:\n"
+        "      - path: output/*/review.md\n"
+        "        matches: '^# Review'\n"
+        "        display: 'review artifact must start with # Review.'\n"
+        "    expect: []\n"
+        "    next: []\n",
+    )
+    service = StageExitPolicyService(root_dir)
+    stale_matching = root_dir / "output" / "run-1" / "review.md"
+    stale_matching.parent.mkdir(parents=True, exist_ok=True)
+    stale_matching.write_text("# Review\nold\n", encoding="utf-8")
+
+    save_state(root_dir, {**DEFAULT_STATE, "task_id": "password-reset", "workflow_id": "patterns", "stage": "NESTED_REVIEW"})
+
+    fresh_nonmatching = root_dir / "output" / "run-2" / "review.md"
+    fresh_nonmatching.parent.mkdir(parents=True, exist_ok=True)
+    fresh_nonmatching.write_text("wrong header\n", encoding="utf-8")
+    bad_mtime = max(stale_matching.stat().st_mtime_ns, fresh_nonmatching.stat().st_mtime_ns) + 1_000_000
+    os.utime(fresh_nonmatching, ns=(bad_mtime, bad_mtime))
+
+    failures = service.exit_failures("NESTED_REVIEW")
+    assert failures == ["review artifact must start with # Review."]
+
+    fresh_nonmatching.write_text("# Review\nnew\n", encoding="utf-8")
+    good_mtime = fresh_nonmatching.stat().st_mtime_ns + 1_000_000
+    os.utime(fresh_nonmatching, ns=(good_mtime, good_mtime))
+    assert service.exit_failures("NESTED_REVIEW") == []

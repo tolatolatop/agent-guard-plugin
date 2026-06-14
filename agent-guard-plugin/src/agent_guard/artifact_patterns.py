@@ -55,11 +55,21 @@ def _safe_mtime_ns(path: Path) -> int | None:
 
 def artifact_pattern_mtime_ns(root_dir: Path, artifact_path: str) -> int | None:
     """Return the latest mtime across all concrete paths resolved from one artifact pattern."""
-    resolved = resolve_artifact_pattern(root_dir, artifact_path)
-    mtimes = [mtime for path in resolved if (mtime := _safe_mtime_ns(path)) is not None]
+    mtimes = [mtime for _, mtime in artifact_pattern_mtime_candidates(root_dir, artifact_path)]
     if not mtimes:
         return None
     return max(mtimes)
+
+
+def artifact_pattern_mtime_candidates(root_dir: Path, artifact_path: str) -> list[tuple[Path, int]]:
+    """Return resolved artifact candidates paired with their mtimes."""
+    resolved = resolve_artifact_pattern(root_dir, artifact_path)
+    candidates: list[tuple[Path, int]] = []
+    for path in resolved:
+        mtime = _safe_mtime_ns(path)
+        if mtime is not None:
+            candidates.append((path, mtime))
+    return candidates
 
 
 def artifact_pattern_text_candidates(root_dir: Path, artifact_path: str) -> list[Path]:
