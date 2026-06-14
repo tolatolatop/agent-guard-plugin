@@ -22,26 +22,38 @@ def test_session_start_includes_meta_skill_and_workflow_context() -> None:
     assert reminder["meta_skill"]["path"] == "docs/skills/using-workflow.md"
     assert reminder["meta_skill"]["name"] == "Using Workflow"
     assert reminder["workflow"]["workflow_metadata"]["id"] == "standard-ddd-example"
-    assert reminder["workflow"]["policy_roles"]["globals"]["paths"] == "hard_gate"
-    assert reminder["workflow"]["stage_policy"]["intent"]["goal"] == reminder["workflow"]["current_stage_goal"]
-    assert reminder["workflow"]["stage_policy"]["permissions"]["write"]["allow"] == ["tests/**"]
-    assert reminder["workflow"]["soft_prompt"]["goal"] == reminder["workflow"]["current_stage_goal"]
-    assert reminder["workflow"]["hard_gates"]["write_allow"] == ["tests/**"]
-    assert reminder["workflow"]["current_stage_goal"]
-    assert "GREEN_IMPL" in reminder["workflow"]["transitions_out"]
-    assert reminder["workflow"]["transition_graph_mermaid"]
-    assert any(skill["id"] == "plan-yaml" for skill in reminder["workflow"]["skill_catalog"])
-    assert reminder["workflow"]["stage_writable_paths"] == ["tests/**"]
-    assert reminder["workflow"]["stage_denied_paths"] == ["src/**", ".agent/plan.yaml"]
-    assert reminder["workflow"]["stage_expected_artifacts"] == [".agent/artifacts/red-test.log"]
-    assert reminder["workflow"]["stage_required_artifacts"] == []
-    assert reminder["workflow"]["complete_step_allowed_from_stages"] == ["RED_TEST", "GREEN_IMPL", "REVIEW", "VERIFY"]
-    assert reminder["workflow"]["session_start_navigator"]["skill_id"] == "using-workflow"
-    assert reminder["workflow"]["session_start_navigator"]["prompt_heading"] == "Workflow Navigator"
+    assert reminder["workflow"]["guidance"]["goal"]
+    assert reminder["workflow"]["guidance"]["allowed_actions"] == ["write tests", "run targeted tests", "save failing logs"]
+    assert reminder["workflow"]["guidance"]["forbidden_actions"] == ["write production code", "claim implementation is complete"]
+    assert reminder["workflow"]["guidance"]["expected_artifacts"] == [".agent/artifacts/red-test.log"]
+    assert reminder["workflow"]["guidance"]["display_artifacts"] == [".agent/artifacts/red-test.log"]
+    assert any(
+        "Do not modify .agent/state.json directly" in item
+        for item in reminder["workflow"]["guidance"]["global_guidance"]
+    )
+    assert reminder["workflow"]["gates"]["required_artifacts"] == []
+    assert "display_artifacts" not in reminder["workflow"]["gates"]
+    assert "GREEN_IMPL" in reminder["workflow"]["gates"]["exit"]
+    assert reminder["workflow"]["write_policy"]["allow"] == ["tests/**"]
+    assert reminder["workflow"]["write_policy"]["deny"] == ["src/**", ".agent/plan.yaml"]
+    assert reminder["workflow"]["write_policy"]["protected"] == [".agent/state.json"]
+    assert "GREEN_IMPL" in reminder["workflow"]["flow"]["next"]
+    assert reminder["workflow"]["flow"]["graph_mermaid"]
+    assert reminder["workflow"]["plan"]["mode"] == "advance"
+    assert reminder["workflow"]["plan"]["complete_step_allowed"] is True
+    assert reminder["workflow"]["plan"]["complete_step_allowed_from_stages"] == ["RED_TEST", "GREEN_IMPL", "REVIEW", "VERIFY"]
+    assert any(skill["id"] == "plan-yaml" for skill in reminder["workflow"]["context"]["skill_catalog"])
+    assert reminder["workflow"]["context"]["session_start_navigator"]["skill_id"] == "using-workflow"
+    assert reminder["workflow"]["context"]["session_start_navigator"]["prompt_heading"] == "Workflow Navigator"
+    assert "stage_policy" not in reminder["workflow"]
+    assert "permissions" not in reminder["workflow"]
     assert reminder["fuse"]["protection"] in {"mounted", "unavailable", "inactive", "error", "desynced"}
     assert "# Using Workflow" in reminder["prompt_block"]
     assert "Soft guidance:" in reminder["prompt_block"]
     assert "Hard gates:" in reminder["prompt_block"]
+    hard_gates_block = reminder["prompt_block"].split("Hard gates:", 1)[1].split("Transition graph", 1)[0]
+    assert "Global guidance:" not in hard_gates_block
+    assert ".agent/artifacts/red-test.log" not in hard_gates_block
     assert "Allowed actions:" in reminder["prompt_block"]
     assert "Transition graph (mermaid):" in reminder["prompt_block"]
     assert "Allowed paths:" not in reminder["prompt_block"]
@@ -49,6 +61,7 @@ def test_session_start_includes_meta_skill_and_workflow_context() -> None:
     assert "Stage writable paths:" in reminder["prompt_block"]
     assert "Stage denied paths:" in reminder["prompt_block"]
     assert "Stage expected artifacts:" in reminder["prompt_block"]
+    assert "Stage display artifacts:" in reminder["prompt_block"]
     assert "Stage required artifacts:" in reminder["prompt_block"]
     assert "Complete-step allowed from:" in reminder["prompt_block"]
     assert "Automatic transitions:" not in reminder["prompt_block"]
@@ -81,7 +94,7 @@ def test_session_start_uses_claude_skill_layout_when_configured() -> None:
         else:
             os.environ["AGENT_GUARD_SKILLS_DIR"] = previous
 
-    workflow_core = next(skill for skill in reminder["workflow"]["skill_catalog"] if skill["id"] == "workflow-core")
+    workflow_core = next(skill for skill in reminder["workflow"]["context"]["skill_catalog"] if skill["id"] == "workflow-core")
     assert reminder["meta_skill"]["absolute_path"].endswith(".claude/skills/using-workflow/SKILL.md")
     assert workflow_core["absolute_path"].endswith(".claude/skills/workflow-core/SKILL.md")
     assert "# Using Workflow" in reminder["prompt_block"]
@@ -94,8 +107,8 @@ def test_session_start_projects_green_impl_write_scope() -> None:
 
     reminder = get_session_reminder(root_dir)
 
-    assert reminder["workflow"]["stage_writable_paths"] == ["**"]
-    assert reminder["workflow"]["stage_denied_paths"] == [".agent/**"]
+    assert reminder["workflow"]["write_policy"]["allow"] == ["**"]
+    assert reminder["workflow"]["write_policy"]["deny"] == [".agent/**"]
 
 
 def test_session_start_includes_recent_archive_after_reset() -> None:
@@ -134,8 +147,8 @@ def test_session_start_defaults_to_idle_when_agent_dir_is_missing() -> None:
     assert reminder["stage"] == "IDLE"
     assert reminder["current_step"] is None
     assert reminder["next_required_action"] is None
-    assert "explore repository directories and files in read-only mode" in reminder["workflow"]["allowed_actions"]
-    assert "modify files before a task is started" in reminder["workflow"]["forbidden_actions"]
+    assert "explore repository directories and files in read-only mode" in reminder["workflow"]["guidance"]["allowed_actions"]
+    assert "modify files before a task is started" in reminder["workflow"]["guidance"]["forbidden_actions"]
 
 
 def test_session_start_reports_fuse_degradation_when_runtime_is_unavailable(

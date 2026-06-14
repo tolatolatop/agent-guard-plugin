@@ -26,7 +26,7 @@ def get_session_reminder(root_dir: Path) -> dict[str, Any]:
     workflow_id = str(state.get("workflow_id")) if isinstance(state.get("workflow_id"), str) else None
     workflow_context = get_workflow_context(root_dir, stage, workflow_id)
     recent_archive = latest_archive(root_dir)
-    navigator = workflow_context["session_start_navigator"]
+    navigator = workflow_context["context"]["session_start_navigator"]
     prompt_block = build_session_prompt_block(
         task_id=state.get("task_id"),
         stage=stage,

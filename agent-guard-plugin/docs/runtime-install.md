@@ -133,10 +133,12 @@ Artifact retention:
   - `review.md`
   - `summary.md`
 
-`session-start` now returns two layers of prompt-ready guidance:
+`session-start` returns prompt-ready context:
 
 - a prominent `meta_skill` navigator pointing at `docs/skills/using-workflow.md`
-- a `workflow` block with current-stage goal, legal transitions, action constraints, and skill references
+- a `workflow.guidance` block with stage goal, allowed/forbidden action guidance, expected artifacts, and global guidance
+- a `workflow.gates` block with required artifacts, enter/exit displays, finalization checks, and failure-policy summaries
+- `workflow.write_policy`, `workflow.flow`, `workflow.plan`, and `workflow.context` blocks for write rules, stage graph, plan behavior, and skill/install context
 
 The intent is to inject only a concise navigator into the visible prompt, while leaving the full workflow and specialist skills on disk for on-demand loading.
 

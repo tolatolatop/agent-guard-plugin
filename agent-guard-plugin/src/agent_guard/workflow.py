@@ -11,13 +11,20 @@ from .transitions import (
 )
 from .workflow_spec import (
     complete_step_allowed_from_stages,
+    failure_policy,
+    finalization_policy,
     global_gates,
+    install_defaults,
+    path_policy,
     session_start_defaults,
+    stage_entry_conditions,
+    stage_exit_conditions,
+    stage_plan_mode,
     stage_policy_view,
     stage_transitions,
     transition_graph_mermaid,
     workflow_metadata,
-    workflow_policy_roles,
+    workflow_entry_stage,
 )
 
 def _parse_skill_metadata(file_path: Path, skill_id: str) -> dict[str, str]:
@@ -146,43 +153,73 @@ def get_workflow_context(root_dir: Path, stage: str, workflow_id: str | None = N
     navigator = resolve_session_start_navigator(skill_catalog, root_dir, workflow_id)
     transitions = transition_graph_mermaid(root_dir, workflow_id)
     stage_map = stage_transitions(root_dir, workflow_id)
-    # This dictionary is the single payload used by session-start and related
-    # reminders, so it keeps prompt generation and machine-readable state aligned.
-    return {
-        "workflow_metadata": workflow_metadata(root_dir, workflow_id),
-        "policy_roles": workflow_policy_roles(root_dir, workflow_id),
-        "stage_policy": rules,
-        "soft_prompt": {
-            "goal": rules["intent"]["goal"],
-            "allowed_actions": rules["permissions"]["actions"]["allow"],
-            "forbidden_actions": rules["permissions"]["actions"]["deny"],
-            "expected_artifacts": rules["evidence"]["expected"],
-        },
-        "hard_gates": {
-            "write_allow": rules["permissions"]["write"]["allow"],
-            "write_deny": rules["permissions"]["write"]["deny"],
-            "required_artifacts": rules["evidence"]["required"],
-            "transition_targets": stage_map.get(stage, []),
-            "transition_conditions": transition_conditions_for_stage(stage, root_dir, workflow_id),
-            "complete_step": rules["permissions"]["commands"]["complete_step"],
-            "global_gates": global_gates(root_dir, workflow_id),
-        },
-        "current_stage_goal": rules["intent"]["goal"],
+    globals_guidance = global_gates(root_dir, workflow_id)
+    paths = path_policy(root_dir, workflow_id)
+    finalize = finalization_policy(root_dir, workflow_id)
+    failures = failure_policy(root_dir, workflow_id)
+    install = install_defaults(root_dir, workflow_id)
+    guidance = {
+        "goal": rules["intent"]["goal"],
         "allowed_actions": rules["permissions"]["actions"]["allow"],
         "forbidden_actions": rules["permissions"]["actions"]["deny"],
-        "stage_writable_paths": rules["permissions"]["write"]["allow"],
-        "stage_denied_paths": rules["permissions"]["write"]["deny"],
-        "stage_display_artifacts": rules["evidence"]["display"],
-        "stage_expected_artifacts": rules["evidence"]["expected"],
-        "stage_required_artifacts": rules["evidence"]["required"],
-        "transitions_in": [source for source, targets in stage_map.items() if stage in targets],
-        "transitions_out": stage_map.get(stage, []),
+        "expected_artifacts": rules["evidence"]["expected"],
+        "display_artifacts": rules["evidence"]["display"],
+        "global_guidance": globals_guidance,
+    }
+    gates = {
+        "required_artifacts": rules["evidence"]["required"],
+        "enter": stage_entry_conditions(stage, None, root_dir, workflow_id),
+        "exit": stage_exit_conditions(stage, root_dir, workflow_id),
+        "finalization": {
+            "required_rules": finalize["required_rules"],
+            "messages": finalize["rule_messages"],
+        },
+        "failure": {
+            "repeat_threshold": failures["repeat_threshold"],
+            "fingerprint_roots": failures["fingerprint_roots"],
+        },
+    }
+    write_policy = {
+        "allow": rules["permissions"]["write"]["allow"],
+        "deny": rules["permissions"]["write"]["deny"],
+        "protected": paths["protected_paths"],
+        "sensitive": paths["sensitive_paths"],
+    }
+    flow = {
+        "entry": workflow_entry_stage(root_dir, workflow_id),
+        "current": stage,
+        "next": stage_map.get(stage, []),
+        "inbound": [source for source, targets in stage_map.items() if stage in targets],
+        "graph": stage_map,
+        "graph_mermaid": transitions,
         "transition_conditions": transition_conditions_for_stage(stage, root_dir, workflow_id),
-        "transition_graph_mermaid": transitions,
+    }
+    plan = {
+        "mode": stage_plan_mode(stage, root_dir, workflow_id),
+        "complete_step_allowed": stage in complete_step_allowed_from_stages(root_dir, workflow_id),
         "complete_step_allowed_from_stages": complete_step_allowed_from_stages(root_dir, workflow_id),
-        "global_gates": global_gates(root_dir, workflow_id),
-        "skill_catalog": skill_catalog,
+    }
+    context = {
         "session_start_navigator": navigator,
+        "skill_catalog": skill_catalog,
+        "install_defaults": {
+            "skills": {
+                "match": install["skill_match"],
+                "exclude_match": install["skill_exclude_match"],
+            }
+        },
+    }
+    # This dictionary is the session-start contract. It separates soft prompt
+    # guidance from hard gates and write policy so callers do not infer runtime
+    # behavior from display-only fields such as expect or allow.actions.
+    return {
+        "workflow_metadata": workflow_metadata(root_dir, workflow_id),
+        "guidance": guidance,
+        "gates": gates,
+        "write_policy": write_policy,
+        "flow": flow,
+        "plan": plan,
+        "context": context,
     }
 
 
@@ -196,22 +233,22 @@ def build_session_prompt_block(
     recent_archive: dict[str, Any] | None = None,
 ) -> str:
     """Build session prompt block."""
-    transitions_out = ", ".join(workflow_context["transitions_out"]) or "none"
+    transitions_out = ", ".join(workflow_context["flow"]["next"]) or "none"
     transition_conditions = " | ".join(
         f"{target}: {', '.join(conditions)}"
-        for target, conditions in workflow_context["transition_conditions"].items()
+        for target, conditions in workflow_context["flow"]["transition_conditions"].items()
     ) or "none"
-    allowed = "; ".join(workflow_context["allowed_actions"])
-    forbidden = "; ".join(workflow_context["forbidden_actions"])
-    gates = "; ".join(workflow_context["global_gates"])
-    stage_writable_paths = workflow_context["stage_writable_paths"] or ["<none>"]
-    stage_denied_paths = workflow_context["stage_denied_paths"] or ["<none>"]
-    stage_display_artifacts = workflow_context["stage_display_artifacts"] or ["<none>"]
-    stage_expected_artifacts = workflow_context["stage_expected_artifacts"] or ["<none>"]
-    stage_required_artifacts = workflow_context["stage_required_artifacts"] or ["<none>"]
-    transition_graph = workflow_context["transition_graph_mermaid"]
-    complete_step_allowed = workflow_context["complete_step_allowed_from_stages"] or ["<none>"]
-    navigator = workflow_context["session_start_navigator"]
+    allowed = "; ".join(workflow_context["guidance"]["allowed_actions"])
+    forbidden = "; ".join(workflow_context["guidance"]["forbidden_actions"])
+    guidance = "; ".join(workflow_context["guidance"]["global_guidance"])
+    stage_writable_paths = workflow_context["write_policy"]["allow"] or ["<none>"]
+    stage_denied_paths = workflow_context["write_policy"]["deny"] or ["<none>"]
+    stage_display_artifacts = workflow_context["guidance"]["display_artifacts"] or ["<none>"]
+    stage_expected_artifacts = workflow_context["guidance"]["expected_artifacts"] or ["<none>"]
+    stage_required_artifacts = workflow_context["gates"]["required_artifacts"] or ["<none>"]
+    transition_graph = workflow_context["flow"]["graph_mermaid"]
+    complete_step_allowed = workflow_context["plan"]["complete_step_allowed_from_stages"] or ["<none>"]
+    navigator = workflow_context["context"]["session_start_navigator"]
     archive_line = ""
     if recent_archive:
         archive_line = (
@@ -226,21 +263,21 @@ def build_session_prompt_block(
         f"Next required action: {next_step or 'none'}\n"
         f"Can finalize: {can_finalize}\n"
         "Soft guidance:\n"
-        f"Stage goal: {workflow_context['current_stage_goal']}\n"
+        f"Stage goal: {workflow_context['guidance']['goal']}\n"
         f"Allowed actions: {allowed}\n"
         f"Forbidden actions: {forbidden}\n"
+        f"Global guidance: {guidance}\n"
         f"Stage expected artifacts: {stage_expected_artifacts}\n"
+        f"Stage display artifacts: {stage_display_artifacts}\n"
         "Hard gates:\n"
         f"Stage exits: {transitions_out}\n"
         f"Stage exit conditions: {transition_conditions}\n"
-        f"Global gates: {gates}\n"
         "Transition graph (mermaid):\n"
         "```mermaid\n"
         f"{transition_graph}\n"
         "```\n"
         + f"Stage writable paths: {stage_writable_paths}\n"
         + f"Stage denied paths: {stage_denied_paths}\n"
-        + f"Stage artifacts: {stage_display_artifacts}\n"
         + f"Stage required artifacts: {stage_required_artifacts}\n"
         + f"Complete-step allowed from: {complete_step_allowed}\n"
         + f"{navigator['prompt_heading']}:\n"
