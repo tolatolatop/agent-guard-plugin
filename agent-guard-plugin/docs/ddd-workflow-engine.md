@@ -345,12 +345,12 @@ The rule composition is workflow data.
 
 This preserves safety and testability while avoiding arbitrary script execution in the DSL.
 
-## Compatibility Mapping
+## Historical Compatibility Mapping
 
-The current repository keeps a canonical internal model and a compatibility projection.
-The author-facing workflow file already uses the new stage-centered DSL.
+This section records the historical migration concern that led to the stage-centered DSL.
+It is not a current implementation contract: current workflow files must use `version: 2`, and the runtime no longer exposes the old canonical compatibility projection.
 
-Mapping:
+Historical mapping:
 
 - `goal` -> stage `goal`
 - `plan_mode` -> stage `plan`

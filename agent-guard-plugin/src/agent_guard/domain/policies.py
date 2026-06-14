@@ -19,13 +19,13 @@ from ..managed_documents import (
 from ..events import append_event
 from ..infrastructure.repositories import FailuresRepository, JobsRepository, StateRepository
 from ..workflow_spec import (
-    canonical_expected_failure_stage,
-    canonical_failure_analysis_stage,
-    canonical_verification_stage,
+    expected_failure_stage,
+    failure_analysis_stage,
     failure_policy,
     finalization_policy,
     path_policy,
     stage_required_artifact_rules,
+    verification_stage,
 )
 
 
@@ -305,14 +305,14 @@ class FailurePolicyService:
             )
         self.failures_repo.save(failure)
 
-        expected_failure_stage = canonical_expected_failure_stage(self.root_dir, session.workflow_id)
-        analysis_stage = canonical_failure_analysis_stage(self.root_dir, session.workflow_id)
-        verification_stage = canonical_verification_stage(self.root_dir, session.workflow_id)
-        expected_red_failure = session.stage == expected_failure_stage and exit_code != 0
+        red_stage = expected_failure_stage(self.root_dir, session.workflow_id)
+        analysis_stage = failure_analysis_stage(self.root_dir, session.workflow_id)
+        verify_stage = verification_stage(self.root_dir, session.workflow_id)
+        expected_red_failure = session.stage == red_stage and exit_code != 0
         next_session = session
         if exit_code != 0 and not expected_red_failure and analysis_stage:
             next_session = next_session.enter_failure_analysis(analysis_stage)
-        if verification_stage and session.stage == verification_stage:
+        if verify_stage and session.stage == verify_stage:
             next_session = next_session.record_verification(
                 VerificationRecord(
                     command=command,

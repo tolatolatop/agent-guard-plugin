@@ -189,7 +189,7 @@ def _string_list(value: Any, label: str) -> list[str]:
 
 
 def _normalize_required_artifact_entry(value: Any, label: str) -> dict[str, str]:
-    """Normalize one required-artifact entry from flat or grouped DSL."""
+    """Normalize one required-artifact entry."""
     if isinstance(value, str):
         return {"path": value}
     if not isinstance(value, dict):
@@ -208,12 +208,6 @@ def _normalize_required_artifact_entry(value: Any, label: str) -> dict[str, str]
         if not isinstance(display, str) or not display.strip():
             raise RuntimeError(f"{label} item display must be a non-empty string.")
         normalized["display"] = display
-    message = value.get("message")
-    if message is not None:
-        if not isinstance(message, str) or not message.strip():
-            raise RuntimeError(f"{label} item message must be a non-empty string.")
-        if "display" not in normalized:
-            normalized["display"] = message
     return normalized
 
 
@@ -221,8 +215,8 @@ def _normalize_required_artifacts(value: Any, label: str) -> list[Any]:
     return [_normalize_required_artifact_entry(item, label) for item in _require_list(value, label)]
 
 
-def _normalize_canonical_check_item(value: Any, label: str) -> str | dict[str, str]:
-    """Normalize one canonical check item."""
+def _normalize_check_item(value: Any, label: str) -> str | dict[str, str]:
+    """Normalize one stage check item."""
     if isinstance(value, str):
         if not value.strip():
             raise RuntimeError(f"{label} item must be a non-empty string.")
@@ -253,26 +247,6 @@ def _normalize_canonical_check_item(value: Any, label: str) -> str | dict[str, s
     raise RuntimeError(f"{label} item must define either path or rule.")
 
 
-def _normalize_canonical_check_items(value: Any, label: str) -> list[str | dict[str, str]]:
-    return [_normalize_canonical_check_item(item, label) for item in _require_list(value, label)]
-
-
-def _legacy_plan_mode(stage_name: str) -> str:
-    """Map legacy coding-oriented stages to the canonical plan mode."""
-    if stage_name == "PLANNING":
-        return "create"
-    if stage_name in {"READY_TO_SUMMARIZE", "DONE"}:
-        return "complete"
-    if stage_name in {"RED_TEST", "GREEN_IMPL", "REVIEW", "VERIFY", "NEEDS_FAILURE_ANALYSIS"}:
-        return "advance" if stage_name in {"RED_TEST", "GREEN_IMPL", "REVIEW", "VERIFY"} else "follow"
-    return "deny"
-
-
-def _legacy_stop_allowed(stage_name: str) -> bool:
-    """Compatibility stop behavior for the current grouped workflow."""
-    return stage_name in {"IDLE", "CLARIFYING", "PLANNING", "NEEDS_HUMAN", "DONE"}
-
-
 def _apply_plan_path_policy(plan_mode: str, writable_paths: list[str], denied_paths: list[str]) -> tuple[list[str], list[str]]:
     """Bind .agent/plan.yaml write access to the stage plan mode."""
     normalized_writable = [str(item) for item in writable_paths if str(item) != ".agent/plan.yaml"]
@@ -299,74 +273,9 @@ def _apply_plan_artifact_defaults(
     return normalized_expected, normalized_required
 
 
-def _normalize_stage_from_grouped(stage_name: str, stage_data: dict[str, Any]) -> dict[str, Any]:
-    intent = _require_mapping(stage_data.get("intent", {}), f".workflow.yaml grouped stage {stage_name} intent")
-    permissions = _require_mapping(stage_data.get("permissions", {}), f".workflow.yaml grouped stage {stage_name} permissions")
-    transitions = _require_mapping(stage_data.get("transitions", {}), f".workflow.yaml grouped stage {stage_name} transitions")
-    evidence = _require_mapping(stage_data.get("evidence", {}), f".workflow.yaml grouped stage {stage_name} evidence")
-
-    write = _require_mapping(permissions.get("write", {}), f".workflow.yaml grouped stage {stage_name} permissions.write")
-    actions = _require_mapping(permissions.get("actions", {}), f".workflow.yaml grouped stage {stage_name} permissions.actions")
-    commands = _require_mapping(permissions.get("commands", {}), f".workflow.yaml grouped stage {stage_name} permissions.commands")
-    handoff = _require_mapping(permissions.get("handoff", {}), f".workflow.yaml grouped stage {stage_name} permissions.handoff")
-
-    complete_step = commands.get("complete_step", "deny")
-    if complete_step not in {"allow", "deny"}:
-        raise RuntimeError(f".workflow.yaml grouped stage {stage_name} permissions.commands.complete_step must be allow or deny.")
-
-    human_stop = handoff.get("human_stop", "allow")
-    if human_stop not in {"allow", "deny"}:
-        raise RuntimeError(f".workflow.yaml grouped stage {stage_name} permissions.handoff.human_stop must be allow or deny.")
-
-    plan_mode = _legacy_plan_mode(stage_name)
-    writable_paths, denied_paths = _apply_plan_path_policy(
-        plan_mode,
-        _string_list(write.get("allow", []), f".workflow.yaml grouped stage {stage_name} permissions.write.allow"),
-        _string_list(write.get("deny", []), f".workflow.yaml grouped stage {stage_name} permissions.write.deny"),
-    )
-
-    expected_artifacts, required_artifacts = _apply_plan_artifact_defaults(
-        plan_mode,
-        _string_list(evidence.get("expected", []), f".workflow.yaml grouped stage {stage_name} evidence.expected"),
-        _normalize_required_artifacts(evidence.get("required", []), f".workflow.yaml grouped stage {stage_name} evidence.required"),
-    )
-
-    normalized: dict[str, Any] = {
-        "goal": str(intent.get("goal", "")),
-        "allowed_actions": _string_list(actions.get("allow", []), f".workflow.yaml grouped stage {stage_name} permissions.actions.allow"),
-        "forbidden_actions": _string_list(actions.get("deny", []), f".workflow.yaml grouped stage {stage_name} permissions.actions.deny"),
-        "allowed_next_stages": _string_list(transitions.get("to", []), f".workflow.yaml grouped stage {stage_name} transitions.to"),
-        "entry_conditions": {
-            "any": _require_list(transitions.get("enter_when", []), f".workflow.yaml grouped stage {stage_name} transitions.enter_when"),
-        },
-        "exit_conditions": {
-            "any": [],
-        },
-        "artifacts_expected": expected_artifacts,
-        "artifacts_required": required_artifacts,
-        "write_policy": {
-            "writable_paths": writable_paths,
-            "denied_paths": denied_paths,
-        },
-        "plan_mode": plan_mode,
-    }
-    if complete_step == "allow":
-        normalized["allows_complete_step"] = True
-    if human_stop == "deny":
-        normalized["forbid_needs_human"] = {
-            "display": str(
-                handoff.get(
-                    "deny_message",
-                    "Current stage does not allow human intervention; continue advancing the task.",
-                )
-            )
-        }
-    return normalized
-
-
-def _normalize_entry_condition_from_canonical(stage_name: str, value: Any) -> dict[str, str]:
-    """Normalize one canonical enter-condition item into the flat internal form."""
-    item = _normalize_canonical_check_item(value, f".workflow.yaml canonical stage {stage_name} enter")
+def _normalize_entry_condition_from_dsl(stage_name: str, value: Any) -> dict[str, str]:
+    """Normalize one enter/exit condition item into the internal form."""
+    item = _normalize_check_item(value, f".workflow.yaml stage {stage_name} enter")
     if isinstance(item, str):
         return {"path": item, "display": f"{item} must exist"}
     if "path" in item:
@@ -386,26 +295,26 @@ def _normalize_entry_condition_from_canonical(stage_name: str, value: Any) -> di
         return normalized
     if "display" in item:
         return {"display": item["display"]}
-    raise RuntimeError(f".workflow.yaml canonical stage {stage_name} enter item must define a displayable condition.")
+    raise RuntimeError(f".workflow.yaml stage {stage_name} enter item must define a displayable condition.")
 
 
-def _normalize_stage_from_canonical(stage_name: str, stage_data: dict[str, Any]) -> dict[str, Any]:
-    """Normalize one canonical stage into the flat internal workflow format."""
-    allow = _require_mapping(stage_data.get("allow", {}), f".workflow.yaml canonical stage {stage_name} allow")
-    deny = _require_mapping(stage_data.get("deny", {}), f".workflow.yaml canonical stage {stage_name} deny")
+def _normalize_stage_from_dsl(stage_name: str, stage_data: dict[str, Any]) -> dict[str, Any]:
+    """Normalize one current-DSL stage into the internal workflow format."""
+    allow = _require_mapping(stage_data.get("allow", {}), f".workflow.yaml stage {stage_name} allow")
+    deny = _require_mapping(stage_data.get("deny", {}), f".workflow.yaml stage {stage_name} deny")
     plan_mode = str(stage_data.get("plan", "deny"))
     writable_paths, denied_paths = _apply_plan_path_policy(
         plan_mode,
-        _string_list(allow.get("write", []), f".workflow.yaml canonical stage {stage_name} allow.write"),
-        _string_list(deny.get("write", []), f".workflow.yaml canonical stage {stage_name} deny.write"),
+        _string_list(allow.get("write", []), f".workflow.yaml stage {stage_name} allow.write"),
+        _string_list(deny.get("write", []), f".workflow.yaml stage {stage_name} deny.write"),
     )
 
-    raw_exit_items = _require_list(stage_data.get("exit", []), f".workflow.yaml canonical stage {stage_name} exit")
+    raw_exit_items = _require_list(stage_data.get("exit", []), f".workflow.yaml stage {stage_name} exit")
     expected_artifacts, required_artifacts = _apply_plan_artifact_defaults(
         plan_mode,
-        _string_list(stage_data.get("expect", []), f".workflow.yaml canonical stage {stage_name} expect"),
+        _string_list(stage_data.get("expect", []), f".workflow.yaml stage {stage_name} expect"),
         [
-            _normalize_required_artifact_entry(item, f".workflow.yaml canonical stage {stage_name} exit")
+            _normalize_required_artifact_entry(item, f".workflow.yaml stage {stage_name} exit")
             for item in raw_exit_items
             if isinstance(item, str) or (isinstance(item, dict) and "path" in item)
         ],
@@ -413,18 +322,18 @@ def _normalize_stage_from_canonical(stage_name: str, stage_data: dict[str, Any])
 
     normalized: dict[str, Any] = {
         "goal": str(stage_data.get("goal", "")),
-        "allowed_actions": _string_list(allow.get("actions", []), f".workflow.yaml canonical stage {stage_name} allow.actions"),
-        "forbidden_actions": _string_list(deny.get("actions", []), f".workflow.yaml canonical stage {stage_name} deny.actions"),
-        "allowed_next_stages": _string_list(stage_data.get("next", []), f".workflow.yaml canonical stage {stage_name} next"),
+        "allowed_actions": _string_list(allow.get("actions", []), f".workflow.yaml stage {stage_name} allow.actions"),
+        "forbidden_actions": _string_list(deny.get("actions", []), f".workflow.yaml stage {stage_name} deny.actions"),
+        "allowed_next_stages": _string_list(stage_data.get("next", []), f".workflow.yaml stage {stage_name} next"),
         "entry_conditions": {
             "any": [
-                _normalize_entry_condition_from_canonical(stage_name, item)
-                for item in _require_list(stage_data.get("enter", []), f".workflow.yaml canonical stage {stage_name} enter")
+                _normalize_entry_condition_from_dsl(stage_name, item)
+                for item in _require_list(stage_data.get("enter", []), f".workflow.yaml stage {stage_name} enter")
             ],
         },
         "exit_conditions": {
             "any": [
-                _normalize_entry_condition_from_canonical(stage_name, item)
+                _normalize_entry_condition_from_dsl(stage_name, item)
                 for item in raw_exit_items
                 if isinstance(item, dict) and "rule" in item
             ],
@@ -436,6 +345,8 @@ def _normalize_stage_from_canonical(stage_name: str, stage_data: dict[str, Any])
             "denied_paths": denied_paths,
         },
         "plan_mode": plan_mode,
+        "stop_allowed": bool(allow.get("stop", False)),
+        "human_allowed": bool(allow.get("human", False)),
     }
     if str(stage_data.get("plan", "deny")) == "advance":
         normalized["allows_complete_step"] = True
@@ -448,143 +359,91 @@ def _normalize_stage_from_canonical(stage_name: str, stage_data: dict[str, Any])
     return normalized
 
 
-def _is_canonical_workflow_dsl(spec: dict[str, Any], globals_config: dict[str, Any]) -> bool:
-    """Detect whether the input workflow document already uses the new author DSL."""
-    if "protected" in globals_config or "sensitive" in globals_config or "finalize" in globals_config:
-        return True
-    stages = spec.get("stages", {})
-    if isinstance(stages, dict):
-        for stage_data in stages.values():
-            if isinstance(stage_data, dict) and (
-                "goal" in stage_data
-                or "plan" in stage_data
-                or "allow" in stage_data
-                or "deny" in stage_data
-                or "enter" in stage_data
-                or "exit" in stage_data
-                or "next" in stage_data
-                or "final" in stage_data
-            ):
-                return True
-    return False
+def _unsupported_schema_error(detail: str) -> RuntimeError:
+    return RuntimeError(
+        f"Unsupported workflow schema: {detail}. "
+        "agent-guard only supports workflow schema version 2. "
+        "See docs/workflow-schema.md for the current stage-centered DSL."
+    )
+
+
+def _reject_unsupported_workflow_shape(spec: dict[str, Any], globals_config: dict[str, Any], stages: dict[str, Any]) -> None:
+    version = spec.get("version")
+    if version != 2:
+        raise _unsupported_schema_error("version must be 2")
+    if "workflow" not in spec:
+        raise _unsupported_schema_error("top-level workflow is required")
+    legacy_globals = [key for key in ("paths", "finalization") if key in globals_config]
+    if legacy_globals:
+        raise _unsupported_schema_error(f"legacy globals.{legacy_globals[0]} is no longer supported")
+    for stage_name, stage_data in stages.items():
+        if not isinstance(stage_data, dict):
+            raise RuntimeError(f".workflow.yaml stage {stage_name} must be a mapping.")
+        legacy_stage_keys = [key for key in ("intent", "permissions", "transitions", "evidence") if key in stage_data]
+        if legacy_stage_keys:
+            raise _unsupported_schema_error(f"legacy stage field {stage_name}.{legacy_stage_keys[0]} is no longer supported")
 
 
 def normalize_workflow_spec(spec: dict[str, Any]) -> dict[str, Any]:
-    """Normalize either the flat workflow format or the grouped DSL format."""
+    """Normalize the current stage-centered workflow DSL."""
     if "globals" not in spec:
         return spec
 
     globals_config = _require_mapping(spec.get("globals", {}), ".workflow.yaml globals")
-    workflow_config = _require_mapping(
-        spec.get("workflow", spec.get("metadata", {})),
-        ".workflow.yaml workflow",
-    )
     stages = _require_mapping(spec.get("stages", {}), ".workflow.yaml stages")
-
-    if _is_canonical_workflow_dsl(spec, globals_config):
-        failures = _require_mapping(globals_config.get("failures", {}), ".workflow.yaml globals.failures")
-        finalize = _require_mapping(globals_config.get("finalize", {}), ".workflow.yaml globals.finalize")
-        wizard = _require_mapping(globals_config.get("wizard", {}), ".workflow.yaml globals.wizard")
-        session_start = _require_mapping(globals_config.get("session_start", {}), ".workflow.yaml globals.session_start")
-        install = _require_mapping(globals_config.get("install", {}), ".workflow.yaml globals.install")
-        install_skills = _require_mapping(install.get("skills", {}), ".workflow.yaml globals.install.skills")
-        workflow_entry = str(workflow_config.get("entry", "IDLE"))
-
-        finalize_require = _require_list(finalize.get("require", []), ".workflow.yaml globals.finalize.require")
-        normalized_finalize_rules: list[str] = []
-        for item in finalize_require:
-            normalized_item = _normalize_canonical_check_item(item, ".workflow.yaml globals.finalize.require")
-            if isinstance(normalized_item, str):
-                normalized_finalize_rules.append(normalized_item)
-                continue
-            rule = normalized_item.get("rule")
-            if not rule:
-                raise RuntimeError(".workflow.yaml globals.finalize.require item must resolve to a rule.")
-            normalized_finalize_rules.append(str(rule))
-
-        return {
-            "version": spec.get("version", 2),
-            "metadata": {
-                "id": str(workflow_config.get("id", "")),
-                "title": str(workflow_config.get("title", "")),
-                "description": str(workflow_config.get("description", "")),
-                "entry": workflow_entry,
-            },
-            "entry_stage": workflow_entry,
-            "global_gates": _string_list(spec.get("global_gates", []), ".workflow.yaml global_gates"),
-            "protected_paths": _string_list(globals_config.get("protected", []), ".workflow.yaml globals.protected"),
-            "path_policy": {
-                "protected_paths": _string_list(globals_config.get("protected", []), ".workflow.yaml globals.protected"),
-                "sensitive_paths": _string_list(globals_config.get("sensitive", []), ".workflow.yaml globals.sensitive"),
-            },
-            "failure_policy": {
-                "repeat_threshold": int(failures.get("repeat_threshold", 2)),
-                "fingerprint_roots": _string_list(
-                    failures.get("fingerprint_roots", ["src", "tests"]),
-                    ".workflow.yaml globals.failures.fingerprint_roots",
-                ),
-            },
-            "finalization_policy": {
-                "required_rules": normalized_finalize_rules,
-                "rule_messages": {
-                    str(key): str(value)
-                    for key, value in _require_mapping(finalize.get("messages", {}), ".workflow.yaml globals.finalize.messages").items()
-                },
-            },
-            "wizard_defaults": {
-                "start_stages": _string_list(wizard.get("start_stages", []), ".workflow.yaml globals.wizard.start_stages"),
-            },
-            "session_start_defaults": {
-                "navigator_skill": str(session_start.get("navigator_skill", "using-workflow")),
-            },
-            "install_defaults": {
-                "skill_match": _string_list(install_skills.get("match", []), ".workflow.yaml globals.install.skills.match"),
-                "skill_exclude_match": _string_list(
-                    install_skills.get("exclude_match", []),
-                    ".workflow.yaml globals.install.skills.exclude_match",
-                ),
-            },
-            "stages": {
-                stage_name: _normalize_stage_from_canonical(
-                    stage_name,
-                    _require_mapping(stage_data, f".workflow.yaml stage {stage_name}"),
-                )
-                for stage_name, stage_data in stages.items()
-            },
-        }
-
-    paths = _require_mapping(globals_config.get("paths", {}), ".workflow.yaml globals.paths")
+    _reject_unsupported_workflow_shape(spec, globals_config, stages)
+    workflow_config = _require_mapping(spec.get("workflow", {}), ".workflow.yaml workflow")
     failures = _require_mapping(globals_config.get("failures", {}), ".workflow.yaml globals.failures")
-    finalization = _require_mapping(globals_config.get("finalization", {}), ".workflow.yaml globals.finalization")
+    finalize = _require_mapping(globals_config.get("finalize", {}), ".workflow.yaml globals.finalize")
     wizard = _require_mapping(globals_config.get("wizard", {}), ".workflow.yaml globals.wizard")
     session_start = _require_mapping(globals_config.get("session_start", {}), ".workflow.yaml globals.session_start")
     install = _require_mapping(globals_config.get("install", {}), ".workflow.yaml globals.install")
     install_skills = _require_mapping(install.get("skills", {}), ".workflow.yaml globals.install.skills")
+    workflow_entry = str(workflow_config.get("entry", "IDLE"))
+
+    finalize_require = _require_list(finalize.get("require", []), ".workflow.yaml globals.finalize.require")
+    normalized_finalize_rules: list[str] = []
+    for item in finalize_require:
+        normalized_item = _normalize_check_item(item, ".workflow.yaml globals.finalize.require")
+        if isinstance(normalized_item, str):
+            normalized_finalize_rules.append(normalized_item)
+            continue
+        rule = normalized_item.get("rule")
+        if not rule:
+            raise RuntimeError(".workflow.yaml globals.finalize.require item must resolve to a rule.")
+        normalized_finalize_rules.append(str(rule))
 
     return {
-        "version": spec.get("version", 1),
+        "version": 2,
         "metadata": {
             "id": str(workflow_config.get("id", "")),
             "title": str(workflow_config.get("title", "")),
             "description": str(workflow_config.get("description", "")),
-            "entry": str(workflow_config.get("entry", "")),
+            "entry": workflow_entry,
+            "roles": {
+                str(key): str(value)
+                for key, value in _require_mapping(workflow_config.get("roles", {}), ".workflow.yaml workflow.roles").items()
+            },
         },
-        "entry_stage": str(workflow_config.get("entry", "")),
+        "entry_stage": workflow_entry,
         "global_gates": _string_list(spec.get("global_gates", []), ".workflow.yaml global_gates"),
-        "protected_paths": _string_list(paths.get("protected", []), ".workflow.yaml globals.paths.protected"),
+        "protected_paths": _string_list(globals_config.get("protected", []), ".workflow.yaml globals.protected"),
         "path_policy": {
-            "protected_paths": _string_list(paths.get("protected", []), ".workflow.yaml globals.paths.protected"),
-            "sensitive_paths": _string_list(paths.get("sensitive", []), ".workflow.yaml globals.paths.sensitive"),
+            "protected_paths": _string_list(globals_config.get("protected", []), ".workflow.yaml globals.protected"),
+            "sensitive_paths": _string_list(globals_config.get("sensitive", []), ".workflow.yaml globals.sensitive"),
         },
         "failure_policy": {
             "repeat_threshold": int(failures.get("repeat_threshold", 2)),
-            "fingerprint_roots": _string_list(failures.get("fingerprint_roots", ["src", "tests"]), ".workflow.yaml globals.failures.fingerprint_roots"),
+            "fingerprint_roots": _string_list(
+                failures.get("fingerprint_roots", ["src", "tests"]),
+                ".workflow.yaml globals.failures.fingerprint_roots",
+            ),
         },
         "finalization_policy": {
-            "required_rules": _string_list(finalization.get("require", []), ".workflow.yaml globals.finalization.require"),
+            "required_rules": normalized_finalize_rules,
             "rule_messages": {
                 str(key): str(value)
-                for key, value in _require_mapping(finalization.get("messages", {}), ".workflow.yaml globals.finalization.messages").items()
+                for key, value in _require_mapping(finalize.get("messages", {}), ".workflow.yaml globals.finalize.messages").items()
             },
         },
         "wizard_defaults": {
@@ -601,7 +460,7 @@ def normalize_workflow_spec(spec: dict[str, Any]) -> dict[str, Any]:
             ),
         },
         "stages": {
-            stage_name: _normalize_stage_from_grouped(stage_name, _require_mapping(stage_data, f".workflow.yaml stage {stage_name}"))
+            stage_name: _normalize_stage_from_dsl(stage_name, _require_mapping(stage_data, f".workflow.yaml stage {stage_name}"))
             for stage_name, stage_data in stages.items()
         },
     }
@@ -609,53 +468,28 @@ def normalize_workflow_spec(spec: dict[str, Any]) -> dict[str, Any]:
 
 def validate_workflow_spec(spec: dict[str, Any]) -> None:
     """Validate core workflow policy sections and rule names."""
+    if spec.get("version") != 2:
+        raise _unsupported_schema_error("version must be 2")
     _require_mapping(spec.get("stages", {}), ".workflow.yaml stages")
     for section_name in ("path_policy", "failure_policy", "finalization_policy", "wizard_defaults", "session_start_defaults", "install_defaults"):
         _require_mapping(spec.get(section_name, {}), f".workflow.yaml {section_name}")
+    entry = str(spec.get("entry_stage", ""))
+    if entry and entry not in workflow_stages_from_spec(spec):
+        raise RuntimeError(f".workflow.yaml workflow.entry references unknown stage: {entry}")
+    roles = _explicit_workflow_stage_roles(spec)
+    stages = workflow_stages_from_spec(spec)
+    unknown_role_targets = [f"{role}={stage}" for role, stage in roles.items() if stage not in stages]
+    if unknown_role_targets:
+        raise RuntimeError(f".workflow.yaml workflow.roles references unknown stage: {', '.join(unknown_role_targets)}")
     for stage_name, stage_data in workflow_stages_from_spec(spec).items():
         _validate_stage_rules(stage_name, _require_mapping(stage_data, f".workflow.yaml stage {stage_name}"))
+        for target_stage in _require_list(stage_data.get("allowed_next_stages", []), f".workflow.yaml stage {stage_name} next"):
+            if str(target_stage) not in stages:
+                raise RuntimeError(f".workflow.yaml stage {stage_name} next references unknown stage: {target_stage}")
     final_rules = _require_list(spec.get("finalization_policy", {}).get("required_rules", []), ".workflow.yaml finalization_policy.required_rules")
     unknown_rules = [str(rule_name) for rule_name in final_rules if str(rule_name) not in allowed_rule_names()]
     if unknown_rules:
         raise RuntimeError(f"Unknown finalization rules in .workflow.yaml: {', '.join(unknown_rules)}")
-
-
-def validate_canonical_workflow_spec(spec: dict[str, Any]) -> None:
-    """Validate the projected canonical workflow model."""
-    workflow = _require_mapping(spec.get("workflow", {}), ".workflow.yaml canonical workflow")
-    stages = _require_mapping(spec.get("stages", {}), ".workflow.yaml canonical stages")
-    entry = workflow.get("entry")
-    if not isinstance(entry, str) or not entry.strip():
-        raise RuntimeError(".workflow.yaml canonical workflow.entry must be a non-empty string.")
-    if entry not in stages:
-        raise RuntimeError(f".workflow.yaml canonical workflow.entry references unknown stage: {entry}")
-
-    globals_config = _require_mapping(spec.get("globals", {}), ".workflow.yaml canonical globals")
-    finalize = _require_mapping(globals_config.get("finalize", {}), ".workflow.yaml canonical globals.finalize")
-    for item in _normalize_canonical_check_items(finalize.get("require", []), ".workflow.yaml canonical globals.finalize.require"):
-        if isinstance(item, dict) and item.get("rule") and item["rule"] not in allowed_rule_names():
-            raise RuntimeError(f"Unknown finalization rules in .workflow.yaml: {item['rule']}")
-
-    allowed_plan_modes = {"deny", "create", "follow", "advance", "complete"}
-    for stage_name, raw_stage in stages.items():
-        stage_data = _require_mapping(raw_stage, f".workflow.yaml canonical stage {stage_name}")
-        if str(stage_data.get("plan", "deny")) not in allowed_plan_modes:
-            raise RuntimeError(
-                f".workflow.yaml canonical stage {stage_name} plan must be one of: deny, create, follow, advance, complete."
-            )
-        allow = _require_mapping(stage_data.get("allow", {}), f".workflow.yaml canonical stage {stage_name} allow")
-        deny = _require_mapping(stage_data.get("deny", {}), f".workflow.yaml canonical stage {stage_name} deny")
-        _require_list(allow.get("write", []), f".workflow.yaml canonical stage {stage_name} allow.write")
-        _require_list(allow.get("actions", []), f".workflow.yaml canonical stage {stage_name} allow.actions")
-        _require_list(deny.get("write", []), f".workflow.yaml canonical stage {stage_name} deny.write")
-        _require_list(deny.get("actions", []), f".workflow.yaml canonical stage {stage_name} deny.actions")
-        _normalize_canonical_check_items(stage_data.get("enter", []), f".workflow.yaml canonical stage {stage_name} enter")
-        _normalize_canonical_check_items(stage_data.get("exit", []), f".workflow.yaml canonical stage {stage_name} exit")
-        next_stages = _require_list(stage_data.get("next", []), f".workflow.yaml canonical stage {stage_name} next")
-        for target_stage in next_stages:
-            if str(target_stage) not in stages:
-                raise RuntimeError(f".workflow.yaml canonical stage {stage_name} next references unknown stage: {target_stage}")
-
 
 def workflow_stages_from_spec(spec: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Return stages from a provided spec mapping."""
@@ -721,6 +555,11 @@ def stage_write_policy_from_spec(spec: dict[str, Any], stage: str) -> dict[str, 
 
 
 def _validate_stage_rules(stage_name: str, stage_data: dict[str, Any]) -> None:
+    allowed_plan_modes = {"deny", "create", "follow", "advance", "complete"}
+    if str(stage_data.get("plan_mode", "deny")) not in allowed_plan_modes:
+        raise RuntimeError(
+            f".workflow.yaml stage {stage_name} plan must be one of: deny, create, follow, advance, complete."
+        )
     conditions_config = stage_data.get("entry_conditions", {})
     if conditions_config and not isinstance(conditions_config, dict):
         raise RuntimeError(f".workflow.yaml stage {stage_name} entry_conditions must be a mapping.")
@@ -769,126 +608,6 @@ def _validate_stage_rules(stage_name: str, stage_data: dict[str, Any]) -> None:
     allows_complete_step = stage_data.get("allows_complete_step")
     if allows_complete_step is not None and not isinstance(allows_complete_step, bool):
         raise RuntimeError(f".workflow.yaml stage {stage_name} allows_complete_step must be a boolean.")
-
-
-def _legacy_human_allowed(stage_data: dict[str, Any]) -> bool:
-    """Whether the current legacy stage allows a human stop/handoff."""
-    return stage_data.get("forbid_needs_human") is None
-
-
-def _legacy_entry_stage(flat_spec: dict[str, Any]) -> str:
-    """Derive the canonical entry stage from legacy transitions."""
-    explicit_entry = flat_spec.get("entry_stage")
-    if isinstance(explicit_entry, str) and explicit_entry.strip():
-        return explicit_entry
-    metadata = flat_spec.get("metadata", {})
-    if isinstance(metadata, dict):
-        metadata_entry = metadata.get("entry")
-        if isinstance(metadata_entry, str) and metadata_entry.strip():
-            return metadata_entry
-    idle_targets = workflow_stages_from_spec(flat_spec).get("IDLE", {}).get("allowed_next_stages", [])
-    if isinstance(idle_targets, list) and idle_targets:
-        return str(idle_targets[0])
-    start_stages = flat_spec.get("wizard_defaults", {}).get("start_stages", [])
-    if isinstance(start_stages, list) and start_stages:
-        return str(start_stages[0])
-    return "IDLE"
-
-
-def _compat_stage_from_required_command(flat_spec: dict[str, Any], command_name: str) -> str | None:
-    """Find one legacy stage by one required command entry condition."""
-    for stage_name in workflow_stages_from_spec(flat_spec):
-        for item in stage_entry_conditions_from_spec(flat_spec, stage_name):
-            if item.get("rule") == "required_command" and item.get("value") == command_name:
-                return str(stage_name)
-    return None
-
-
-def _compat_stage_from_expected_artifact(flat_spec: dict[str, Any], artifact_path: str) -> str | None:
-    """Find one legacy stage by one expected artifact path."""
-    for stage_name, stage_data in workflow_stages_from_spec(flat_spec).items():
-        expected = stage_data.get("artifacts_expected", [])
-        if isinstance(expected, list) and artifact_path in expected:
-            return str(stage_name)
-        for item in stage_required_artifact_rules_from_spec(flat_spec, stage_name):
-            if item["path"] == artifact_path:
-                return str(stage_name)
-    return None
-
-
-def _compat_stage_from_required_artifact(flat_spec: dict[str, Any], artifact_path: str) -> str | None:
-    """Find one legacy stage by one required artifact path."""
-    for stage_name in workflow_stages_from_spec(flat_spec):
-        for item in stage_required_artifact_rules_from_spec(flat_spec, stage_name):
-            if item["path"] == artifact_path:
-                return str(stage_name)
-    return None
-
-
-def normalize_legacy_to_canonical(flat_spec: dict[str, Any]) -> dict[str, Any]:
-    """Project the current legacy workflow model into the new canonical shape."""
-    metadata = _require_mapping(flat_spec.get("metadata", {}), ".workflow.yaml metadata")
-    stages = workflow_stages_from_spec(flat_spec)
-    completion_stage = _compat_stage_from_required_command(flat_spec, "mark-done") or "DONE"
-
-    canonical_stages: dict[str, Any] = {}
-    for stage_name, stage_data in stages.items():
-        required_items: list[str | dict[str, str]] = []
-        for entry in stage_required_artifact_rules_from_spec(flat_spec, stage_name):
-            if set(entry.keys()) == {"path"}:
-                required_items.append(entry["path"])
-            else:
-                required_items.append(dict(entry))
-
-        canonical_stages[stage_name] = {
-            "goal": str(stage_data.get("goal", "")),
-            "plan": _legacy_plan_mode(stage_name),
-            "allow": {
-                "write": stage_write_policy_from_spec(flat_spec, stage_name)["writable_paths"],
-                "actions": [str(item) for item in stage_data.get("allowed_actions", [])],
-                "stop": _legacy_stop_allowed(stage_name),
-                "human": _legacy_human_allowed(stage_data),
-            },
-            "deny": {
-                "write": stage_write_policy_from_spec(flat_spec, stage_name)["denied_paths"],
-                "actions": [str(item) for item in stage_data.get("forbidden_actions", [])],
-            },
-            "enter": [dict(item) for item in stage_entry_conditions_from_spec(flat_spec, stage_name)],
-            "exit": required_items,
-            "next": [str(item) for item in stage_data.get("allowed_next_stages", [])],
-            "final": stage_name == completion_stage,
-        }
-
-    return {
-        "version": 2,
-        "workflow": {
-            "id": str(metadata.get("id", "")),
-            "title": str(metadata.get("title", "")),
-            "description": str(metadata.get("description", "")),
-            "entry": _legacy_entry_stage(flat_spec),
-        },
-        "globals": {
-            "protected": path_policy_from_spec(flat_spec)["protected_paths"],
-            "sensitive": path_policy_from_spec(flat_spec)["sensitive_paths"],
-            "failures": failure_policy_from_spec(flat_spec),
-            "finalize": {
-                "require": [{"rule": rule_name} for rule_name in finalization_policy_from_spec(flat_spec)["required_rules"]],
-                "messages": finalization_policy_from_spec(flat_spec)["rule_messages"],
-            },
-            "session_start": {
-                "navigator_skill": session_start_defaults_from_spec(flat_spec)["navigator_skill"],
-            },
-            "compat": {
-                "completion_ready_stage": _compat_stage_from_required_command(flat_spec, "ready-to-summarize"),
-                "completion_stage": completion_stage,
-                "verification_stage": _compat_stage_from_expected_artifact(flat_spec, ".agent/artifacts/final-verification.log"),
-                "expected_failure_stage": _compat_stage_from_expected_artifact(flat_spec, ".agent/artifacts/red-test.log"),
-                "failure_analysis_stage": _compat_stage_from_required_artifact(flat_spec, ".agent/artifacts/failure-analysis.md"),
-                "human_handoff_stage": "NEEDS_HUMAN" if "NEEDS_HUMAN" in stages else None,
-            },
-        },
-        "stages": canonical_stages,
-    }
 
 
 def workflow_stages(root_dir: Path | None = None, workflow_id: str | None = None) -> dict[str, dict[str, Any]]:
@@ -1269,93 +988,6 @@ def global_gates(root_dir: Path | None = None, workflow_id: str | None = None) -
     return [str(item) for item in gates]
 
 
-@lru_cache(maxsize=None)
-def canonical_workflow_spec(root_dir: Path | None = None, workflow_id: str | None = None) -> dict[str, Any]:
-    """Projected canonical workflow model used by the runtime compatibility layer."""
-    canonical = normalize_legacy_to_canonical(load_workflow_spec(root_dir, workflow_id))
-    validate_canonical_workflow_spec(canonical)
-    return canonical
-
-
-def canonical_entry_stage(root_dir: Path | None = None, workflow_id: str | None = None) -> str:
-    """Canonical entry stage."""
-    workflow = _require_mapping(canonical_workflow_spec(root_dir, workflow_id).get("workflow", {}), ".workflow.yaml canonical workflow")
-    return str(workflow.get("entry", "IDLE"))
-
-
-def canonical_stage_spec(stage: str, root_dir: Path | None = None, workflow_id: str | None = None) -> dict[str, Any]:
-    """Canonical stage spec."""
-    stages = _require_mapping(canonical_workflow_spec(root_dir, workflow_id).get("stages", {}), ".workflow.yaml canonical stages")
-    fallback = stages.get("IDLE", {})
-    return _require_mapping(stages.get(stage, fallback), f".workflow.yaml canonical stage {stage}")
-
-
-def canonical_stage_next(stage: str, root_dir: Path | None = None, workflow_id: str | None = None) -> list[str]:
-    """Canonical next stages for one stage."""
-    return [str(item) for item in _require_list(canonical_stage_spec(stage, root_dir, workflow_id).get("next", []), f".workflow.yaml canonical stage {stage} next")]
-
-
-def canonical_stage_stop_allowed(stage: str, root_dir: Path | None = None, workflow_id: str | None = None) -> bool:
-    """Whether the stage allows ending the current interaction."""
-    allow = _require_mapping(canonical_stage_spec(stage, root_dir, workflow_id).get("allow", {}), f".workflow.yaml canonical stage {stage} allow")
-    return bool(allow.get("stop", False))
-
-
-def canonical_stage_human_allowed(stage: str, root_dir: Path | None = None, workflow_id: str | None = None) -> bool:
-    """Whether the stage allows human intervention."""
-    allow = _require_mapping(canonical_stage_spec(stage, root_dir, workflow_id).get("allow", {}), f".workflow.yaml canonical stage {stage} allow")
-    return bool(allow.get("human", False))
-
-
-def canonical_stage_plan_mode(stage: str, root_dir: Path | None = None, workflow_id: str | None = None) -> str:
-    """Canonical stage plan mode."""
-    return str(canonical_stage_spec(stage, root_dir, workflow_id).get("plan", "deny"))
-
-
-def canonical_final_stages(root_dir: Path | None = None, workflow_id: str | None = None) -> list[str]:
-    """Canonical final stages."""
-    return [
-        stage_name
-        for stage_name, stage_data in _require_mapping(canonical_workflow_spec(root_dir, workflow_id).get("stages", {}), ".workflow.yaml canonical stages").items()
-        if bool(_require_mapping(stage_data, f".workflow.yaml canonical stage {stage_name}").get("final", False))
-    ]
-
-
-def _canonical_compat_stage(name: str, root_dir: Path | None = None, workflow_id: str | None = None) -> str | None:
-    compat = _require_mapping(canonical_workflow_spec(root_dir, workflow_id).get("globals", {}).get("compat", {}), ".workflow.yaml canonical globals.compat")
-    stage_name = compat.get(name)
-    return stage_name if isinstance(stage_name, str) and stage_name.strip() else None
-
-
-def canonical_completion_stage(root_dir: Path | None = None, workflow_id: str | None = None) -> str:
-    """Canonical completion stage."""
-    compat_stage = _canonical_compat_stage("completion_stage", root_dir, workflow_id)
-    if compat_stage:
-        return compat_stage
-    final_stages = canonical_final_stages(root_dir, workflow_id)
-    return final_stages[0] if final_stages else "DONE"
-
-
-def canonical_completion_ready_stage(root_dir: Path | None = None, workflow_id: str | None = None) -> str:
-    """Canonical completion-ready stage used by the legacy command."""
-    return _canonical_compat_stage("completion_ready_stage", root_dir, workflow_id) or canonical_completion_stage(root_dir, workflow_id)
-
-
-def canonical_failure_analysis_stage(root_dir: Path | None = None, workflow_id: str | None = None) -> str | None:
-    """Canonical failure-analysis stage used by the compatibility adapter."""
-    return _canonical_compat_stage("failure_analysis_stage", root_dir, workflow_id)
-
-
-def canonical_expected_failure_stage(root_dir: Path | None = None, workflow_id: str | None = None) -> str | None:
-    """Canonical expected-failure stage used by the compatibility adapter."""
-    return _canonical_compat_stage("expected_failure_stage", root_dir, workflow_id)
-
-
-def canonical_verification_stage(root_dir: Path | None = None, workflow_id: str | None = None) -> str | None:
-    """Canonical verification stage used by the compatibility adapter."""
-    return _canonical_compat_stage("verification_stage", root_dir, workflow_id)
-
-
 def protected_paths(root_dir: Path | None = None, workflow_id: str | None = None) -> list[str]:
     """Protected paths."""
     return path_policy(root_dir, workflow_id)["protected_paths"]
@@ -1412,3 +1044,133 @@ def complete_step_allowed_from_stages(root_dir: Path | None = None, workflow_id:
         for stage_name, stage_data in workflow_stages(root_dir, workflow_id).items()
         if stage_data.get("allows_complete_step") is True or stage_data.get("plan_mode") == "advance"
     ]
+
+
+def workflow_entry_stage(root_dir: Path | None = None, workflow_id: str | None = None) -> str:
+    """Runtime workflow entry stage."""
+    spec = load_workflow_spec(root_dir, workflow_id)
+    entry = spec.get("entry_stage")
+    if isinstance(entry, str) and entry.strip():
+        return entry
+    metadata = _require_mapping(spec.get("metadata", {}), ".workflow.yaml metadata")
+    metadata_entry = metadata.get("entry")
+    if isinstance(metadata_entry, str) and metadata_entry.strip():
+        return metadata_entry
+    return "IDLE"
+
+
+def stage_plan_mode(stage: str, root_dir: Path | None = None, workflow_id: str | None = None) -> str:
+    """Runtime stage plan mode."""
+    return str(stage_spec(stage, root_dir, workflow_id).get("plan_mode", "deny"))
+
+
+def stage_stop_allowed(stage: str, root_dir: Path | None = None, workflow_id: str | None = None) -> bool:
+    """Whether the stage allows ending the current interaction."""
+    return bool(stage_spec(stage, root_dir, workflow_id).get("stop_allowed", False))
+
+
+def stage_human_allowed(stage: str, root_dir: Path | None = None, workflow_id: str | None = None) -> bool:
+    """Whether the stage allows human intervention."""
+    return bool(stage_spec(stage, root_dir, workflow_id).get("human_allowed", False))
+
+
+def _explicit_workflow_stage_roles(spec: dict[str, Any]) -> dict[str, str]:
+    metadata = _require_mapping(spec.get("metadata", {}), ".workflow.yaml metadata")
+    roles = metadata.get("roles", {})
+    if not isinstance(roles, dict):
+        return {}
+    return {str(key): str(value) for key, value in roles.items() if isinstance(value, str) and value.strip()}
+
+
+def _first_stage_with_required_command(spec: dict[str, Any], command_name: str) -> str | None:
+    for stage_name in workflow_stages_from_spec(spec):
+        for item in stage_entry_conditions_from_spec(spec, stage_name):
+            if item.get("rule") == "required_command" and item.get("value") == command_name:
+                return str(stage_name)
+    return None
+
+
+def _first_stage_with_expected_or_required_artifact(spec: dict[str, Any], artifact_path: str) -> str | None:
+    for stage_name, stage_data in workflow_stages_from_spec(spec).items():
+        expected = stage_data.get("artifacts_expected", [])
+        if isinstance(expected, list) and artifact_path in expected:
+            return str(stage_name)
+        for item in stage_required_artifact_rules_from_spec(spec, stage_name):
+            if item["path"] == artifact_path:
+                return str(stage_name)
+    return None
+
+
+def _first_final_stage(spec: dict[str, Any]) -> str | None:
+    for stage_name, stage_data in workflow_stages_from_spec(spec).items():
+        if bool(stage_data.get("is_final_stage", False)):
+            return str(stage_name)
+    if "DONE" in workflow_stages_from_spec(spec):
+        return "DONE"
+    return None
+
+
+def _infer_workflow_stage_roles(spec: dict[str, Any]) -> dict[str, str]:
+    stages = workflow_stages_from_spec(spec)
+    inferred: dict[str, str] = {}
+    completion = _first_final_stage(spec) or _first_stage_with_required_command(spec, "mark-done")
+    if completion:
+        inferred["completion"] = completion
+    completion_ready = _first_stage_with_required_command(spec, "ready-to-summarize")
+    if completion_ready is None and completion:
+        for stage_name, stage_data in stages.items():
+            if completion in [str(item) for item in stage_data.get("allowed_next_stages", [])] and str(stage_data.get("plan_mode", "")) == "complete":
+                completion_ready = str(stage_name)
+                break
+    if completion_ready:
+        inferred["completion_ready"] = completion_ready
+    verification = _first_stage_with_expected_or_required_artifact(spec, ".agent/artifacts/final-verification.log")
+    if verification:
+        inferred["verification"] = verification
+    expected_failure = _first_stage_with_expected_or_required_artifact(spec, ".agent/artifacts/red-test.log")
+    if expected_failure:
+        inferred["expected_failure"] = expected_failure
+    failure_analysis = _first_stage_with_expected_or_required_artifact(spec, ".agent/artifacts/failure-analysis.md")
+    if failure_analysis:
+        inferred["failure_analysis"] = failure_analysis
+    if "NEEDS_HUMAN" in stages:
+        inferred["human_handoff"] = "NEEDS_HUMAN"
+    return inferred
+
+
+def workflow_stage_roles(root_dir: Path | None = None, workflow_id: str | None = None) -> dict[str, str]:
+    """Workflow stage roles used by runtime commands and hooks."""
+    spec = load_workflow_spec(root_dir, workflow_id)
+    roles = _infer_workflow_stage_roles(spec)
+    roles.update(_explicit_workflow_stage_roles(spec))
+    return roles
+
+
+def workflow_stage_for_role(role: str, root_dir: Path | None = None, workflow_id: str | None = None) -> str | None:
+    """Return the stage name configured or inferred for one workflow role."""
+    return workflow_stage_roles(root_dir, workflow_id).get(role)
+
+
+def completion_stage(root_dir: Path | None = None, workflow_id: str | None = None) -> str:
+    """Runtime completion stage."""
+    return workflow_stage_for_role("completion", root_dir, workflow_id) or "DONE"
+
+
+def completion_ready_stage(root_dir: Path | None = None, workflow_id: str | None = None) -> str:
+    """Runtime completion-ready stage used by ready-to-summarize."""
+    return workflow_stage_for_role("completion_ready", root_dir, workflow_id) or completion_stage(root_dir, workflow_id)
+
+
+def failure_analysis_stage(root_dir: Path | None = None, workflow_id: str | None = None) -> str | None:
+    """Runtime failure-analysis stage."""
+    return workflow_stage_for_role("failure_analysis", root_dir, workflow_id)
+
+
+def expected_failure_stage(root_dir: Path | None = None, workflow_id: str | None = None) -> str | None:
+    """Runtime expected-failure stage."""
+    return workflow_stage_for_role("expected_failure", root_dir, workflow_id)
+
+
+def verification_stage(root_dir: Path | None = None, workflow_id: str | None = None) -> str | None:
+    """Runtime verification stage."""
+    return workflow_stage_for_role("verification", root_dir, workflow_id)

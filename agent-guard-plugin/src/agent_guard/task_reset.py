@@ -24,7 +24,7 @@ from .state import (
     save_state,
     state_path,
 )
-from .workflow_spec import canonical_completion_ready_stage, canonical_completion_stage, canonical_entry_stage
+from .workflow_spec import completion_ready_stage, completion_stage, workflow_entry_stage
 
 
 def _slugify(value: str) -> str:
@@ -76,9 +76,9 @@ def latest_archive(root_dir: Path) -> dict[str, Any] | None:
 def _is_resettable_state(root_dir: Path, state: dict[str, Any]) -> bool:
     """Internal helper for is resettable state."""
     workflow_id = str(state.get("workflow_id")) if isinstance(state.get("workflow_id"), str) else None
-    if state.get("stage") == canonical_completion_stage(root_dir, workflow_id):
+    if state.get("stage") == completion_stage(root_dir, workflow_id):
         return True
-    return state.get("stage") == canonical_completion_ready_stage(root_dir, workflow_id) and state.get("can_finalize") is True
+    return state.get("stage") == completion_ready_stage(root_dir, workflow_id) and state.get("can_finalize") is True
 
 
 def _snapshot_state(root_dir: Path) -> dict[str, Any]:
@@ -152,7 +152,7 @@ def _reset_runtime_files(root_dir: Path, new_task_id: str, workflow_id: str | No
         **DEFAULT_STATE,
         "task_id": new_task_id,
         "workflow_id": workflow_id,
-        "stage": canonical_entry_stage(root_dir, workflow_id),
+        "stage": workflow_entry_stage(root_dir, workflow_id),
     }
     save_state(root_dir, new_state)
     return new_state
@@ -166,8 +166,8 @@ def reset_task(root_dir: Path, new_task_id: str, workflow_id: str | None = None)
         current_workflow = str(state.get("workflow_id")) if isinstance(state.get("workflow_id"), str) else None
         raise RuntimeError(
             "reset-task is only allowed when the current task is complete. "
-            f"Move the state to {canonical_completion_stage(root_dir, current_workflow)} or "
-            f"{canonical_completion_ready_stage(root_dir, current_workflow)} with can_finalize=true first."
+            f"Move the state to {completion_stage(root_dir, current_workflow)} or "
+            f"{completion_ready_stage(root_dir, current_workflow)} with can_finalize=true first."
         )
 
     archive_result = archive_current_task(root_dir)
@@ -190,8 +190,8 @@ def close_task(root_dir: Path, force: bool = False) -> dict[str, Any]:
         current_workflow = str(state.get("workflow_id")) if isinstance(state.get("workflow_id"), str) else None
         raise RuntimeError(
             "close-task is only allowed when the current task is complete or the workspace is idle. "
-            f"Move the state to {canonical_completion_stage(root_dir, current_workflow)} or "
-            f"{canonical_completion_ready_stage(root_dir, current_workflow)} with can_finalize=true first, "
+            f"Move the state to {completion_stage(root_dir, current_workflow)} or "
+            f"{completion_ready_stage(root_dir, current_workflow)} with can_finalize=true first, "
             "or pass --force to close the workspace anyway."
         )
 

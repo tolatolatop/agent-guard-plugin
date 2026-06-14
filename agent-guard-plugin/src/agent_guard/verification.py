@@ -10,7 +10,7 @@ from typing import Any
 from .application.use_cases import record_command_execution
 from .state import artifacts_dir, load_state
 from .transitions import ready_to_summarize
-from .workflow_spec import canonical_verification_stage
+from .workflow_spec import verification_stage
 
 
 def split_verify_args(args: list[str]) -> tuple[bool, list[str]]:
@@ -55,9 +55,9 @@ def run_verification_command(root_dir: Path, args: list[str]) -> tuple[int, dict
     auto_ready, command_argv = split_verify_args(args)
     state = load_state(root_dir)
     workflow_id = str(state.get("workflow_id")) if isinstance(state.get("workflow_id"), str) else None
-    verification_stage = canonical_verification_stage(root_dir, workflow_id)
-    if state.get("stage") != verification_stage:
-        raise RuntimeError(f"verify is only allowed in {verification_stage}; current stage is {state.get('stage')}")
+    verify_stage = verification_stage(root_dir, workflow_id)
+    if state.get("stage") != verify_stage:
+        raise RuntimeError(f"verify is only allowed in {verify_stage}; current stage is {state.get('stage')}")
 
     command_text = shlex.join(command_argv)
     completed = subprocess.run(

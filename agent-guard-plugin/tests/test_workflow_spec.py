@@ -4,15 +4,11 @@ from pathlib import Path
 import yaml
 
 from agent_guard.workflow_spec import (
-    canonical_completion_ready_stage,
-    canonical_completion_stage,
-    canonical_entry_stage,
-    canonical_failure_analysis_stage,
-    canonical_stage_plan_mode,
-    canonical_stage_spec,
-    canonical_verification_stage,
-    canonical_workflow_spec,
+    completion_ready_stage,
+    completion_stage,
     discover_workflow_ids,
+    expected_failure_stage,
+    failure_analysis_stage,
     failure_policy,
     finalization_policy,
     install_defaults,
@@ -30,13 +26,48 @@ from agent_guard.workflow_spec import (
     stage_entry_conditions_from_spec,
     stage_exit_conditions,
     stage_forbid_needs_human_display,
+    stage_human_allowed,
+    stage_plan_mode,
+    stage_stop_allowed,
     transition_graph_mermaid,
     validate_workflow_spec,
+    verification_stage,
     stage_write_policy,
+    workflow_entry_stage,
     workflow_policy_view,
     workflow_policy_roles,
+    workflow_stage_for_role,
+    workflow_stage_roles,
     wizard_defaults,
 )
+
+
+def test_new_runtime_role_api_resolves_default_workflow_roles() -> None:
+    """Runtime stage-role helpers should expose workflow roles without projection callers."""
+    assert workflow_entry_stage() == "CLARIFYING"
+    assert workflow_stage_roles() == {
+        "verification": "VERIFY",
+        "expected_failure": "RED_TEST",
+        "failure_analysis": "NEEDS_FAILURE_ANALYSIS",
+        "completion_ready": "READY_TO_SUMMARIZE",
+        "completion": "DONE",
+        "human_handoff": "NEEDS_HUMAN",
+    }
+    assert workflow_stage_for_role("verification") == "VERIFY"
+    assert verification_stage() == "VERIFY"
+    assert expected_failure_stage() == "RED_TEST"
+    assert failure_analysis_stage() == "NEEDS_FAILURE_ANALYSIS"
+    assert completion_ready_stage() == "READY_TO_SUMMARIZE"
+    assert completion_stage() == "DONE"
+
+
+def test_new_runtime_stage_api_exposes_plan_and_handoff_flags() -> None:
+    """Runtime stage helpers should read plan/stop/human behavior through v2-facing names."""
+    assert stage_plan_mode("VERIFY") == "advance"
+    assert stage_stop_allowed("VERIFY") is False
+    assert stage_human_allowed("VERIFY") is False
+    assert stage_stop_allowed("DONE") is True
+    assert stage_human_allowed("DONE") is True
 
 
 def test_ready_to_summarize_exit_conditions_follow_done_entry_conditions() -> None:
@@ -217,11 +248,11 @@ def test_stage_required_artifact_rules_support_optional_regex_validation() -> No
     ]
 
 
-def test_required_artifact_message_is_accepted_as_legacy_display_alias() -> None:
-    """Test that legacy artifact message aliases normalize into display."""
+def test_required_artifact_display_is_preserved() -> None:
+    """Test that required artifact display text is preserved."""
     spec = {
         "version": 2,
-        "workflow": {"id": "legacy-message", "title": "Legacy Message", "entry": "REVIEW"},
+        "workflow": {"id": "artifact-display", "title": "Artifact Display", "entry": "REVIEW"},
         "globals": {"protected": [], "sensitive": [], "failures": {}, "finalize": {"require": []}, "session_start": {}},
         "stages": {
             "REVIEW": {
@@ -234,7 +265,7 @@ def test_required_artifact_message_is_accepted_as_legacy_display_alias() -> None
                     {
                         "path": ".agent/artifacts/review.md",
                         "matches": "^# Review",
-                        "message": "review.md must start with a heading.",
+                        "display": "review.md must start with a heading.",
                     }
                 ],
                 "expect": [],
@@ -305,103 +336,133 @@ def test_workflow_policy_roles_mark_global_gate_types() -> None:
     assert roles["globals"]["install"] == "soft_prompt"
 
 
-def test_normalize_workflow_spec_accepts_grouped_dsl_shape() -> None:
-    """Test that grouped DSL input is normalized into the flat internal shape."""
-    grouped = {
-        "version": 1,
-        "workflow": {
-            "id": "grouped-example",
-            "title": "Grouped Example",
-            "description": "DSL compatibility test",
-        },
+def _minimal_v2_workflow() -> dict[str, object]:
+    return {
+        "version": 2,
+        "workflow": {"id": "minimal", "title": "Minimal", "entry": "ONLY"},
         "globals": {
-            "paths": {
-                "protected": [".agent/state.json"],
-                "sensitive": [".github/**"],
-            },
-            "failures": {
-                "repeat_threshold": 2,
-                "fingerprint_roots": ["src", "tests"],
-            },
-            "finalization": {
-                "require": ["successful_last_verification"],
-                "messages": {
-                    "successful_last_verification": "last_verification.exit_code must be 0",
-                },
-            },
-            "wizard": {
-                "start_stages": ["RED_TEST"],
-            },
-            "session_start": {
-                "navigator_skill": "workflow-core",
-            },
-            "install": {
-                "skills": {
-                    "match": ["workflow"],
-                    "exclude_match": ["failure"],
-                }
-            },
+            "protected": [],
+            "sensitive": [],
+            "failures": {},
+            "finalize": {"require": []},
+            "session_start": {"navigator_skill": "using-workflow"},
         },
         "stages": {
-            "RED_TEST": {
-                "intent": {
-                    "goal": "Create a failing test.",
-                },
-                "permissions": {
-                    "write": {
-                        "allow": ["tests/**"],
-                        "deny": ["src/**"],
-                    },
-                    "actions": {
-                        "allow": ["write tests"],
-                        "deny": ["write production code"],
-                    },
-                    "commands": {
-                        "complete_step": "allow",
-                    },
-                    "handoff": {
-                        "human_stop": "deny",
-                        "deny_message": "stay in stage",
-                    },
-                },
-                "transitions": {
-                    "to": ["GREEN_IMPL"],
-                    "enter_when": [],
-                },
-                "evidence": {
-                    "expected": [".agent/artifacts/red-test.log"],
-                    "required": [],
-                },
+            "ONLY": {
+                "goal": "Only stage.",
+                "plan": "deny",
+                "allow": {"write": [], "actions": [], "stop": True, "human": True},
+                "deny": {"write": [], "actions": []},
+                "enter": [],
+                "exit": [],
+                "expect": [],
+                "next": [],
             },
         },
     }
 
-    normalized = normalize_workflow_spec(grouped)
 
-    assert normalized["metadata"]["id"] == "grouped-example"
-    assert normalized["path_policy"]["protected_paths"] == [".agent/state.json"]
-    assert normalized["path_policy"]["sensitive_paths"] == [".github/**"]
-    assert normalized["failure_policy"]["fingerprint_roots"] == ["src", "tests"]
-    assert normalized["finalization_policy"]["required_rules"] == ["successful_last_verification"]
-    assert normalized["wizard_defaults"]["start_stages"] == ["RED_TEST"]
-    assert normalized["session_start_defaults"]["navigator_skill"] == "workflow-core"
-    assert normalized["install_defaults"]["skill_match"] == ["workflow"]
-    assert normalized["install_defaults"]["skill_exclude_match"] == ["failure"]
-    assert normalized["stages"]["RED_TEST"]["goal"] == "Create a failing test."
-    assert normalized["stages"]["RED_TEST"]["write_policy"]["writable_paths"] == ["tests/**"]
-    assert normalized["stages"]["RED_TEST"]["allows_complete_step"] is True
-    assert normalized["stages"]["RED_TEST"]["forbid_needs_human"]["display"] == "stay in stage"
-    assert normalized["stages"]["RED_TEST"]["artifacts_required"] == []
+def _assert_unsupported_workflow_schema(spec: dict[str, object], expected: str) -> None:
+    try:
+        normalize_workflow_spec(spec)
+    except RuntimeError as exc:
+        assert "Unsupported workflow schema" in str(exc)
+        assert "docs/workflow-schema.md" in str(exc)
+        assert expected in str(exc)
+    else:
+        raise AssertionError("Expected unsupported workflow schema to fail")
 
 
-def test_normalize_workflow_spec_applies_plan_create_defaults_in_canonical_dsl() -> None:
+def test_version_1_workflow_schema_is_rejected() -> None:
+    """Test that version 1 workflows are not normalized."""
+    spec = _minimal_v2_workflow()
+    spec["version"] = 1
+
+    _assert_unsupported_workflow_schema(spec, "version must be 2")
+
+
+def test_legacy_globals_paths_schema_is_rejected() -> None:
+    """Test that old globals.paths workflows are rejected."""
+    spec = _minimal_v2_workflow()
+    spec["globals"] = {
+        "paths": {"protected": [".agent/state.json"], "sensitive": []},
+        "failures": {},
+        "finalize": {"require": []},
+        "session_start": {"navigator_skill": "using-workflow"},
+    }
+
+    _assert_unsupported_workflow_schema(spec, "legacy globals.paths")
+
+
+def test_legacy_globals_finalization_schema_is_rejected() -> None:
+    """Test that old globals.finalization workflows are rejected."""
+    spec = _minimal_v2_workflow()
+    spec["globals"] = {
+        "protected": [],
+        "sensitive": [],
+        "failures": {},
+        "finalization": {"require": []},
+        "session_start": {"navigator_skill": "using-workflow"},
+    }
+
+    _assert_unsupported_workflow_schema(spec, "legacy globals.finalization")
+
+
+def test_legacy_stage_shape_is_rejected() -> None:
+    """Test that grouped legacy stage fields are rejected."""
+    spec = _minimal_v2_workflow()
+    spec["stages"] = {
+        "ONLY": {
+            "intent": {"goal": "Old goal"},
+            "permissions": {"write": {"allow": [], "deny": []}},
+            "transitions": {"to": []},
+            "evidence": {"expected": [], "required": []},
+        }
+    }
+
+    _assert_unsupported_workflow_schema(spec, "legacy stage field ONLY.intent")
+
+
+def test_workflow_roles_must_reference_existing_stages() -> None:
+    """Test that explicit workflow role targets are validated."""
+    spec = _minimal_v2_workflow()
+    spec["workflow"] = {"id": "bad-role", "title": "Bad Role", "entry": "ONLY", "roles": {"verification": "MISSING"}}
+    normalized = normalize_workflow_spec(spec)
+
+    try:
+        validate_workflow_spec(normalized)
+    except RuntimeError as exc:
+        assert "workflow.roles references unknown stage" in str(exc)
+        assert "verification=MISSING" in str(exc)
+    else:
+        raise AssertionError("Expected invalid workflow role target to fail")
+
+
+def test_explicit_workflow_roles_override_inferred_roles(monkeypatch, tmp_path: Path) -> None:
+    """Test that workflow.roles can explicitly bind runtime roles."""
+    user_dir = tmp_path / "user"
+    user_dir.mkdir()
+    spec = _minimal_v2_workflow()
+    spec["workflow"] = {"id": "role-override", "title": "Role Override", "entry": "ONLY", "roles": {"verification": "ONLY"}}
+    (user_dir / "default.workflow.yaml").write_text(yaml.safe_dump(spec), encoding="utf-8")
+    monkeypatch.setattr("agent_guard.workflow_spec.user_workflow_dirs", lambda: [user_dir])
+    load_workflow_spec.cache_clear()
+
+    try:
+        assert workflow_stage_roles()["verification"] == "ONLY"
+        assert verification_stage() == "ONLY"
+    finally:
+        load_workflow_spec.cache_clear()
+
+
+def test_normalize_workflow_spec_applies_plan_create_defaults_in_current_dsl() -> None:
     """Test that plan:create injects plan.yaml write and artifact defaults."""
-    canonical = {
+    spec = {
         "version": 2,
         "workflow": {
-            "id": "canonical-example",
-            "title": "Canonical Example",
-            "description": "DSL compatibility test",
+            "id": "current-example",
+            "title": "Current Example",
+            "description": "Current DSL test",
             "entry": "PLANNING",
         },
         "globals": {
@@ -452,7 +513,7 @@ def test_normalize_workflow_spec_applies_plan_create_defaults_in_canonical_dsl()
         },
     }
 
-    normalized = normalize_workflow_spec(canonical)
+    normalized = normalize_workflow_spec(spec)
 
     assert normalized["stages"]["PLANNING"]["write_policy"]["writable_paths"] == [".agent/plan.yaml"]
     assert normalized["stages"]["PLANNING"]["artifacts_expected"] == [".agent/plan.yaml"]
@@ -461,8 +522,8 @@ def test_normalize_workflow_spec_applies_plan_create_defaults_in_canonical_dsl()
 
 
 def test_normalize_workflow_spec_preserves_rule_based_exit_conditions() -> None:
-    """Test that canonical exit rules are preserved in the flat internal shape."""
-    canonical = {
+    """Test that exit rules are preserved in the internal shape."""
+    spec = {
         "version": 2,
         "workflow": {"id": "command-exit", "title": "Command Exit", "entry": "VERIFY"},
         "globals": {"protected": [], "sensitive": [], "failures": {}, "finalize": {"require": []}, "session_start": {}},
@@ -486,7 +547,7 @@ def test_normalize_workflow_spec_preserves_rule_based_exit_conditions() -> None:
         },
     }
 
-    normalized = normalize_workflow_spec(canonical)
+    normalized = normalize_workflow_spec(spec)
 
     assert normalized["stages"]["VERIFY"]["exit_conditions"]["any"] == [
         {
@@ -498,7 +559,7 @@ def test_normalize_workflow_spec_preserves_rule_based_exit_conditions() -> None:
 
 
 def test_invalid_command_rule_regex_fails_workflow_validation() -> None:
-    """Test that command rule regexes are validated when loading the canonical DSL."""
+    """Test that command rule regexes are validated when loading the current DSL."""
     spec = {
         "version": 2,
         "workflow": {"id": "bad-command-regex", "title": "Bad", "entry": "VERIFY"},
@@ -540,40 +601,6 @@ def test_workflow_example_file_normalizes_and_validates() -> None:
             "display": "failure-analysis.md must start with the Failure Summary section.",
         }
     ]
-
-
-def test_canonical_workflow_projects_legacy_grouped_dsl() -> None:
-    """Test that the legacy grouped workflow is projected into the canonical Phase 1 model."""
-    workflow = canonical_workflow_spec()
-
-    assert workflow["workflow"]["entry"] == "CLARIFYING"
-    assert workflow["globals"]["finalize"]["require"] == [
-        {"rule": "no_running_jobs"},
-        {"rule": "successful_last_verification"},
-        {"rule": "can_finalize_flag"},
-        {"rule": "all_plan_steps_terminal"},
-    ]
-    assert workflow["stages"]["PLANNING"]["plan"] == "create"
-    assert workflow["stages"]["RED_TEST"]["plan"] == "advance"
-    assert workflow["stages"]["GREEN_IMPL"]["plan"] == "advance"
-    assert workflow["stages"]["READY_TO_SUMMARIZE"]["plan"] == "complete"
-    assert workflow["stages"]["PLANNING"]["exit"] == [".agent/plan.yaml"]
-    assert workflow["stages"]["NEEDS_FAILURE_ANALYSIS"]["exit"] == [
-        {
-            "path": ".agent/artifacts/failure-analysis.md",
-            "matches": "^## Failure Summary",
-            "display": "failure-analysis.md must start with the Failure Summary section.",
-        }
-    ]
-
-
-def test_canonical_helpers_resolve_legacy_completion_and_entry_stages() -> None:
-    """Test that canonical helper APIs preserve the legacy workflow behavior."""
-    assert canonical_entry_stage() == "CLARIFYING"
-    assert canonical_completion_ready_stage() == "READY_TO_SUMMARIZE"
-    assert canonical_completion_stage() == "DONE"
-    assert canonical_stage_plan_mode("VERIFY") == "advance"
-    assert canonical_stage_spec("DONE")["final"] is True
 
 
 def test_discover_workflow_ids_prefers_user_workflow_directory(monkeypatch, tmp_path: Path) -> None:
@@ -661,18 +688,18 @@ def test_load_workflow_spec_prefers_user_workflow_over_repo(monkeypatch, tmp_pat
     load_workflow_spec.cache_clear()
 
 
-def test_checked_in_research_workflow_loads_and_projects_compatibility_helpers() -> None:
+def test_checked_in_research_workflow_loads_and_resolves_roles() -> None:
     """The checked-in research workflow should be loadable through the named-workflow path."""
     spec = load_workflow_spec(workflow_id="research")
 
     assert spec["metadata"]["id"] == "research"
     assert spec["entry_stage"] == "QUESTIONING"
     assert wizard_defaults(workflow_id="research")["start_stages"] == ["QUESTIONING", "DISCOVER", "ANALYZE"]
-    assert canonical_entry_stage(workflow_id="research") == "QUESTIONING"
-    assert canonical_verification_stage(workflow_id="research") == "VALIDATE"
-    assert canonical_failure_analysis_stage(workflow_id="research") == "NEEDS_FAILURE_ANALYSIS"
-    assert canonical_completion_ready_stage(workflow_id="research") == "READY_TO_DELIVER"
-    assert canonical_completion_stage(workflow_id="research") == "DONE"
+    assert workflow_entry_stage(workflow_id="research") == "QUESTIONING"
+    assert verification_stage(workflow_id="research") == "VALIDATE"
+    assert failure_analysis_stage(workflow_id="research") == "NEEDS_FAILURE_ANALYSIS"
+    assert completion_ready_stage(workflow_id="research") == "READY_TO_DELIVER"
+    assert completion_stage(workflow_id="research") == "DONE"
     assert stage_write_policy("DISCOVER", workflow_id="research")["writable_paths"] == [
         "docs/**",
         "notes/**",
@@ -681,18 +708,18 @@ def test_checked_in_research_workflow_loads_and_projects_compatibility_helpers()
     ]
 
 
-def test_checked_in_docs_workflow_loads_and_projects_compatibility_helpers() -> None:
-    """The checked-in docs workflow should expose its own stage model and compatibility targets."""
+def test_checked_in_docs_workflow_loads_and_resolves_roles() -> None:
+    """The checked-in docs workflow should expose its own stage model and runtime roles."""
     spec = load_workflow_spec(workflow_id="docs")
 
     assert spec["metadata"]["id"] == "docs"
     assert spec["entry_stage"] == "INTAKE"
     assert wizard_defaults(workflow_id="docs")["start_stages"] == ["INTAKE", "OUTLINE", "DRAFT"]
-    assert canonical_entry_stage(workflow_id="docs") == "INTAKE"
-    assert canonical_verification_stage(workflow_id="docs") == "VALIDATE"
-    assert canonical_failure_analysis_stage(workflow_id="docs") == "NEEDS_FAILURE_ANALYSIS"
-    assert canonical_completion_ready_stage(workflow_id="docs") == "READY_TO_PUBLISH"
-    assert canonical_completion_stage(workflow_id="docs") == "DONE"
+    assert workflow_entry_stage(workflow_id="docs") == "INTAKE"
+    assert verification_stage(workflow_id="docs") == "VALIDATE"
+    assert failure_analysis_stage(workflow_id="docs") == "NEEDS_FAILURE_ANALYSIS"
+    assert completion_ready_stage(workflow_id="docs") == "READY_TO_PUBLISH"
+    assert completion_stage(workflow_id="docs") == "DONE"
     assert stage_write_policy("DRAFT", workflow_id="docs")["writable_paths"] == [
         "docs/**",
         "*.md",

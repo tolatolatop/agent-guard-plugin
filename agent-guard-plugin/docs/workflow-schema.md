@@ -30,6 +30,10 @@ workflow:
   title: Standard Workflow
   description: Reference workflow for agent-guard.
   entry: CLARIFYING
+  roles:
+    verification: VERIFY
+    completion_ready: READY_TO_SUMMARIZE
+    completion: DONE
 
 global_gates:
   - Do not write outside stage permissions.
@@ -106,8 +110,11 @@ Supported fields:
 - `title`
 - `description`
 - `entry`
+- `roles`
 
 `entry` must name one of the stages defined under `stages`.
+
+`roles` is optional. When present, each role value must name a stage defined under `stages`. Runtime helpers use these roles to locate workflow-specific completion, verification, failure-analysis, and handoff stages. If a role is omitted, `agent-guard` infers known roles from `final`, command gates, and artifact expectations.
 
 ### `global_gates`
 
@@ -144,6 +151,19 @@ Each key is a stage name. Each stage supports:
 - `exit`
 - `expect`
 - `next`
+
+## Unsupported Old Schemas
+
+Only `version: 2` and the stage-centered schema documented here are supported.
+
+Older workflow shapes are rejected at load time with a repair-oriented error. Unsupported examples include:
+
+- `version: 1`
+- `globals.paths`
+- `globals.finalization`
+- stage fields named `intent`, `permissions`, `transitions`, or `evidence`
+
+Migrate old files by moving path policy into `globals.protected` and `globals.sensitive`, finalization policy into `globals.finalize`, and each stage into `goal`, `plan`, `allow`, `deny`, `enter`, `exit`, `expect`, and `next`.
 
 ## `globals`
 

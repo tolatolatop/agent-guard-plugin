@@ -14,8 +14,8 @@ from agent_guard.transitions import _guard_transition, complete_step, mark_done
 from .helpers import make_temp_repo
 
 
-def test_idle_start_task_uses_canonical_entry_stage() -> None:
-    """IDLE: start-task should use the canonical entry stage."""
+def test_idle_start_task_uses_workflow_entry_stage() -> None:
+    """IDLE: start-task should use the workflow entry stage."""
     root_dir = make_temp_repo()
     session = TaskSession(task_id=None, workflow_id=None, stage="IDLE", current_step=None)
     repo = Mock()
@@ -25,7 +25,7 @@ def test_idle_start_task_uses_canonical_entry_stage() -> None:
     with (
         patch("agent_guard.application.use_cases.ensure_agent_files"),
         patch("agent_guard.application.use_cases.StateRepository", return_value=repo),
-        patch("agent_guard.application.use_cases.canonical_entry_stage", return_value="CLARIFYING"),
+        patch("agent_guard.application.use_cases.workflow_entry_stage", return_value="CLARIFYING"),
     ):
         result = start_task(root_dir, "password-reset")
 
@@ -44,12 +44,12 @@ def test_active_start_task_does_not_recompute_entry_stage() -> None:
     with (
         patch("agent_guard.application.use_cases.ensure_agent_files"),
         patch("agent_guard.application.use_cases.StateRepository", return_value=repo),
-        patch("agent_guard.application.use_cases.canonical_entry_stage") as canonical_entry_stage,
+        patch("agent_guard.application.use_cases.workflow_entry_stage") as workflow_entry_stage,
     ):
         with pytest.raises(RuntimeError) as exc:
             start_task(root_dir, "market-scan", workflow_id="coding")
 
-    canonical_entry_stage.assert_not_called()
+    workflow_entry_stage.assert_not_called()
     assert "different workflow" in str(exc.value)
 
 
@@ -60,7 +60,7 @@ def test_clarifying_stop_allows_without_finalize_check() -> None:
     with (
         patch("agent_guard.runtime_bridge.load_state", return_value={"stage": "CLARIFYING", "can_finalize": False}),
         patch("agent_guard.runtime_bridge.stage_forbid_needs_human_display", return_value=None),
-        patch("agent_guard.runtime_bridge.canonical_stage_stop_allowed", return_value=True),
+        patch("agent_guard.runtime_bridge.stage_stop_allowed", return_value=True),
         patch("agent_guard.runtime_bridge._cli_json") as cli_json,
     ):
         with pytest.raises(SystemExit) as exc:
@@ -96,7 +96,7 @@ def test_planning_stop_allows_without_finalize_check() -> None:
     with (
         patch("agent_guard.runtime_bridge.load_state", return_value={"stage": "PLANNING", "can_finalize": False}),
         patch("agent_guard.runtime_bridge.stage_forbid_needs_human_display", return_value=None),
-        patch("agent_guard.runtime_bridge.canonical_stage_stop_allowed", return_value=True),
+        patch("agent_guard.runtime_bridge.stage_stop_allowed", return_value=True),
         patch("agent_guard.runtime_bridge._cli_json") as cli_json,
     ):
         with pytest.raises(SystemExit) as exc:
@@ -116,8 +116,8 @@ def test_red_test_post_command_records_red_test_log() -> None:
 
     with (
         patch("agent_guard.runtime_bridge.load_state", return_value={"stage": "RED_TEST"}),
-        patch("agent_guard.runtime_bridge.canonical_verification_stage", return_value="VERIFY"),
-        patch("agent_guard.runtime_bridge.canonical_expected_failure_stage", return_value="RED_TEST"),
+        patch("agent_guard.runtime_bridge.verification_stage", return_value="VERIFY"),
+        patch("agent_guard.runtime_bridge.expected_failure_stage", return_value="RED_TEST"),
         patch("agent_guard.runtime_bridge._write_command_log", return_value=".agent/artifacts/red-test.log") as write_log,
         patch("agent_guard.runtime_bridge._cli_json", return_value=(0, {})) as cli_json,
     ):
@@ -139,8 +139,8 @@ def test_green_impl_post_command_skips_success_log() -> None:
 
     with (
         patch("agent_guard.runtime_bridge.load_state", return_value={"stage": "GREEN_IMPL"}),
-        patch("agent_guard.runtime_bridge.canonical_verification_stage", return_value="VERIFY"),
-        patch("agent_guard.runtime_bridge.canonical_expected_failure_stage", return_value="RED_TEST"),
+        patch("agent_guard.runtime_bridge.verification_stage", return_value="VERIFY"),
+        patch("agent_guard.runtime_bridge.expected_failure_stage", return_value="RED_TEST"),
         patch("agent_guard.runtime_bridge._write_command_log") as write_log,
         patch("agent_guard.runtime_bridge._cli_json", return_value=(0, {})) as cli_json,
     ):
@@ -181,8 +181,8 @@ def test_verify_post_command_records_final_verification_log() -> None:
 
     with (
         patch("agent_guard.runtime_bridge.load_state", return_value={"stage": "VERIFY"}),
-        patch("agent_guard.runtime_bridge.canonical_verification_stage", return_value="VERIFY"),
-        patch("agent_guard.runtime_bridge.canonical_expected_failure_stage", return_value="RED_TEST"),
+        patch("agent_guard.runtime_bridge.verification_stage", return_value="VERIFY"),
+        patch("agent_guard.runtime_bridge.expected_failure_stage", return_value="RED_TEST"),
         patch("agent_guard.runtime_bridge._write_command_log", return_value=".agent/artifacts/final-verification.log") as write_log,
         patch("agent_guard.runtime_bridge._cli_json", return_value=(0, {})) as cli_json,
     ):
@@ -193,7 +193,7 @@ def test_verify_post_command_records_final_verification_log() -> None:
 
 
 def test_ready_to_summarize_mark_done_targets_completion_stage() -> None:
-    """READY_TO_SUMMARIZE: mark-done should target the canonical completion stage."""
+    """READY_TO_SUMMARIZE: mark-done should target the completion stage."""
     root_dir = make_temp_repo()
     session = TaskSession(task_id="password-reset", workflow_id=None, stage="READY_TO_SUMMARIZE", current_step=None, can_finalize=True)
 
@@ -202,7 +202,7 @@ def test_ready_to_summarize_mark_done_targets_completion_stage() -> None:
         patch("agent_guard.transitions._guard_transition") as guard,
         patch("agent_guard.transitions.save_task_session") as save_session,
         patch("agent_guard.transitions._append_transition_event", return_value={"hook": "WorkflowTransition"}),
-        patch("agent_guard.transitions.canonical_completion_stage", return_value="DONE"),
+        patch("agent_guard.transitions.completion_stage", return_value="DONE"),
         patch("agent_guard.transitions._next_stages", return_value=[]),
     ):
         result = mark_done(root_dir)
@@ -220,7 +220,7 @@ def test_needs_failure_analysis_exit_guard_checks_artifacts() -> None:
 
     with (
         patch("agent_guard.transitions.STAGE_TRANSITIONS", {"NEEDS_FAILURE_ANALYSIS": ["VERIFY"], "VERIFY": []}),
-        patch("agent_guard.transitions.canonical_completion_stage", return_value="DONE"),
+        patch("agent_guard.transitions.completion_stage", return_value="DONE"),
         patch("agent_guard.transitions.StageExitPolicyService") as policy_service,
     ):
         policy_service.return_value.exit_failures.return_value = ["failure-analysis.md must be updated"]
@@ -238,7 +238,7 @@ def test_needs_human_stop_allows_without_finalize_check() -> None:
     with (
         patch("agent_guard.runtime_bridge.load_state", return_value={"stage": "NEEDS_HUMAN", "can_finalize": False}),
         patch("agent_guard.runtime_bridge.stage_forbid_needs_human_display", return_value=None),
-        patch("agent_guard.runtime_bridge.canonical_stage_stop_allowed", return_value=True),
+        patch("agent_guard.runtime_bridge.stage_stop_allowed", return_value=True),
         patch("agent_guard.runtime_bridge._cli_json") as cli_json,
     ):
         with pytest.raises(SystemExit) as exc:
@@ -255,7 +255,7 @@ def test_done_stop_allows_without_finalize_check() -> None:
     with (
         patch("agent_guard.runtime_bridge.load_state", return_value={"stage": "DONE", "can_finalize": False}),
         patch("agent_guard.runtime_bridge.stage_forbid_needs_human_display", return_value=None),
-        patch("agent_guard.runtime_bridge.canonical_stage_stop_allowed", return_value=True),
+        patch("agent_guard.runtime_bridge.stage_stop_allowed", return_value=True),
         patch("agent_guard.runtime_bridge._cli_json") as cli_json,
     ):
         with pytest.raises(SystemExit) as exc:

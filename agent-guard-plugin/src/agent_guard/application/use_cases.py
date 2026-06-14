@@ -11,7 +11,7 @@ from ..infrastructure.repositories import StateRepository
 from ..path_policy import stage_rule_for
 from ..runtime_adapter import get_next_step, get_session_reminder
 from ..state import AGENT_DIR, ensure_agent_files
-from ..workflow_spec import canonical_entry_stage
+from ..workflow_spec import workflow_entry_stage
 
 
 def initialize_workspace(root_dir: Path) -> dict[str, Any]:
@@ -27,7 +27,7 @@ def start_task(root_dir: Path, task_id: str, workflow_id: str | None = None) -> 
     repo = StateRepository(root_dir)
     session = repo.load()
     resolved_workflow = workflow_id or session.workflow_id
-    entry_stage = session.stage if session.stage != "IDLE" else canonical_entry_stage(root_dir, resolved_workflow)
+    entry_stage = session.stage if session.stage != "IDLE" else workflow_entry_stage(root_dir, resolved_workflow)
     updated = repo.save(
         session.start(
             task_id,

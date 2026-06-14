@@ -402,7 +402,7 @@ The current implementation is closer than before, but a few mixed areas remain.
 - `forbidden_actions`
 - `write_policy`
 
-Conceptually these should be read through the stage DSL view, even if a compatibility layer remains internally.
+Conceptually these should continue to be read through the stage DSL view exposed by `workflow_spec.py`.
 
 ### `permissions.actions` are not enforced
 
@@ -419,7 +419,7 @@ Each one should map to a concrete service or CLI gate if it is meant to be bindi
 
 If DSL-ization continues, the most coherent order is:
 
-1. Keep `workflow_spec.py` canonicalization small and explicit so prompt projections stop depending on old field names.
+1. Keep `workflow_spec.py` normalization small and explicit so prompt projections stay aligned with the stage-centered DSL.
 2. Clearly label soft-prompt-only fields versus hard-gate fields in the workflow spec normalizer.
 3. Decide whether `allow.actions` and `deny.actions` should remain descriptive forever or gain partial enforcement later.
 4. Keep dynamic execution evidence in state repositories, not in the workflow document.

@@ -12,17 +12,17 @@ from .gates import can_finalize
 from .plan import plan_step_entities, update_plan_step_status
 from .state import AGENT_DIR, load_task_session, save_task_session
 from .workflow_spec import (
-    canonical_completion_ready_stage,
-    canonical_completion_stage,
-    canonical_entry_stage,
-    canonical_failure_analysis_stage,
-    canonical_verification_stage,
+    completion_ready_stage,
+    completion_stage,
     complete_step_allowed_from_stages,
+    failure_analysis_stage,
     stage_entry_conditions,
     stage_exit_conditions,
     stage_exit_rule_conditions,
     stage_intent,
     stage_transitions,
+    verification_stage,
+    workflow_entry_stage,
 )
 
 STAGE_TRANSITIONS = stage_transitions()
@@ -37,16 +37,16 @@ def automatic_transitions() -> list[str]:
     """Automatic transitions."""
     analysis_stage = "failure-analysis stage"
     try:
-        analysis_stage = canonical_failure_analysis_stage() or analysis_stage
+        analysis_stage = failure_analysis_stage() or analysis_stage
     except RuntimeError:
         pass
-    verification_stage = canonical_verification_stage() or "verification stage"
+    verify_stage = verification_stage() or "verification stage"
     return [
-        f"start-task: IDLE -> {canonical_entry_stage()}",
+        f"start-task: IDLE -> {workflow_entry_stage()}",
         "wizard: initializes directly into the selected starting stage",
         f"record-command: failed non-red command -> {analysis_stage}",
-        f"record-command in {verification_stage}: updates last_verification",
-        f"reset-task: archives a completed task and starts a new one in {canonical_entry_stage()}",
+        f"record-command in {verify_stage}: updates last_verification",
+        f"reset-task: archives a completed task and starts a new one in {workflow_entry_stage()}",
     ]
 
 def _require_direct_transition(root_dir: Path, from_stage: str, to_stage: str, workflow_id: str | None = None) -> None:
@@ -54,9 +54,9 @@ def _require_direct_transition(root_dir: Path, from_stage: str, to_stage: str, w
     transitions = stage_transitions(root_dir, workflow_id)
     if to_stage not in transitions:
         raise RuntimeError(f"Unknown target stage: {to_stage}")
-    completion_stage = canonical_completion_stage(root_dir, workflow_id)
-    if from_stage == completion_stage:
-        raise RuntimeError(f"{completion_stage} cannot transition anywhere. Use reset-task or next-task to start a new task.")
+    done_stage = completion_stage(root_dir, workflow_id)
+    if from_stage == done_stage:
+        raise RuntimeError(f"{done_stage} cannot transition anywhere. Use reset-task or next-task to start a new task.")
     allowed_targets = transitions.get(from_stage, [])
     if to_stage not in allowed_targets:
         allowed_display = ", ".join(allowed_targets) if allowed_targets else "none"
@@ -215,7 +215,7 @@ def ready_to_summarize(root_dir: Path) -> dict[str, Any]:
     """Move workflow state so it is ready to summarize."""
     session = load_task_session(root_dir)
     from_stage = session.stage
-    target_stage = canonical_completion_ready_stage(root_dir, session.workflow_id)
+    target_stage = completion_ready_stage(root_dir, session.workflow_id)
     _guard_transition(root_dir, session, target_stage, "ready-to-summarize", None)
     next_session = session.mark_ready_to_summarize(target_stage)
     save_task_session(root_dir, next_session)
@@ -231,7 +231,7 @@ def mark_done(root_dir: Path) -> dict[str, Any]:
     """Mark done."""
     session = load_task_session(root_dir)
     from_stage = session.stage
-    target_stage = canonical_completion_stage(root_dir, session.workflow_id)
+    target_stage = completion_stage(root_dir, session.workflow_id)
     _guard_transition(root_dir, session, target_stage, "mark-done", None)
     next_session = session.mark_done(target_stage)
     save_task_session(root_dir, next_session)

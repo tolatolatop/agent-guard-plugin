@@ -13,11 +13,11 @@ from .cli import run_command
 from .events import append_event
 from .state import artifacts_dir, ensure_agent_files, load_state
 from .workflow_spec import (
-    canonical_completion_ready_stage,
-    canonical_expected_failure_stage,
-    canonical_stage_stop_allowed,
-    canonical_verification_stage,
+    completion_ready_stage,
+    expected_failure_stage,
     stage_forbid_needs_human_display,
+    stage_stop_allowed,
+    verification_stage,
 )
 
 
@@ -205,9 +205,9 @@ def _extract_exit_code(payload: dict[str, Any]) -> int:
 
 def _log_target_for_command(stage: str | None, exit_code: int, root_dir: Path | None = None, workflow_id: str | None = None) -> str | None:
     """Internal helper for log target for command."""
-    if stage == canonical_verification_stage(root_dir, workflow_id):
+    if stage == verification_stage(root_dir, workflow_id):
         return ".agent/artifacts/final-verification.log"
-    if stage == canonical_expected_failure_stage(root_dir, workflow_id) and exit_code != 0:
+    if stage == expected_failure_stage(root_dir, workflow_id) and exit_code != 0:
         return ".agent/artifacts/red-test.log"
     if exit_code != 0:
         return ".agent/artifacts/command-failure.log"
@@ -310,9 +310,9 @@ def _handle_stop(cwd: Path, action: str = "stop") -> None:
         # Stages with forbid_needs_human must keep progressing through the
         # workflow instead of ending the interaction with a final response.
         _fail(cwd, action, f"agent-guard blocked final response: {forbid_display}", {"state": state})
-    if stage and canonical_stage_stop_allowed(str(stage), cwd, workflow_id):
+    if stage and stage_stop_allowed(str(stage), cwd, workflow_id):
         raise SystemExit(0)
-    ready_stage = canonical_completion_ready_stage(cwd, workflow_id)
+    ready_stage = completion_ready_stage(cwd, workflow_id)
     if stage != ready_stage and state.get("can_finalize") is not True:
         _fail(
             cwd,
