@@ -29,6 +29,7 @@ def test_top_level_help_flag_prints_command_overview() -> None:
     assert "close-task [--force]" in output
     assert "record-command --cmd CMD --exit-code CODE [--log PATH]" in output
     assert "verify [--auto-ready] -- CMD ..." in output
+    assert "version" in output
     assert "help [command]" in output
 
 
@@ -66,6 +67,22 @@ def test_help_command_supports_command_specific_help() -> None:
     assert code == 0
     assert "Usage: agent-guard close-task [--force]" in output
     assert "release .agent protection" in output
+
+
+def test_version_command_prints_package_version() -> None:
+    """Test that version command prints a human-readable version."""
+    code, output = invoke_help(["version"])
+
+    assert code == 0
+    assert output == "agent-guard 0.3.1\n"
+
+
+def test_global_version_flag_prints_package_version() -> None:
+    """Test that --version prints the same version string."""
+    code, output = invoke_help(["--version"])
+
+    assert code == 0
+    assert output == "agent-guard 0.3.1\n"
 
 
 def test_missing_command_prints_help_and_exits_nonzero() -> None:

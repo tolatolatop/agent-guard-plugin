@@ -4,9 +4,11 @@ from __future__ import annotations
 import json
 import os
 import sys
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
+from . import __version__
 from .application.use_cases import (
     build_session_reminder,
     check_failure_loop,
@@ -65,6 +67,7 @@ Commands:
   check-job-poll <job-id>           Check whether a job may be polled now.
   can-finalize                      Check whether finalization is allowed.
   next-step                         Show the next step derived from state and plan.
+  version                           Show the installed agent-guard version.
   install [options]                 Install runtime integrations for supported tools.
   uninstall [options]               Remove runtime integrations for supported tools.
   wizard [--workflow ID]            Run the interactive setup wizard.
@@ -72,6 +75,7 @@ Commands:
 
 Global options:
   -h, --help                        Show help.
+      --version                     Show the installed agent-guard version.
 
 Examples:
   agent-guard init
@@ -125,6 +129,7 @@ COMMAND_HELP: dict[str, str] = {
     "check-job-poll": "Usage: agent-guard check-job-poll <job-id>\n\nCheck whether a job may be polled now.",
     "can-finalize": "Usage: agent-guard can-finalize\n\nCheck whether finalization is allowed.",
     "next-step": "Usage: agent-guard next-step\n\nShow the next step derived from state and plan.",
+    "version": "Usage: agent-guard version\n\nShow the installed agent-guard version.",
     "install": (
         "Usage: agent-guard install [--runtime RUNTIME] [--scope SCOPE] [--workflow ID] [--match REGEX ...] [--exclude-match REGEX ...] [--interactive|-i]\n\n"
         "Install runtime integrations.\n\n"
@@ -151,6 +156,14 @@ COMMAND_HELP: dict[str, str] = {
     "wizard": "Usage: agent-guard wizard [--workflow ID]\n\nRun the interactive setup wizard.",
     "help": "Usage: agent-guard help [command]\n\nShow general or command-specific help.",
 }
+
+
+def package_version() -> str:
+    """Return the installed package version."""
+    try:
+        return version("agent-guard-plugin")
+    except PackageNotFoundError:
+        return __version__
 
 
 def print_json(data: dict[str, Any], exit_code: int = 0) -> None:
@@ -184,6 +197,9 @@ def run_command(argv: list[str], cwd: Path) -> int:
 
     if argv[0] in {"-h", "--help"}:
         print_help(GLOBAL_HELP)
+
+    if argv[0] == "--version":
+        print_help(f"agent-guard {package_version()}")
 
     if argv[0] == "help":
         target = argv[1] if len(argv) > 1 else None
@@ -300,6 +316,8 @@ def run_command(argv: list[str], cwd: Path) -> int:
             print_json(result, 0 if result["decision"] == "allow" else 1)
         elif command == "next-step":
             print_json(next_step(cwd))
+        elif command == "version":
+            print_help(f"agent-guard {package_version()}")
         elif command == "install":
             result = install_runtime(rest, cwd, Path(os.path.expanduser("~")), Path(__file__).resolve().parents[2])
             print_json({"ok": True, **result})
@@ -324,7 +342,7 @@ def run_command(argv: list[str], cwd: Path) -> int:
                         "Unknown command. Supported: init, start-task, status, session-start, "
                         "can-write, record-command, verify, advance-stage, complete-step, ready-to-summarize, "
                         "mark-done, check-failure-loop, check-job-poll, can-finalize, next-step, close-task, "
-                        "reset-task, next-task, install, uninstall, wizard"
+                        "reset-task, next-task, version, install, uninstall, wizard"
                     )
                 },
                 1,
