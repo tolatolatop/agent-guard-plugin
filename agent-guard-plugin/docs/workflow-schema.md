@@ -30,10 +30,6 @@ workflow:
   title: Standard Workflow
   description: Reference workflow for agent-guard.
   entry: CLARIFYING
-  roles:
-    verification: VERIFY
-    completion_ready: READY_TO_SUMMARIZE
-    completion: DONE
 
 global_gates:
   - Do not write outside stage permissions.
@@ -110,17 +106,22 @@ Supported fields:
 - `title`
 - `description`
 - `entry`
-- `roles`
 
 `entry` must name one of the stages defined under `stages`.
 
-`roles` is optional. When present, each role value must name a stage defined under `stages`. Runtime helpers use these roles to locate workflow-specific completion, verification, failure-analysis, and handoff stages. If a role is omitted, `agent-guard` infers known roles from `final`, command gates, and artifact expectations.
+`workflow.roles` is not supported. Runtime helpers infer known roles only from hard workflow structure:
+
+- `final: true`
+- `required_command` gates such as `ready-to-summarize` and `mark-done`
+- required artifacts declared in `exit`
+- the `NEEDS_HUMAN` stage
+- the canonical `RED_TEST` stage identity for expected red-test failures
 
 ### `global_gates`
 
 Type: list of strings
 
-High-level guardrail text surfaced in workflow guidance.
+Global prompt guidance surfaced to agents during session start. Despite the historical field name, these strings are not machine gates by themselves.
 
 ### `globals`
 
@@ -159,11 +160,12 @@ Only `version: 2` and the stage-centered schema documented here are supported.
 Older workflow shapes are rejected at load time with a repair-oriented error. Unsupported examples include:
 
 - `version: 1`
+- `workflow.roles`
 - `globals.paths`
 - `globals.finalization`
 - stage fields named `intent`, `permissions`, `transitions`, or `evidence`
 
-Migrate old files by moving path policy into `globals.protected` and `globals.sensitive`, finalization policy into `globals.finalize`, and each stage into `goal`, `plan`, `allow`, `deny`, `enter`, `exit`, `expect`, and `next`.
+Migrate old files by removing `workflow.roles`, moving path policy into `globals.protected` and `globals.sensitive`, finalization policy into `globals.finalize`, and each stage into `goal`, `plan`, `allow`, `deny`, `enter`, `exit`, `expect`, and `next`. If a runtime role no longer resolves, express it through hard structure instead of a role declaration.
 
 ## `globals`
 
@@ -223,6 +225,7 @@ Supported fields:
 - `messages`
 
 `require` is a list of built-in finalization rules. A rule can be written as a string or as an object with `rule`.
+Finalization rules are completion evidence, separate from ordinary stage exit rules.
 
 Example:
 
@@ -252,6 +255,8 @@ Supported fields:
 
 - `navigator_skill`
 
+This is workflow-specific context packaging. It selects the navigator skill shown by `session-start`; it does not change stage execution rules.
+
 ### `globals.install`
 
 Type: mapping
@@ -260,6 +265,20 @@ Supported fields:
 
 - `skills.match`
 - `skills.exclude_match`
+
+These are workflow-specific default filters for installed skill context. CLI install filters take precedence over workflow defaults. If workflow defaults match no skills, install warns and falls back to full skill installation.
+
+## DSL Layers
+
+The schema separates hard runtime semantics from prompt/context fields:
+
+- Flow: `workflow.entry`, stage `next`, and inferred inbound edges.
+- Gates: stage `enter`, stage `exit`, `final`, `plan`, `globals.failures`, and `globals.finalize`.
+- Write policy: `globals.protected`, `globals.sensitive`, stage `allow.write`, and stage `deny.write`.
+- Guidance: `goal`, `global_gates`, `allow.actions`, `deny.actions`, and `expect`.
+- Context packaging: `globals.session_start` and `globals.install`.
+
+Machine-enforced behavior must come from flow, gates, write policy, plan mode, finalization policy, or failure policy. Guidance fields are displayed to agents but must not be used as a second source of runtime truth.
 
 ## Stage Shape
 
@@ -294,6 +313,7 @@ SOME_STAGE:
 Type: string
 
 Human-readable statement of the stage objective.
+This is prompt guidance and the primary human-facing statement of stage responsibility.
 
 ### `plan`
 
@@ -320,12 +340,14 @@ Optional marker for a final stage.
 Type: list of path globs
 
 Paths the stage may write.
+This is part of machine write policy.
 
 ### `allow.actions`
 
 Type: list of strings
 
 Actions the stage is intended to perform.
+This is prompt guidance only. It is projected as `guidance.allowed_actions` during session start and is not a machine permission.
 
 ### `allow.stop`
 
@@ -344,12 +366,14 @@ Controls whether the stage may hand off to a human stop path.
 Type: list of path globs
 
 Paths the stage must not write, even if a broader allow rule exists.
+This is part of machine write policy.
 
 ### `deny.actions`
 
 Type: list of strings
 
 Actions the stage must avoid.
+This is prompt guidance only. It is projected as `guidance.forbidden_actions` during session start and is not a machine permission.
 
 ### `enter`
 
@@ -424,6 +448,7 @@ Behavior:
 Type: list of paths
 
 Soft guidance only. Missing expected artifacts do not block stage exit.
+Expected artifacts are displayed to agents but do not participate in exit gates, finalization gates, or runtime role inference.
 
 ### `next`
 
@@ -435,7 +460,7 @@ Legal next stages from the current stage.
 
 - `exit` is the hard stage-exit gate.
 - `agent-guard verify [--auto-ready] -- <command>` is the preferred CLI path for verification stages: it runs the command, writes `.agent/artifacts/final-verification.log`, records `last_verification`, and can run `ready-to-summarize` after success.
-- `expect` is prompt guidance only.
+- `expect`, `allow.actions`, `deny.actions`, `goal`, and `global_gates` are prompt guidance only.
 - write control comes from `globals.protected`, `globals.sensitive`, `allow.write`, and `deny.write`.
 - `plan: create` is the stage mode that opens normal plan authoring.
 - `plan: advance` enables `complete-step`.

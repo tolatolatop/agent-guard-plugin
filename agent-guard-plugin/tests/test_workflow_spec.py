@@ -324,8 +324,8 @@ def test_stage_policy_roles_distinguish_soft_and_hard_concerns() -> None:
     assert roles["evidence"]["expected"] == "soft_prompt"
 
 
-def test_workflow_policy_roles_mark_global_gate_types() -> None:
-    """Test that grouped workflow roles distinguish global hard gates from prompts."""
+def test_workflow_policy_roles_mark_global_context_types() -> None:
+    """Test that grouped workflow roles distinguish global hard gates from prompt context."""
     roles = workflow_policy_roles()
 
     assert roles["workflow"] == "soft_prompt"
@@ -423,34 +423,35 @@ def test_legacy_stage_shape_is_rejected() -> None:
     _assert_unsupported_workflow_schema(spec, "legacy stage field ONLY.intent")
 
 
-def test_workflow_roles_must_reference_existing_stages() -> None:
-    """Test that explicit workflow role targets are validated."""
+def test_workflow_roles_are_rejected() -> None:
+    """Test that workflow.roles is no longer a supported runtime role source."""
     spec = _minimal_v2_workflow()
     spec["workflow"] = {"id": "bad-role", "title": "Bad Role", "entry": "ONLY", "roles": {"verification": "MISSING"}}
-    normalized = normalize_workflow_spec(spec)
 
-    try:
-        validate_workflow_spec(normalized)
-    except RuntimeError as exc:
-        assert "workflow.roles references unknown stage" in str(exc)
-        assert "verification=MISSING" in str(exc)
-    else:
-        raise AssertionError("Expected invalid workflow role target to fail")
+    _assert_unsupported_workflow_schema(spec, "workflow.roles is no longer supported")
 
 
-def test_explicit_workflow_roles_override_inferred_roles(monkeypatch, tmp_path: Path) -> None:
-    """Test that workflow.roles can explicitly bind runtime roles."""
+def test_runtime_roles_do_not_infer_from_expected_artifacts(monkeypatch, tmp_path: Path) -> None:
+    """Test that soft expect entries do not bind runtime roles."""
     user_dir = tmp_path / "user"
     user_dir.mkdir()
     spec = _minimal_v2_workflow()
-    spec["workflow"] = {"id": "role-override", "title": "Role Override", "entry": "ONLY", "roles": {"verification": "ONLY"}}
+    spec["stages"]["ONLY"]["expect"] = [
+        ".agent/artifacts/final-verification.log",
+        ".agent/artifacts/red-test.log",
+        ".agent/artifacts/failure-analysis.md",
+    ]
     (user_dir / "default.workflow.yaml").write_text(yaml.safe_dump(spec), encoding="utf-8")
     monkeypatch.setattr("agent_guard.workflow_spec.user_workflow_dirs", lambda: [user_dir])
     load_workflow_spec.cache_clear()
 
     try:
-        assert workflow_stage_roles()["verification"] == "ONLY"
-        assert verification_stage() == "ONLY"
+        assert "verification" not in workflow_stage_roles()
+        assert "expected_failure" not in workflow_stage_roles()
+        assert "failure_analysis" not in workflow_stage_roles()
+        assert verification_stage() is None
+        assert expected_failure_stage() is None
+        assert failure_analysis_stage() is None
     finally:
         load_workflow_spec.cache_clear()
 

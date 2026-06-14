@@ -373,6 +373,9 @@ def _reject_unsupported_workflow_shape(spec: dict[str, Any], globals_config: dic
         raise _unsupported_schema_error("version must be 2")
     if "workflow" not in spec:
         raise _unsupported_schema_error("top-level workflow is required")
+    workflow_config = _require_mapping(spec.get("workflow", {}), ".workflow.yaml workflow")
+    if "roles" in workflow_config:
+        raise _unsupported_schema_error("workflow.roles is no longer supported")
     legacy_globals = [key for key in ("paths", "finalization") if key in globals_config]
     if legacy_globals:
         raise _unsupported_schema_error(f"legacy globals.{legacy_globals[0]} is no longer supported")
@@ -420,10 +423,6 @@ def normalize_workflow_spec(spec: dict[str, Any]) -> dict[str, Any]:
             "title": str(workflow_config.get("title", "")),
             "description": str(workflow_config.get("description", "")),
             "entry": workflow_entry,
-            "roles": {
-                str(key): str(value)
-                for key, value in _require_mapping(workflow_config.get("roles", {}), ".workflow.yaml workflow.roles").items()
-            },
         },
         "entry_stage": workflow_entry,
         "global_gates": _string_list(spec.get("global_gates", []), ".workflow.yaml global_gates"),
@@ -476,11 +475,7 @@ def validate_workflow_spec(spec: dict[str, Any]) -> None:
     entry = str(spec.get("entry_stage", ""))
     if entry and entry not in workflow_stages_from_spec(spec):
         raise RuntimeError(f".workflow.yaml workflow.entry references unknown stage: {entry}")
-    roles = _explicit_workflow_stage_roles(spec)
     stages = workflow_stages_from_spec(spec)
-    unknown_role_targets = [f"{role}={stage}" for role, stage in roles.items() if stage not in stages]
-    if unknown_role_targets:
-        raise RuntimeError(f".workflow.yaml workflow.roles references unknown stage: {', '.join(unknown_role_targets)}")
     for stage_name, stage_data in workflow_stages_from_spec(spec).items():
         _validate_stage_rules(stage_name, _require_mapping(stage_data, f".workflow.yaml stage {stage_name}"))
         for target_stage in _require_list(stage_data.get("allowed_next_stages", []), f".workflow.yaml stage {stage_name} next"):
@@ -980,7 +975,7 @@ def transition_graph_mermaid(root_dir: Path | None = None, workflow_id: str | No
 
 
 def global_gates(root_dir: Path | None = None, workflow_id: str | None = None) -> list[str]:
-    """Global gates."""
+    """Global prompt guidance from the historical global_gates field."""
     spec = load_workflow_spec(root_dir, workflow_id)
     gates = spec.get("global_gates", [])
     if not isinstance(gates, list):
@@ -1074,14 +1069,6 @@ def stage_human_allowed(stage: str, root_dir: Path | None = None, workflow_id: s
     return bool(stage_spec(stage, root_dir, workflow_id).get("human_allowed", False))
 
 
-def _explicit_workflow_stage_roles(spec: dict[str, Any]) -> dict[str, str]:
-    metadata = _require_mapping(spec.get("metadata", {}), ".workflow.yaml metadata")
-    roles = metadata.get("roles", {})
-    if not isinstance(roles, dict):
-        return {}
-    return {str(key): str(value) for key, value in roles.items() if isinstance(value, str) and value.strip()}
-
-
 def _first_stage_with_required_command(spec: dict[str, Any], command_name: str) -> str | None:
     for stage_name in workflow_stages_from_spec(spec):
         for item in stage_entry_conditions_from_spec(spec, stage_name):
@@ -1090,11 +1077,8 @@ def _first_stage_with_required_command(spec: dict[str, Any], command_name: str) 
     return None
 
 
-def _first_stage_with_expected_or_required_artifact(spec: dict[str, Any], artifact_path: str) -> str | None:
+def _first_stage_with_required_artifact(spec: dict[str, Any], artifact_path: str) -> str | None:
     for stage_name, stage_data in workflow_stages_from_spec(spec).items():
-        expected = stage_data.get("artifacts_expected", [])
-        if isinstance(expected, list) and artifact_path in expected:
-            return str(stage_name)
         for item in stage_required_artifact_rules_from_spec(spec, stage_name):
             if item["path"] == artifact_path:
                 return str(stage_name)
@@ -1124,13 +1108,12 @@ def _infer_workflow_stage_roles(spec: dict[str, Any]) -> dict[str, str]:
                 break
     if completion_ready:
         inferred["completion_ready"] = completion_ready
-    verification = _first_stage_with_expected_or_required_artifact(spec, ".agent/artifacts/final-verification.log")
+    verification = _first_stage_with_required_artifact(spec, ".agent/artifacts/final-verification.log")
     if verification:
         inferred["verification"] = verification
-    expected_failure = _first_stage_with_expected_or_required_artifact(spec, ".agent/artifacts/red-test.log")
-    if expected_failure:
-        inferred["expected_failure"] = expected_failure
-    failure_analysis = _first_stage_with_expected_or_required_artifact(spec, ".agent/artifacts/failure-analysis.md")
+    if "RED_TEST" in stages:
+        inferred["expected_failure"] = "RED_TEST"
+    failure_analysis = _first_stage_with_required_artifact(spec, ".agent/artifacts/failure-analysis.md")
     if failure_analysis:
         inferred["failure_analysis"] = failure_analysis
     if "NEEDS_HUMAN" in stages:
@@ -1141,9 +1124,7 @@ def _infer_workflow_stage_roles(spec: dict[str, Any]) -> dict[str, str]:
 def workflow_stage_roles(root_dir: Path | None = None, workflow_id: str | None = None) -> dict[str, str]:
     """Workflow stage roles used by runtime commands and hooks."""
     spec = load_workflow_spec(root_dir, workflow_id)
-    roles = _infer_workflow_stage_roles(spec)
-    roles.update(_explicit_workflow_stage_roles(spec))
-    return roles
+    return _infer_workflow_stage_roles(spec)
 
 
 def workflow_stage_for_role(role: str, root_dir: Path | None = None, workflow_id: str | None = None) -> str | None:
