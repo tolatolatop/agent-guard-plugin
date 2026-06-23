@@ -3,6 +3,8 @@ from pathlib import Path
 
 import yaml
 
+from .helpers import setup_default_workflow
+
 from agent_guard.workflow_spec import (
     completion_ready_stage,
     completion_stage,
@@ -42,8 +44,9 @@ from agent_guard.workflow_spec import (
 )
 
 
-def test_new_runtime_role_api_resolves_default_workflow_roles() -> None:
+def test_new_runtime_role_api_resolves_default_workflow_roles(monkeypatch, tmp_path: Path) -> None:
     """Runtime stage-role helpers should expose workflow roles without projection callers."""
+    setup_default_workflow(monkeypatch, tmp_path)
     assert workflow_entry_stage() == "CLARIFYING"
     assert workflow_stage_roles() == {
         "verification": "VERIFY",
@@ -61,8 +64,9 @@ def test_new_runtime_role_api_resolves_default_workflow_roles() -> None:
     assert completion_stage() == "DONE"
 
 
-def test_new_runtime_stage_api_exposes_plan_and_handoff_flags() -> None:
+def test_new_runtime_stage_api_exposes_plan_and_handoff_flags(monkeypatch, tmp_path: Path) -> None:
     """Runtime stage helpers should read plan/stop/human behavior through v2-facing names."""
+    setup_default_workflow(monkeypatch, tmp_path)
     assert stage_plan_mode("VERIFY") == "advance"
     assert stage_stop_allowed("VERIFY") is False
     assert stage_human_allowed("VERIFY") is False
@@ -70,8 +74,9 @@ def test_new_runtime_stage_api_exposes_plan_and_handoff_flags() -> None:
     assert stage_human_allowed("DONE") is True
 
 
-def test_ready_to_summarize_exit_conditions_follow_done_entry_conditions() -> None:
+def test_ready_to_summarize_exit_conditions_follow_done_entry_conditions(monkeypatch, tmp_path: Path) -> None:
     """Test that ready to summarize exit conditions follow done entry conditions."""
+    setup_default_workflow(monkeypatch, tmp_path)
     conditions = stage_exit_conditions("READY_TO_SUMMARIZE")
 
     assert conditions["DONE"] == [
@@ -81,8 +86,9 @@ def test_ready_to_summarize_exit_conditions_follow_done_entry_conditions() -> No
     ]
 
 
-def test_needs_failure_analysis_exit_conditions_resolve_required_artifact_placeholder() -> None:
+def test_needs_failure_analysis_exit_conditions_resolve_required_artifact_placeholder(monkeypatch, tmp_path: Path) -> None:
     """Test that needs failure analysis exit conditions resolve required artifact placeholder."""
+    setup_default_workflow(monkeypatch, tmp_path)
     conditions = stage_exit_conditions("NEEDS_FAILURE_ANALYSIS")
 
     assert conditions["VERIFY"] == [
@@ -90,8 +96,9 @@ def test_needs_failure_analysis_exit_conditions_resolve_required_artifact_placeh
     ]
 
 
-def test_review_exit_conditions_include_required_review_artifact() -> None:
+def test_review_exit_conditions_include_required_review_artifact(monkeypatch, tmp_path: Path) -> None:
     """Test that review exit conditions include required review artifact."""
+    setup_default_workflow(monkeypatch, tmp_path)
     conditions = stage_exit_conditions("REVIEW")
 
     assert conditions["VERIFY"] == [
@@ -99,8 +106,9 @@ def test_review_exit_conditions_include_required_review_artifact() -> None:
     ]
 
 
-def test_designing_exit_conditions_include_required_design_artifact() -> None:
+def test_designing_exit_conditions_include_required_design_artifact(monkeypatch, tmp_path: Path) -> None:
     """Test that leaving DESIGNING requires the design artifact."""
+    setup_default_workflow(monkeypatch, tmp_path)
     conditions = stage_exit_conditions("DESIGNING")
 
     assert conditions["PLANNING"] == [
@@ -109,8 +117,9 @@ def test_designing_exit_conditions_include_required_design_artifact() -> None:
     ]
 
 
-def test_verify_exit_conditions_include_final_verification_log() -> None:
+def test_verify_exit_conditions_include_final_verification_log(monkeypatch, tmp_path: Path) -> None:
     """Test that leaving VERIFY requires the final verification log artifact."""
+    setup_default_workflow(monkeypatch, tmp_path)
     conditions = stage_exit_conditions("VERIFY")
 
     assert conditions["READY_TO_SUMMARIZE"] == [
@@ -124,8 +133,9 @@ def test_verify_exit_conditions_include_final_verification_log() -> None:
     ]
 
 
-def test_red_test_exit_conditions_include_pytest_command_requirement() -> None:
+def test_red_test_exit_conditions_include_pytest_command_requirement(monkeypatch, tmp_path: Path) -> None:
     """Test that leaving RED_TEST requires running pytest in the current stage."""
+    setup_default_workflow(monkeypatch, tmp_path)
     conditions = stage_exit_conditions("RED_TEST")
 
     assert conditions["GREEN_IMPL"] == [
@@ -133,8 +143,9 @@ def test_red_test_exit_conditions_include_pytest_command_requirement() -> None:
     ]
 
 
-def test_green_impl_entry_conditions_are_empty() -> None:
+def test_green_impl_entry_conditions_are_empty(monkeypatch, tmp_path: Path) -> None:
     """Test that green impl entry conditions are empty."""
+    setup_default_workflow(monkeypatch, tmp_path)
     assert stage_entry_conditions("GREEN_IMPL", "RED_TEST") == []
 
 
@@ -189,8 +200,9 @@ def test_stage_entry_conditions_preserve_path_based_checks() -> None:
     ]
 
 
-def test_planning_exit_conditions_include_required_plan_artifact() -> None:
+def test_planning_exit_conditions_include_required_plan_artifact(monkeypatch, tmp_path: Path) -> None:
     """Test that leaving planning requires an updated plan.yaml artifact."""
+    setup_default_workflow(monkeypatch, tmp_path)
     conditions = stage_exit_conditions("PLANNING")
 
     assert conditions["RED_TEST"] == [
@@ -198,16 +210,18 @@ def test_planning_exit_conditions_include_required_plan_artifact() -> None:
     ]
 
 
-def test_stage_forbid_needs_human_display_is_exposed() -> None:
+def test_stage_forbid_needs_human_display_is_exposed(monkeypatch, tmp_path: Path) -> None:
     """Test that stage forbid needs human display is exposed."""
+    setup_default_workflow(monkeypatch, tmp_path)
     assert (
         stage_forbid_needs_human_display("GREEN_IMPL")
         == "Current stage does not allow human intervention; continue advancing the task."
     )
 
 
-def test_policy_sections_are_loaded_from_workflow_spec() -> None:
+def test_policy_sections_are_loaded_from_workflow_spec(monkeypatch, tmp_path: Path) -> None:
     """Test that top-level workflow policies are available."""
+    setup_default_workflow(monkeypatch, tmp_path)
     assert ".github/**" in path_policy()["sensitive_paths"]
     assert failure_policy()["repeat_threshold"] == 2
     assert "successful_last_verification" in finalization_policy()["required_rules"]
@@ -218,8 +232,9 @@ def test_policy_sections_are_loaded_from_workflow_spec() -> None:
     assert stage_write_policy("RED_TEST")["writable_paths"] == ["tests/**"]
 
 
-def test_transition_graph_mermaid_is_generated_from_stage_transitions() -> None:
+def test_transition_graph_mermaid_is_generated_from_stage_transitions(monkeypatch, tmp_path: Path) -> None:
     """Test that transition graph Mermaid is generated from the stage transition map."""
+    setup_default_workflow(monkeypatch, tmp_path)
     graph = transition_graph_mermaid()
 
     assert graph.startswith("flowchart TD")
@@ -228,15 +243,17 @@ def test_transition_graph_mermaid_is_generated_from_stage_transitions() -> None:
     assert "  READY_TO_SUMMARIZE --> DONE" in graph
 
 
-def test_stage_display_artifacts_merge_required_and_expected_without_duplicates() -> None:
+def test_stage_display_artifacts_merge_required_and_expected_without_duplicates(monkeypatch, tmp_path: Path) -> None:
     """Test that display artifacts show required items without duplicate expected entries."""
+    setup_default_workflow(monkeypatch, tmp_path)
     assert stage_display_artifacts("NEEDS_FAILURE_ANALYSIS") == [
         ".agent/artifacts/failure-analysis.md",
     ]
 
 
-def test_stage_required_artifact_rules_support_optional_regex_validation() -> None:
+def test_stage_required_artifact_rules_support_optional_regex_validation(monkeypatch, tmp_path: Path) -> None:
     """Test that required artifact rules expose optional format validation fields."""
+    setup_default_workflow(monkeypatch, tmp_path)
     rules = stage_required_artifact_rules("NEEDS_FAILURE_ANALYSIS")
 
     assert rules == [
@@ -285,8 +302,9 @@ def test_required_artifact_display_is_preserved() -> None:
     ]
 
 
-def test_stage_policy_view_exposes_grouped_ddd_shape() -> None:
+def test_stage_policy_view_exposes_grouped_ddd_shape(monkeypatch, tmp_path: Path) -> None:
     """Test that one stage can be read through the grouped DSL view."""
+    setup_default_workflow(monkeypatch, tmp_path)
     stage = stage_policy_view("RED_TEST")
 
     assert stage["intent"]["goal"] == "Create a failing test that proves the missing behavior."
@@ -299,8 +317,9 @@ def test_stage_policy_view_exposes_grouped_ddd_shape() -> None:
     assert stage["evidence"]["required"] == []
 
 
-def test_workflow_policy_view_exposes_grouped_globals_and_stages() -> None:
+def test_workflow_policy_view_exposes_grouped_globals_and_stages(monkeypatch, tmp_path: Path) -> None:
     """Test that the grouped workflow view includes globals and stage policies."""
+    setup_default_workflow(monkeypatch, tmp_path)
     workflow = workflow_policy_view()
 
     assert workflow["workflow"]["id"] == "standard-ddd-example"
@@ -312,8 +331,9 @@ def test_workflow_policy_view_exposes_grouped_globals_and_stages() -> None:
     assert "RED_TEST" in workflow["stages"]
 
 
-def test_stage_policy_roles_distinguish_soft_and_hard_concerns() -> None:
+def test_stage_policy_roles_distinguish_soft_and_hard_concerns(monkeypatch, tmp_path: Path) -> None:
     """Test that grouped stage views expose role annotations."""
+    setup_default_workflow(monkeypatch, tmp_path)
     roles = stage_policy_roles("RED_TEST")
 
     assert roles["intent"] == "soft_prompt"
@@ -324,8 +344,9 @@ def test_stage_policy_roles_distinguish_soft_and_hard_concerns() -> None:
     assert roles["evidence"]["expected"] == "soft_prompt"
 
 
-def test_workflow_policy_roles_mark_global_context_types() -> None:
+def test_workflow_policy_roles_mark_global_context_types(monkeypatch, tmp_path: Path) -> None:
     """Test that grouped workflow roles distinguish global hard gates from prompt context."""
+    setup_default_workflow(monkeypatch, tmp_path)
     roles = workflow_policy_roles()
 
     assert roles["workflow"] == "soft_prompt"
