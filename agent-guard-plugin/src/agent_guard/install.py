@@ -1151,3 +1151,28 @@ def uninstall_runtime(
         }
 
     return apply_uninstall_plan(plan, cwd, home_dir)
+
+
+def stop_all_hooks(cwd: Path, home_dir: Path | None) -> dict[str, Any]:
+    """Disable all installed runtime hooks across all supported runtimes and scopes.
+
+    Removes hook configurations (.claude/settings, .codex/hooks.json, .opencode/plugins)
+    but preserves installed skill bundles.
+    """
+    resolved_home = home_dir or Path(os.path.expanduser("~"))
+    results: list[dict[str, Any]] = []
+
+    for runtime in SUPPORTED_RUNTIMES:
+        for scope in SUPPORTED_SCOPES:
+            plan = plan_uninstall_runtime(["--runtime", runtime, "--scope", scope], cwd, resolved_home)
+            if plan["changes"]:
+                hook_changes = [
+                    c for c in plan["changes"]
+                    if "skills" not in c["path"].replace("\\", "/").lower()
+                ]
+                if hook_changes:
+                    hook_plan = {**plan, "changes": hook_changes}
+                    applied = apply_uninstall_plan(hook_plan, cwd, resolved_home)
+                    results.append(applied)
+
+    return {"ok": True, "results": results}

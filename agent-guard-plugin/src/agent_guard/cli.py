@@ -21,7 +21,7 @@ from .application.use_cases import (
     start_task,
 )
 from .fuse_integration import ensure_fuse_protection, public_fuse_status
-from .install import install_runtime, parse_flags, uninstall_runtime
+from .install import install_runtime, parse_flags, stop_all_hooks, uninstall_runtime
 from .jobs import load_jobs
 from .plan import load_plan_summary
 from .runtime_adapter import get_next_step
@@ -57,7 +57,7 @@ Commands:
   record-command --cmd CMD --exit-code CODE [--log PATH]
                                     Record command execution details.
   verify [--auto-ready] -- CMD ...  Run a verification command and record final verification.
-  advance-stage --to STAGE [--step STEP_ID]
+  advance-stage --to STAGE [--step STEP_ID] [--force]
                                     Move the workflow to a new stage.
   complete-step <step-id> [--next-step STEP_ID]
                                     Mark the current step complete without advancing workflow stage.
@@ -69,6 +69,7 @@ Commands:
   next-step                         Show the next step derived from state and plan.
   version                           Show the installed agent-guard version.
   install [options]                 Install runtime integrations for supported tools.
+  stop-hook                         Disable all installed runtime hooks (keeps skills installed).
   uninstall [options]               Remove runtime integrations for supported tools.
   wizard [--workflow ID]            Run the interactive setup wizard.
   help [command]                    Show general or command-specific help.
@@ -116,8 +117,9 @@ COMMAND_HELP: dict[str, str] = {
         "With --auto-ready, successful verification also runs ready-to-summarize."
     ),
     "advance-stage": (
-        "Usage: agent-guard advance-stage --to STAGE [--step STEP_ID]\n\n"
-        "Move the workflow to a new stage."
+        "Usage: agent-guard advance-stage --to STAGE [--step STEP_ID] [--force]\n\n"
+        "Move the workflow to a new stage.\n\n"
+        "Use --force to bypass all exit gates, entry gates, and artifact checks."
     ),
     "complete-step": (
         "Usage: agent-guard complete-step <step-id> [--next-step STEP_ID]\n\n"
@@ -145,6 +147,12 @@ COMMAND_HELP: dict[str, str] = {
         "      --match REGEX       Include only skills whose slug or filename match. Repeatable.\n"
         "      --exclude-match REGEX\n"
         "                         Exclude skills whose slug or filename match. Repeatable."
+    ),
+    "stop-hook": (
+        "Usage: agent-guard stop-hook\n\n"
+        "Disable all installed runtime hooks across Claude Code, Codex, and OpenCode.\n"
+        "Only removes hook configurations (.claude/settings, .codex/hooks.json, .opencode/plugins).\n"
+        "Installed skill bundles are preserved."
     ),
     "uninstall": (
         "Usage: agent-guard uninstall [--runtime RUNTIME] [--scope SCOPE]\n\n"
@@ -272,7 +280,7 @@ def run_command(argv: list[str], cwd: Path) -> int:
                 print_json(
                     {
                         "error": (
-                            "Usage: agent-guard advance-stage --to <stage> [--step <step-id>] "
+                            "Usage: agent-guard advance-stage --to <stage> [--step <step-id>] [--force]"
                         )
                     },
                     1,
@@ -281,6 +289,7 @@ def run_command(argv: list[str], cwd: Path) -> int:
                 cwd,
                 str(flags["to"]),
                 step_id=str(flags["step"]) if "step" in flags else None,
+                force=bool(flags.get("force")),
             )
             print_json({"ok": True, **result})
         elif command == "complete-step":
@@ -330,6 +339,9 @@ def run_command(argv: list[str], cwd: Path) -> int:
                 input_stream=sys.stdin,
             )
             print_json({"ok": True, **result})
+        elif command == "stop-hook":
+            result = stop_all_hooks(cwd, Path(os.path.expanduser("~")))
+            print_json({"ok": True, **result})
         elif command == "wizard":
             flags = parse_flags(rest)
             workflow_id = str(flags["workflow"]) if "workflow" in flags else None
@@ -342,7 +354,7 @@ def run_command(argv: list[str], cwd: Path) -> int:
                         "Unknown command. Supported: init, start-task, status, session-start, "
                         "can-write, record-command, verify, advance-stage, complete-step, ready-to-summarize, "
                         "mark-done, check-failure-loop, check-job-poll, can-finalize, next-step, close-task, "
-                        "reset-task, next-task, version, install, uninstall, wizard"
+                        "reset-task, next-task, version, install, uninstall, stop-hook, wizard"
                     )
                 },
                 1,

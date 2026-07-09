@@ -6,6 +6,8 @@ from pathlib import Path
 import tomllib
 import pytest
 
+from agent_guard.cli import run_command
+
 from agent_guard.install import (
     _CLAUDE_PLUGIN_NAME,
     _CLAUDE_SKILLS_DIR_PLUGIN_ID,
@@ -630,3 +632,103 @@ def test_uninstall_claude_removes_skills_bundle_after_confirmation() -> None:
     if config_path.exists():
         config = json.loads(config_path.read_text(encoding="utf-8"))
         assert _CLAUDE_SKILLS_DIR_PLUGIN_ID not in config.get("enabledPlugins", {})
+
+
+def test_stop_hooks_removes_claude_hooks_but_keeps_skills() -> None:
+    """Test that stop-hook removes Claude hooks but preserves installed skills."""
+    root, home = make_dirs()
+    install_runtime(["--runtime", "claude-code", "--scope", "project"], root, home, PLUGIN_ROOT)
+
+    from agent_guard.install import stop_all_hooks
+    result = stop_all_hooks(root, home)
+
+    assert result["ok"] is True
+    # Skills should still exist
+    assert claude_plugin_skill(root, "using-workflow").exists()
+    assert claude_plugin_skill(root, "workflow-core").exists()
+    # Hooks should be removed from config (config file may be deleted or cleaned)
+    config_path = root / ".claude" / "settings.local.json"
+    if config_path.exists():
+        config_body = config_path.read_text(encoding="utf-8")
+        assert "agent-guard-bridge" not in config_body
+
+
+def test_stop_hooks_removes_codex_hooks_but_keeps_skills() -> None:
+    """Test that stop-hook removes Codex hooks but preserves installed skills."""
+    root, home = make_dirs()
+    install_runtime(["--runtime", "codex", "--scope", "project"], root, home, PLUGIN_ROOT)
+
+    from agent_guard.install import stop_all_hooks
+    result = stop_all_hooks(root, home)
+
+    assert result["ok"] is True
+    # Skills should still exist
+    assert (root / ".codex" / "skills" / "workflow-core" / "SKILL.md").exists()
+    # Hooks should be removed
+    assert not (root / ".codex" / "hooks.json").exists()
+
+
+def test_stop_hooks_removes_opencode_hooks_but_keeps_skills() -> None:
+    """Test that stop-hook removes OpenCode plugin but preserves installed skills."""
+    root, home = make_dirs()
+    install_runtime(["--runtime", "opencode", "--scope", "project"], root, home, PLUGIN_ROOT)
+
+    from agent_guard.install import stop_all_hooks
+    result = stop_all_hooks(root, home)
+
+    assert result["ok"] is True
+    # Skills should still exist
+    assert (root / ".opencode" / "skills" / "using-workflow" / "SKILL.md").exists()
+    # Plugin file should be removed
+    assert not (root / ".opencode" / "plugins" / "agent-guard.js").exists()
+
+
+def test_stop_hooks_works_across_all_runtimes() -> None:
+    """Test that stop-hook removes hooks across all 3 runtimes preserving skills."""
+    root, home = make_dirs()
+    install_runtime(["--runtime", "claude-code", "--scope", "project"], root, home, PLUGIN_ROOT)
+    install_runtime(["--runtime", "codex", "--scope", "project"], root, home, PLUGIN_ROOT)
+    install_runtime(["--runtime", "opencode", "--scope", "project"], root, home, PLUGIN_ROOT)
+
+    from agent_guard.install import stop_all_hooks
+    result = stop_all_hooks(root, home)
+
+    assert result["ok"] is True
+    # All hooks gone (config file may be deleted when empty)
+    claude_config = root / ".claude" / "settings.local.json"
+    if claude_config.exists():
+        assert "agent-guard-bridge" not in claude_config.read_text(encoding="utf-8")
+    assert not (root / ".codex" / "hooks.json").exists()
+    assert not (root / ".opencode" / "plugins" / "agent-guard.js").exists()
+    # All skills preserved
+    assert claude_plugin_skill(root, "using-workflow").exists()
+    assert (root / ".codex" / "skills" / "workflow-core" / "SKILL.md").exists()
+    assert (root / ".opencode" / "skills" / "using-workflow" / "SKILL.md").exists()
+
+
+def test_stop_hooks_is_idempotent() -> None:
+    """Test that stop-hook succeeds even when no hooks are installed."""
+    root, home = make_dirs()
+
+    from agent_guard.install import stop_all_hooks
+    result = stop_all_hooks(root, home)
+
+    assert result["ok"] is True
+
+
+def test_stop_hooks_cli_command() -> None:
+    """Test that stop-hook CLI command works via run_command."""
+    from unittest.mock import patch
+    root, home = make_dirs()
+    install_runtime(["--runtime", "codex", "--scope", "project"], root, home, PLUGIN_ROOT)
+
+    with patch("agent_guard.cli.os.path.expanduser", return_value=str(home)):
+        try:
+            run_command(["stop-hook"], root)
+        except SystemExit as exc:
+            assert exc.code == 0
+
+    # Skills preserved
+    assert (root / ".codex" / "skills" / "workflow-core" / "SKILL.md").exists()
+    # Hooks removed
+    assert not (root / ".codex" / "hooks.json").exists()

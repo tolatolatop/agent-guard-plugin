@@ -152,10 +152,12 @@ def advance_stage(
     root_dir: Path,
     to_stage: str,
     step_id: str | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
     """Advance stage."""
     session = load_task_session(root_dir)
-    _guard_transition(root_dir, session, to_stage, "advance-stage", step_id)
+    if not force:
+        _guard_transition(root_dir, session, to_stage, "advance-stage", step_id)
 
     resolved_step = step_id or session.current_step
     from_stage = session.stage
@@ -165,7 +167,10 @@ def advance_stage(
         can_finalize=False,
     )
     save_task_session(root_dir, next_session)
-    event = _append_transition_event(root_dir, "advance-stage", from_stage, to_stage, next_session, {"step": resolved_step})
+    extra: dict[str, Any] = {"step": resolved_step}
+    if force:
+        extra["force"] = True
+    event = _append_transition_event(root_dir, "advance-stage", from_stage, to_stage, next_session, extra)
     return {
         "goal": stage_intent(to_stage, root_dir, session.workflow_id)["goal"],
         "step_goal": _plan_step_goal(root_dir, str(resolved_step) if resolved_step else None),

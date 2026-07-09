@@ -895,3 +895,70 @@ def test_failure_analysis_artifact_format_is_checked_when_configured() -> None:
         ["advance-stage", "--to", "GREEN_IMPL", "--step", "green-001"],
     )
     assert code == 0
+
+
+def test_advance_stage_force_skips_all_guards_and_succeeds() -> None:
+    """Test that advance-stage --force bypasses exit gates, entry gates, and artifact checks."""
+    root_dir = make_temp_repo()
+    write_state(root_dir, task_id="password-reset", stage="PLANNING")
+    result = advance_stage(root_dir, "RED_TEST", step_id="red-001", force=True)
+    assert result["state"]["stage"] == "RED_TEST"
+
+
+def test_advance_stage_force_bypasses_artifact_exit_gate() -> None:
+    """Test that force=True skips artifact-based exit gates."""
+    root_dir = make_temp_repo()
+    write_state(root_dir, task_id="password-reset", stage="DESIGNING")
+    result = advance_stage(root_dir, "PLANNING", force=True)
+    assert result["state"]["stage"] == "PLANNING"
+
+
+def test_advance_stage_force_bypasses_entry_rule_gate() -> None:
+    """Test that force=True skips entry condition rules."""
+    root_dir = make_temp_repo()
+    write_state(
+        root_dir,
+        task_id="password-reset",
+        stage="GREEN_IMPL",
+        current_step="green-001",
+    )
+    result = advance_stage(root_dir, "READY_TO_SUMMARIZE", force=True)
+    assert result["state"]["stage"] == "READY_TO_SUMMARIZE"
+
+
+def test_advance_stage_force_cli_flag() -> None:
+    """Test that advance-stage --to STAGE --force works through the CLI."""
+    root_dir = make_temp_repo()
+    write_state(root_dir, task_id="password-reset", stage="PLANNING")
+    code, result = invoke_cli(
+        root_dir,
+        ["advance-stage", "--to", "RED_TEST", "--force"],
+    )
+    assert code == 0
+    assert result["ok"] is True
+    assert result["state"]["stage"] == "RED_TEST"
+
+
+def test_advance_stage_force_records_force_in_event() -> None:
+    """Test that a forced transition records force=True in the transition event."""
+    root_dir = make_temp_repo()
+    write_state(root_dir, task_id="password-reset", stage="PLANNING")
+    advance_stage(root_dir, "RED_TEST", step_id="red-001", force=True)
+    events = read_events(root_dir)
+    last_event = events[-1]
+    assert last_event["hook"] == "WorkflowTransition"
+    assert last_event["from_stage"] == "PLANNING"
+    assert last_event["to_stage"] == "RED_TEST"
+    assert last_event.get("force") is True
+
+
+def test_advance_stage_non_force_still_enforces_guards() -> None:
+    """Test that advance-stage without --force still enforces guards."""
+    root_dir = make_temp_repo()
+    write_state(root_dir, task_id="password-reset", stage="PLANNING")
+    try:
+        advance_stage(root_dir, "RED_TEST", step_id="red-001")
+    except RuntimeError as exc:
+        assert ".agent/plan.yaml" in str(exc)
+    else:
+        raise AssertionError("Expected PLANNING exit to be blocked without plan.yaml")
