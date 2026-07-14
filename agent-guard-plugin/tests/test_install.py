@@ -181,7 +181,10 @@ def test_packaged_skills_dir_falls_back_to_repo_docs_when_bundle_missing(
     docs_dir = fake_repo_root / "docs" / "skills"
     docs_dir.mkdir(parents=True)
     (docs_dir / "using-workflow.md").write_text("# skill\n", encoding="utf-8")
-    monkeypatch.setattr("agent_guard.install.__file__", str(fake_package_dir / "install.py"))
+    monkeypatch.setattr(
+        "agent_guard.runtime_integrations.skills.__file__",
+        str(fake_package_dir / "runtime_integrations" / "skills.py"),
+    )
 
     resolved = packaged_skills_dir()
 
@@ -214,7 +217,7 @@ def test_install_claude_skills_bundle_errors_when_no_sources_exist(tmp_path: Pat
     """Test that install claude skills bundle errors when no sources exist."""
     empty_dir = tmp_path / "empty-skills"
     empty_dir.mkdir()
-    monkeypatch.setattr("agent_guard.install.packaged_skills_dir", lambda: empty_dir)
+    monkeypatch.setattr("agent_guard.runtime_integrations.skills.packaged_skills_dir", lambda: empty_dir)
 
     with pytest.raises(RuntimeError, match="Could not locate bundled workflow skills"):
         install_claude_skills_bundle(tmp_path / "target", tmp_path / "plugin-root")
@@ -292,7 +295,7 @@ def test_selected_skill_sources_with_workflow_defaults_fall_back_to_full_install
 ) -> None:
     """Test that empty workflow-driven selection only warns and falls back to full install."""
     monkeypatch.setattr(
-        "agent_guard.install.workflow_install_defaults",
+        "agent_guard.runtime_integrations.skills.workflow_install_defaults",
         lambda root_dir=None, workflow_id=None: {"skill_match": ["definitely-no-such-skill"], "skill_exclude_match": []},
     )
 
@@ -315,7 +318,7 @@ def test_install_runtime_uses_workflow_defaults_when_cli_filters_are_absent(
         return {"skill_match": ["workflow-core"], "skill_exclude_match": []}
 
     monkeypatch.setattr(
-        "agent_guard.install.workflow_install_defaults",
+        "agent_guard.runtime_integrations.skills.workflow_install_defaults",
         fake_defaults,
     )
     root, home = make_dirs()
@@ -338,7 +341,7 @@ def test_install_runtime_can_read_defaults_from_explicit_workflow(
         calls.append((root_dir, workflow_id))
         return {"skill_match": ["workflow-core"], "skill_exclude_match": []}
 
-    monkeypatch.setattr("agent_guard.install.workflow_install_defaults", fake_defaults)
+    monkeypatch.setattr("agent_guard.runtime_integrations.skills.workflow_install_defaults", fake_defaults)
     root, home = make_dirs()
 
     install_runtime(["--runtime", "codex", "--scope", "project", "--workflow", "research"], root, home, PLUGIN_ROOT)
@@ -428,7 +431,7 @@ def test_install_runtime_interactive_filters_override_workflow_defaults(
 ) -> None:
     """Test that interactive filter input overrides workflow-default skill filters."""
     monkeypatch.setattr(
-        "agent_guard.install.workflow_install_defaults",
+        "agent_guard.runtime_integrations.skills.workflow_install_defaults",
         lambda: {"skill_match": ["definitely-no-such-skill"], "skill_exclude_match": []},
     )
     root, home = make_dirs()

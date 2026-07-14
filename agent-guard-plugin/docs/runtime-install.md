@@ -73,6 +73,15 @@ Runtime differences:
 - OpenCode uses plugin events rather than a standalone JSON hook manifest, so the installer generates a tiny JS loader and keeps all guard logic in Python.
 - Claude Code, Codex, and OpenCode all get native skill layouts so their applications can discover the workflow bundle without relying on a private flat directory convention.
 
+Implementation layout:
+
+- `agent_guard.install` owns CLI parsing, interactive prompts, registry dispatch, confirmation, and generic plan application.
+- `agent_guard.runtime_integrations.claude_code` owns Claude settings, directory-plugin activation, project trust, and Claude uninstall behavior.
+- `agent_guard.runtime_integrations.codex` owns Codex hook and skill paths, hook generation, legacy cleanup, and Codex uninstall behavior.
+- `agent_guard.runtime_integrations.opencode` owns the generated loader and translates OpenCode event payloads into generic bridge actions.
+- `agent_guard.runtime_integrations.skills` and `.common` contain only behavior genuinely shared by multiple runtimes.
+- `agent_guard.runtime_bridge` executes normalized policy actions and does not interpret OpenCode's raw tool-event schema.
+
 Current guard mapping:
 
 - session bootstrap: `session-start`
