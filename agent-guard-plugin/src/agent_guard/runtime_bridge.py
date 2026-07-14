@@ -11,6 +11,8 @@ from typing import Any
 
 from .cli import run_command
 from .events import append_event
+from .runtime_integrations.common import BridgeAction
+from .runtime_integrations.opencode import normalize_after_event, normalize_before_event
 from .state import artifacts_dir, ensure_agent_files, load_state
 from .workflow_spec import (
     completion_ready_stage,
@@ -178,23 +180,6 @@ def _extract_command(payload: dict[str, Any]) -> str | None:
     return cmd if isinstance(cmd, str) else None
 
 
-def _extract_apply_patch_paths(args: dict[str, Any]) -> list[str]:
-    """Extract project-relative paths from OpenCode apply_patch text."""
-    patch_text = args.get("patchText")
-    if not isinstance(patch_text, str):
-        return []
-
-    paths: list[str] = []
-    for line in patch_text.splitlines():
-        for marker in ("*** Add File: ", "*** Update File: ", "*** Delete File: ", "*** Move to: "):
-            if line.startswith(marker):
-                path = line.removeprefix(marker).strip()
-                if path:
-                    paths.append(path)
-                break
-    return paths
-
-
 def _extract_exit_code(payload: dict[str, Any]) -> int:
     """Internal helper for extract exit code."""
     response = payload.get("tool_response", {})
@@ -327,51 +312,17 @@ def _handle_stop(cwd: Path, action: str = "stop") -> None:
         _fail(cwd, action, "agent-guard blocked finalization: " + "; ".join(str(reason) for reason in reasons), payload)
 
 
-def _handle_opencode_before(cwd: Path, payload: dict[str, Any]) -> None:
-    """Internal helper for handle opencode before."""
-    input_payload = payload.get("input")
-    output_payload = payload.get("output")
-    if isinstance(input_payload, dict):
-        tool = input_payload.get("tool")
-        if isinstance(output_payload, dict) and isinstance(output_payload.get("args"), dict):
-            args = output_payload.get("args", {})
+def _handle_normalized_actions(cwd: Path, actions: list[BridgeAction]) -> None:
+    """Execute runtime-specific events after they have been normalized."""
+    for action in actions:
+        if action.action == "pre-write":
+            _handle_pre_write(cwd, action.payload, action=action.source)
+        elif action.action == "pre-command":
+            _handle_pre_command(cwd, action.payload, action=action.source)
+        elif action.action == "post-command":
+            _handle_post_command(cwd, action.payload, action=action.source)
         else:
-            args = input_payload.get("args", {})
-    else:
-        tool = payload.get("tool")
-        args = payload.get("args", {})
-    tool_payload = {"tool_input": args if isinstance(args, dict) else {}}
-    if tool == "apply_patch":
-        patch_paths = _extract_apply_patch_paths(tool_payload["tool_input"])
-        for path in patch_paths:
-            _handle_pre_write(cwd, {"tool_input": {"file_path": path}}, action="opencode-before")
-        return
-    if tool in {"write", "edit", "patch"}:
-        _handle_pre_write(cwd, tool_payload, action="opencode-before")
-        return
-    if tool == "bash":
-        _handle_pre_command(cwd, tool_payload, action="opencode-before")
-
-
-def _handle_opencode_after(cwd: Path, payload: dict[str, Any]) -> None:
-    """Internal helper for handle opencode after."""
-    input_payload = payload.get("input", {})
-    output_payload = payload.get("output", {})
-    if not isinstance(input_payload, dict) or input_payload.get("tool") != "bash":
-        raise SystemExit(0)
-    if isinstance(output_payload, dict) and isinstance(output_payload.get("args"), dict):
-        args = output_payload.get("args", {})
-        tool_response = output_payload.get("result", output_payload)
-    else:
-        args = input_payload.get("args", {})
-        tool_response = output_payload
-    if not isinstance(args, dict):
-        args = {}
-    bridge_payload = {
-        "tool_input": args,
-        "tool_response": tool_response if isinstance(tool_response, dict) else {},
-    }
-    _handle_post_command(cwd, bridge_payload, action="opencode-after")
+            raise RuntimeError(f"Unknown normalized bridge action: {action.action}")
 
 
 def main() -> None:
@@ -401,9 +352,9 @@ def main() -> None:
             if event_action == "session-start":
                 _handle_session_start(cwd, action="opencode-event:session-start")
             elif event_action == "opencode-before":
-                _handle_opencode_before(cwd, event_payload)
+                _handle_normalized_actions(cwd, normalize_before_event(event_payload))
             elif event_action == "opencode-after":
-                _handle_opencode_after(cwd, event_payload)
+                _handle_normalized_actions(cwd, normalize_after_event(event_payload))
             else:
                 _print_json({"error": f"Unknown OpenCode event action: {event_action}"}, 1)
         else:
